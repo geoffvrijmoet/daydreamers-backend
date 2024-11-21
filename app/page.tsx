@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { SalesCalendar } from "@/components/sales-calendar";
 import { TransactionsList } from "@/components/transactions-list";
-// comment
+// another comment
 export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
