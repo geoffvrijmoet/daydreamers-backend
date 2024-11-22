@@ -10,15 +10,25 @@ export function useTransactions(startDate?: Date, endDate?: Date) {
     async function fetchTransactions() {
       try {
         const params = new URLSearchParams()
-        if (startDate) params.append('startDate', startDate.toISOString())
-        if (endDate) params.append('endDate', endDate.toISOString())
+        const defaultStartDate = new Date()
+        defaultStartDate.setDate(defaultStartDate.getDate() - 90)
+        
+        params.append('startDate', (startDate || defaultStartDate).toISOString())
+        params.append('endDate', (endDate || new Date()).toISOString())
 
-        const response = await fetch(`/api/transactions?${params}`)
-        if (!response.ok) throw new Error('Failed to fetch transactions')
+        console.log('Fetching transactions with params:', Object.fromEntries(params))
+        const response = await fetch(`/api/transactions/combined?${params}`)
+        
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Failed to fetch transactions')
+        }
         
         const data = await response.json()
-        setTransactions(data.transactions)
+        console.log('Received transactions:', data.transactions?.length || 0)
+        setTransactions(data.transactions || [])
       } catch (err) {
+        console.error('Transaction fetch error:', err)
         setError(err instanceof Error ? err : new Error('Unknown error'))
       } finally {
         setLoading(false)
