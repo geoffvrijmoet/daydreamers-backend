@@ -27,4 +27,23 @@ A business management dashboard for Daydreamers Pet Supply LLC. Track sales, pur
 1. Clone the repository:
 
 ```bash
-git clone https://
+git clone https://github.com/yourusername/daydreamers-dashboard.git
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Run the development server:
+```bash
+npm run dev
+```
+
+4. Open [http://localhost:3001](http://localhost:3001) in your browser.
+
+## Development
+
+- All components are in `/components`
+- Pages are in `/app`
+- Styling is done with Tailwind CSS

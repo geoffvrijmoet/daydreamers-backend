@@ -10,7 +10,7 @@ import { PurchaseInvoiceForm } from '@/components/purchase-invoice-form'
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<Error | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'list' | 'new' | 'purchase'>('list')
   const [syncing, setSyncing] = useState(false)
 
@@ -20,12 +20,20 @@ export default function ProductsPage() {
 
   async function fetchProducts() {
     try {
+      console.log('Fetching products...')
       const response = await fetch('/api/products')
-      if (!response.ok) throw new Error('Failed to fetch products')
+      
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to fetch products')
+      }
+      
       const data = await response.json()
-      setProducts(data.products)
+      console.log(`Fetched ${data.products?.length || 0} products`)
+      setProducts(data.products || [])
     } catch (err) {
-      setError(err instanceof Error ? err : new Error('Unknown error'))
+      console.error('Error fetching products:', err)
+      setError(err instanceof Error ? err.message : 'Failed to fetch products')
     } finally {
       setLoading(false)
     }
@@ -49,10 +57,18 @@ export default function ProductsPage() {
       await fetchProducts()
     } catch (err) {
       console.error('Sync error:', err)
-      setError(err instanceof Error ? err : new Error('Failed to sync products'))
+      setError(err instanceof Error ? err.message : 'Failed to sync products')
     } finally {
       setSyncing(false)
     }
+  }
+
+  if (loading) {
+    return <div>Loading products...</div>
+  }
+
+  if (error) {
+    return <div>Error: {error}</div>
   }
 
   return (
@@ -70,7 +86,7 @@ export default function ProductsPage() {
           <button
             onClick={syncSquareProducts}
             disabled={syncing}
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-400 hover:bg-primary-500 disabled:opacity-50"
           >
             {syncing ? 'Syncing...' : 'Sync Square Products'}
           </button>
@@ -83,7 +99,7 @@ export default function ProductsPage() {
               onClick={() => setActiveTab('list')}
               className={`${
                 activeTab === 'list'
-                  ? 'border-blue-500 text-blue-600'
+                  ? 'border-primary-400 text-primary-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
             >
@@ -93,7 +109,7 @@ export default function ProductsPage() {
               onClick={() => setActiveTab('new')}
               className={`${
                 activeTab === 'new'
-                  ? 'border-blue-500 text-blue-600'
+                  ? 'border-primary-400 text-primary-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
             >
@@ -103,7 +119,7 @@ export default function ProductsPage() {
               onClick={() => setActiveTab('purchase')}
               className={`${
                 activeTab === 'purchase'
-                  ? 'border-blue-500 text-blue-600'
+                  ? 'border-primary-400 text-primary-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
             >

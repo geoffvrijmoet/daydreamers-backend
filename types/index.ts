@@ -54,4 +54,22 @@ export type SalesData = {
     count: number
     profit?: number
   }
+}
+
+export type EmailTransaction = {
+  id: string
+  date: string
+  amount: number
+  description: string
+  merchant: string
+  cardLast4: string
+  emailId: string
+  source: 'gmail'
+  type: 'purchase'
+}
+
+export type GmailCredentials = {
+  accessToken: string
+  refreshToken: string
+  expiryDate: number
 } 

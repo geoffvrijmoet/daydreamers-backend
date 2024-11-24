@@ -1,19 +1,26 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
-import { Product } from '@/types'
-import { ObjectId } from 'mongodb'
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const db = await getDb()
-    const products = await db.collection('products').find().toArray()
+    const { searchParams } = new URL(request.url)
+    const includeInactive = searchParams.get('includeInactive') === 'true'
     
-    return NextResponse.json({ 
-      products: products.map(product => ({
-        ...product,
-        id: product._id.toString()
-      }))
-    })
+    const db = await getDb()
+    
+    console.log('Fetching products from MongoDB...')
+    const products = await db.collection('products').find({}).toArray()
+    console.log(`Found ${products.length} products`)
+
+    // Map _id to id for frontend consumption
+    const mappedProducts = products.map(product => ({
+      ...product,
+      id: product._id.toString()
+    }))
+
+    console.log('First product as example:', mappedProducts[0])
+
+    return NextResponse.json({ products: mappedProducts })
   } catch (error) {
     console.error('Error fetching products:', error)
     return NextResponse.json(
