@@ -105,4 +105,31 @@ export async function POST() {
       { status: 500 }
     )
   }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const { id } = await req.json()
+    if (!id) {
+      return NextResponse.json({ error: 'Transaction ID is required' }, { status: 400 })
+    }
+
+    const db = await getDb()
+    const result = await db.collection('transactions').deleteOne({ 
+      id,
+      source: 'gmail'
+    })
+
+    if (result.deletedCount === 0) {
+      return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
+    }
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('Error deleting transaction:', error)
+    return NextResponse.json(
+      { error: 'Failed to delete transaction' },
+      { status: 500 }
+    )
+  }
 } 

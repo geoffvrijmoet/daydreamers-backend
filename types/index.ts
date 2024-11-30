@@ -4,8 +4,16 @@ export type Transaction = {
   type: 'sale' | 'purchase'
   amount: number
   description: string
-  source?: 'square' | 'shopify' | 'gmail'
-  items?: TransactionItem[]
+  source?: 'square' | 'shopify' | 'gmail' | 'manual'
+  customer?: string
+  paymentMethod?: string
+  products?: Array<{
+    productId: string
+    name: string
+    quantity: number
+    unitPrice: number
+    totalPrice: number
+  }>
 }
 
 export type TransactionItem = {
@@ -66,6 +74,15 @@ export type EmailTransaction = {
   emailId: string
   source: 'gmail'
   type: 'purchase'
+  supplier?: string
+  supplierOrderNumber?: string
+  products?: Array<{
+    productId: string
+    name: string
+    quantity: number
+    unitPrice: number
+    totalPrice: number
+  }>
 }
 
 export type GmailCredentials = {

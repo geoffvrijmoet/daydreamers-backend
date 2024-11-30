@@ -6,9 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "update-amex": "ts-node -r tsconfig-paths/register -r dotenv/config scripts/update-amex-transactions.ts"
   },
   "dependencies": {
+    "@prisma/client": "^6.0.0",
     "@radix-ui/react-slot": "^1.1.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
@@ -19,6 +21,7 @@
     "lucide-react": "^0.460.0",
     "mongodb": "^6.11.0",
     "next": "14.2.16",
+    "next-themes": "^0.4.3",
     "path": "^0.12.7",
     "path-browserify": "^1.0.1",
     "react": "^18",
@@ -37,6 +40,8 @@
     "eslint-config-next": "14.2.16",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "^5"
   }
 }

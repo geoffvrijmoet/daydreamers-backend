@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { Card } from "@/components/ui/card"
 import { Product } from '@/types'
 
-type TransactionProduct = {
+type PurchaseProduct = {
   productId: string
   name: string
   quantity: number
@@ -12,45 +12,40 @@ type TransactionProduct = {
   totalPrice: number
 }
 
-type ManualTransaction = {
+type Purchase = {
   id?: string
   date: string
   amount: number
-  products: TransactionProduct[]
-  type: 'sale' | 'purchase'
+  products: PurchaseProduct[]
+  type: 'purchase'
   paymentMethod: string
-  customer?: string
-  tip?: number
-  discount?: number
+  vendor?: string
+  supplierOrderNumber?: string
 }
 
-type ManualTransactionFormProps = {
-  initialData?: ManualTransaction
+type PurchaseFormProps = {
   onSuccess?: () => void
   onCancel?: () => void
 }
 
-export function ManualTransactionForm({ initialData, onSuccess, onCancel }: ManualTransactionFormProps) {
-  const [isOpen, setIsOpen] = useState(!!initialData)
+export function PurchaseForm({ onSuccess, onCancel }: PurchaseFormProps) {
+  const [isOpen, setIsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [confirmDelete, setConfirmDelete] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
-  const [selectedProductId, setSelectedProductId] = useState<string>('')
   const [quantity, setQuantity] = useState<number>(1)
   const [searchQuery, setSearchQuery] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
   
-  const [transaction, setTransaction] = useState<ManualTransaction>(
-    initialData || {
-      date: new Date().toISOString().split('T')[0],
-      amount: 0,
-      products: [],
-      type: 'sale',
-      paymentMethod: 'Venmo',
-      customer: ''
-    }
-  )
+  const [purchase, setPurchase] = useState<Purchase>({
+    date: new Date().toISOString().split('T')[0],
+    amount: 0,
+    products: [],
+    type: 'purchase',
+    paymentMethod: 'AMEX 01001',
+    vendor: '',
+    supplierOrderNumber: ''
+  })
 
   // Fetch available products
   useEffect(() => {
@@ -75,28 +70,72 @@ export function ManualTransactionForm({ initialData, onSuccess, onCancel }: Manu
   )
 
   const handleProductSelect = (product: Product) => {
-    const newProduct: TransactionProduct = {
+    const newProduct: PurchaseProduct = {
       productId: product.id,
       name: product.name,
-      quantity: quantity,
-      unitPrice: product.retailPrice,
-      totalPrice: product.retailPrice * quantity
+      quantity: 1,
+      unitPrice: product.wholesalePrice || 0,
+      totalPrice: product.wholesalePrice || 0
     }
 
-    setTransaction(prev => ({
+    setPurchase(prev => ({
       ...prev,
       products: [...prev.products, newProduct],
       amount: prev.amount + newProduct.totalPrice
     }))
 
-    // Reset selection
     setSearchQuery('')
-    setQuantity(1)
     setShowSuggestions(false)
   }
 
+  const handleUnitPriceChange = (index: number, newPrice: number) => {
+    setPurchase(prev => {
+      const newProducts = [...prev.products]
+      const product = newProducts[index]
+      const oldTotal = product.totalPrice
+      
+      // Update the product
+      newProducts[index] = {
+        ...product,
+        unitPrice: newPrice,
+        totalPrice: newPrice * product.quantity
+      }
+      
+      // Calculate new total amount
+      return {
+        ...prev,
+        products: newProducts,
+        amount: prev.amount - oldTotal + newProducts[index].totalPrice
+      }
+    })
+  }
+
+  const handleQuantityChange = (index: number, newQuantity: number) => {
+    if (newQuantity < 1) return // Don't allow quantities less than 1
+    
+    setPurchase(prev => {
+      const newProducts = [...prev.products]
+      const product = newProducts[index]
+      const oldTotal = product.totalPrice
+      
+      // Update the product
+      newProducts[index] = {
+        ...product,
+        quantity: newQuantity,
+        totalPrice: product.unitPrice * newQuantity
+      }
+      
+      // Calculate new total amount
+      return {
+        ...prev,
+        products: newProducts,
+        amount: prev.amount - oldTotal + newProducts[index].totalPrice
+      }
+    })
+  }
+
   const handleRemoveProduct = (index: number) => {
-    setTransaction(prev => {
+    setPurchase(prev => {
       const newProducts = [...prev.products]
       const removedProduct = newProducts[index]
       newProducts.splice(index, 1)
@@ -108,59 +147,9 @@ export function ManualTransactionForm({ initialData, onSuccess, onCancel }: Manu
     })
   }
 
-  const handleQuantityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newQuantity = Number(e.target.value)
-    if (newQuantity < 1) return // Don't allow quantities less than 1
-    setQuantity(newQuantity)
-  }
-
-  const handleExistingProductQuantityChange = (index: number, newQuantity: number) => {
-    if (newQuantity < 1) return // Don't allow quantities less than 1
-    
-    setTransaction(prev => {
-      const newProducts = [...prev.products]
-      const product = newProducts[index]
-      const oldTotal = product.totalPrice
-      
-      // Update the product
-      newProducts[index] = {
-        ...product,
-        quantity: newQuantity,
-        totalPrice: product.unitPrice * newQuantity
-      }
-
-      // Calculate new total amount
-      const newTotal = product.unitPrice * newQuantity
-      
-      return {
-        ...prev,
-        products: newProducts,
-        amount: prev.amount - oldTotal + newTotal
-      }
-    })
-  }
-
-  // Add function to calculate products total
-  const calculateProductsTotal = (products: TransactionProduct[]) => {
-    return products.reduce((sum, product) => sum + product.totalPrice, 0);
-  };
-
-  // Add function to handle manual amount changes
-  const handleAmountChange = (newAmount: number) => {
-    const productsTotal = calculateProductsTotal(transaction.products);
-    const difference = newAmount - productsTotal;
-    
-    setTransaction(prev => ({
-      ...prev,
-      amount: newAmount,
-      tip: difference > 0 ? difference : undefined,
-      discount: difference < 0 ? Math.abs(difference) : undefined
-    }));
-  };
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (transaction.products.length === 0) {
+    if (purchase.products.length === 0) {
       setError('Please add at least one product')
       return
     }
@@ -170,71 +159,42 @@ export function ManualTransactionForm({ initialData, onSuccess, onCancel }: Manu
 
     try {
       const response = await fetch('/api/transactions/manual', {
-        method: initialData ? 'PUT' : 'POST',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(initialData ? { id: initialData.id, ...transaction } : transaction)
+        body: JSON.stringify(purchase)
       })
 
       if (!response.ok) {
         const error = await response.json()
-        throw new Error(error.message || 'Failed to save transaction')
+        throw new Error(error.message || 'Failed to save purchase')
       }
 
-      // Reset form if not editing
-      if (!initialData) {
-        setTransaction({
-          date: new Date().toISOString().split('T')[0],
-          amount: 0,
-          products: [],
-          type: 'sale',
-          paymentMethod: 'Venmo',
-          customer: ''
-        })
-      }
+      setPurchase({
+        date: new Date().toISOString().split('T')[0],
+        amount: 0,
+        products: [],
+        type: 'purchase',
+        paymentMethod: 'AMEX 01001',
+        vendor: '',
+        supplierOrderNumber: ''
+      })
 
       setIsOpen(false)
       if (onSuccess) onSuccess()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save transaction')
+      setError(err instanceof Error ? err.message : 'Failed to save purchase')
     } finally {
       setLoading(false)
     }
   }
 
-  async function handleDelete() {
-    if (!initialData?.id) return
-    setLoading(true)
-    setError(null)
-
-    try {
-      const response = await fetch('/api/transactions/manual', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: initialData.id })
-      })
-
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.message || 'Failed to delete transaction')
-      }
-
-      setIsOpen(false)
-      if (onSuccess) onSuccess()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete transaction')
-    } finally {
-      setLoading(false)
-      setConfirmDelete(false)
-    }
-  }
-
-  if (!isOpen && !initialData) {
+  if (!isOpen) {
     return (
       <button
         onClick={() => setIsOpen(true)}
         className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
       >
-        Add Manual Transaction
+        Add Purchase
       </button>
     )
   }
@@ -243,7 +203,7 @@ export function ManualTransactionForm({ initialData, onSuccess, onCancel }: Manu
     <Card className="p-6">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-medium text-gray-900 dark:text-white">
-          {initialData ? 'Edit Transaction' : 'Add Manual Transaction'}
+          Add Purchase
         </h2>
         <button
           onClick={() => {
@@ -264,54 +224,79 @@ export function ManualTransactionForm({ initialData, onSuccess, onCancel }: Manu
           <input
             type="date"
             required
-            value={transaction.date}
-            onChange={e => setTransaction(prev => ({ ...prev, date: e.target.value }))}
+            value={purchase.date}
+            onChange={e => setPurchase(prev => ({ ...prev, date: e.target.value }))}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700"
           />
         </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Customer Name
+            Vendor
           </label>
           <input
             type="text"
-            value={transaction.customer || ''}
-            onChange={e => setTransaction(prev => ({ ...prev, customer: e.target.value }))}
-            placeholder="Optional"
+            value={purchase.vendor || ''}
+            onChange={e => setPurchase(prev => ({ ...prev, vendor: e.target.value }))}
+            placeholder="Vendor name"
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700"
           />
         </div>
 
-        {/* Products Section */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Supplier Order Number
+          </label>
+          <input
+            type="text"
+            value={purchase.supplierOrderNumber || ''}
+            onChange={e => setPurchase(prev => ({ ...prev, supplierOrderNumber: e.target.value }))}
+            placeholder="Optional - Order/Invoice number"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700"
+          />
+        </div>
+
         <div className="space-y-2">
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
             Products
           </label>
           
-          {/* Product List with editable quantities */}
           <div className="space-y-2">
-            {transaction.products.map((product, index) => (
+            {purchase.products.map((product, index) => (
               <div key={index} className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-2 rounded">
                 <div className="flex-1">
                   <p className="text-sm font-medium">{product.name}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <input
-                      type="number"
-                      min="1"
-                      value={product.quantity}
-                      onChange={(e) => handleExistingProductQuantityChange(index, parseInt(e.target.value) || 1)}
-                      className="w-16 h-6 text-xs rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600"
-                    />
-                    <span className="text-xs text-gray-500">
-                      × ${product.unitPrice.toFixed(2)} = ${product.totalPrice.toFixed(2)}
+                  <div className="flex items-center gap-4 mt-2">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-gray-500">Qty:</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={product.quantity}
+                        onChange={(e) => handleQuantityChange(index, parseInt(e.target.value) || 1)}
+                        className="w-16 h-7 text-sm rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-gray-500">Price/unit:</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={product.unitPrice}
+                        onChange={(e) => handleUnitPriceChange(index, parseFloat(e.target.value) || 0)}
+                        className="w-20 h-7 text-sm rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600"
+                      />
+                    </div>
+                    <span className="text-sm text-gray-500">
+                      = ${product.totalPrice.toFixed(2)}
                     </span>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => handleRemoveProduct(index)}
-                  className="text-red-600 hover:text-red-800 ml-2"
+                  className="text-red-600 hover:text-red-800 ml-4"
                 >
                   Remove
                 </button>
@@ -319,7 +304,6 @@ export function ManualTransactionForm({ initialData, onSuccess, onCancel }: Manu
             ))}
           </div>
 
-          {/* Add Product - Autocomplete */}
           <div className="relative">
             <div className="flex gap-2">
               <div className="flex-1 relative">
@@ -334,7 +318,6 @@ export function ManualTransactionForm({ initialData, onSuccess, onCancel }: Manu
                   placeholder="Search for a product..."
                   className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700"
                 />
-                {/* Product Suggestions Dropdown */}
                 {showSuggestions && searchQuery && (
                   <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700 max-h-60 overflow-auto">
                     {filteredProducts.length > 0 ? (
@@ -347,7 +330,7 @@ export function ManualTransactionForm({ initialData, onSuccess, onCancel }: Manu
                         >
                           <div className="text-sm font-medium">{product.name}</div>
                           <div className="text-xs text-gray-500">
-                            SKU: {product.sku} - ${product.retailPrice.toFixed(2)}
+                            SKU: {product.sku} - ${(product.wholesalePrice || 0).toFixed(2)}
                           </div>
                         </button>
                       ))
@@ -363,54 +346,10 @@ export function ManualTransactionForm({ initialData, onSuccess, onCancel }: Manu
                 type="number"
                 min="1"
                 value={quantity}
-                onChange={handleQuantityChange}
+                onChange={(e) => setQuantity(Number(e.target.value))}
                 className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700"
               />
             </div>
-          </div>
-
-          {/* Products Total and Manual Amount Section */}
-          <div className="mt-4 space-y-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-            <div className="flex justify-between text-sm">
-              <span className="font-medium text-gray-700 dark:text-gray-300">
-                Products Total:
-              </span>
-              <span className="text-gray-900 dark:text-white">
-                ${calculateProductsTotal(transaction.products).toFixed(2)}
-              </span>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Final Amount
-              </label>
-              <div className="mt-1 relative rounded-md shadow-sm">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <span className="text-gray-500 sm:text-sm">$</span>
-                </div>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={transaction.amount}
-                  onChange={(e) => handleAmountChange(parseFloat(e.target.value) || 0)}
-                  className="pl-7 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700"
-                />
-              </div>
-            </div>
-
-            {/* Show Tip or Discount */}
-            {transaction.tip !== undefined && transaction.tip > 0 && (
-              <div className="flex justify-between text-sm text-green-600 dark:text-green-400">
-                <span>Tip:</span>
-                <span>+${transaction.tip.toFixed(2)}</span>
-              </div>
-            )}
-            {transaction.discount !== undefined && transaction.discount > 0 && (
-              <div className="flex justify-between text-sm text-red-600 dark:text-red-400">
-                <span>Discount:</span>
-                <span>-${transaction.discount.toFixed(2)}</span>
-              </div>
-            )}
           </div>
         </div>
 
@@ -419,11 +358,13 @@ export function ManualTransactionForm({ initialData, onSuccess, onCancel }: Manu
             Payment Method
           </label>
           <select
-            value={transaction.paymentMethod}
-            onChange={e => setTransaction(prev => ({ ...prev, paymentMethod: e.target.value }))}
+            value={purchase.paymentMethod}
+            onChange={e => setPurchase(prev => ({ ...prev, paymentMethod: e.target.value }))}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700"
           >
-            <option value="Venmo">Venmo</option>
+            <option value="AMEX 01001">AMEX 01001</option>
+            <option value="US Bank CC 0402">US Bank CC 0402</option>
+            <option value="US Bank Debit 9912">US Bank Debit 9912</option>
             <option value="Cash">Cash</option>
             <option value="Check">Check</option>
             <option value="Other">Other</option>
@@ -434,22 +375,20 @@ export function ManualTransactionForm({ initialData, onSuccess, onCancel }: Manu
           <p className="text-sm text-red-600">{error}</p>
         )}
 
-        <div className="flex justify-end space-x-4">
-          {initialData && (
-            <button
-              type="button"
-              onClick={() => setConfirmDelete(true)}
-              className="px-4 py-2 text-sm text-red-600 hover:text-red-700"
-            >
-              Delete
-            </button>
-          )}
+        <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex justify-between items-center text-lg font-medium">
+            <span className="text-gray-700 dark:text-gray-300">Total:</span>
+            <span className="text-gray-900 dark:text-white">${purchase.amount.toFixed(2)}</span>
+          </div>
+        </div>
+
+        <div className="flex justify-end">
           <button
             type="submit"
-            disabled={loading || transaction.products.length === 0}
+            disabled={loading || purchase.products.length === 0}
             className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
           >
-            {loading ? 'Saving...' : initialData ? 'Update' : 'Add Transaction'}
+            {loading ? 'Saving...' : 'Add Purchase'}
           </button>
         </div>
       </form>

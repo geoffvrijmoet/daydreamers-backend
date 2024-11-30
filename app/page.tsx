@@ -3,6 +3,7 @@ import { SalesCalendar } from "@/components/sales-calendar";
 import { TransactionsList } from "@/components/transactions-list";
 import { AmexTransactions } from "@/components/amex-transactions";
 import { ManualTransactionForm } from '@/components/manual-transaction-form'
+import { PurchaseForm } from '@/components/purchase-form'
 
 export default function Home() {
   return (
@@ -33,10 +34,8 @@ export default function Home() {
 
         {/* Quick Actions */}
         <div className="flex gap-4 mb-8">
+          <PurchaseForm />
           <ManualTransactionForm />
-          <button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700">
-            Add Purchase
-          </button>
           <button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700">
             Update Inventory
           </button>

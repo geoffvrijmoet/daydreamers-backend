@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     })
 
     // Fetch manual transactions from MongoDB
-    console.log('Fetching manual transactions...')
+    console.log('Fetching manual transactions...startDate:', startDate, 'endDate:', endDate)
     const manualTransactions = await db.collection('transactions')
       .find({
         source: 'manual',

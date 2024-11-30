@@ -2,16 +2,26 @@
 
 import { Card } from "@/components/ui/card"
 import { useTransactions } from "@/lib/hooks/useTransactions"
-import { useMemo, useState } from "react"
+import { useMemo, useState, useEffect } from "react"
 
-type EditingTransaction = {
+type Transaction = {
   id: string
   description: string
   amount: number
   type: 'sale' | 'purchase'
+  source?: 'square' | 'shopify' | 'gmail' | 'manual'
   customer?: string
   paymentMethod?: string
   date: string
+  products?: Array<{
+    name: string
+    quantity: number
+    unitPrice: number
+    totalPrice: number
+  }>
+  productsTotal?: number
+  tip?: number
+  discount?: number
 }
 
 type GroupedTransactions = {
@@ -25,8 +35,18 @@ type GroupedTransactions = {
       customer?: string
       paymentMethod?: string
       date: string
+      products?: Array<{
+        name: string
+        quantity: number
+        unitPrice: number
+        totalPrice: number
+      }>
+      productsTotal?: number
+      tip?: number
+      discount?: number
     }>
     totalAmount: number
+    totalTax: number
     count: number
   }
 }
@@ -34,8 +54,52 @@ type GroupedTransactions = {
 export function TransactionsList() {
   const { transactions, loading, error, refreshTransactions } = useTransactions()
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingTransaction, setEditingTransaction] = useState<EditingTransaction | null>(null)
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    transactions.forEach(transaction => {
+      if (transaction.products?.length) {
+        console.log(`Products for transaction ${transaction.id}:`, {
+          date: transaction.date,
+          description: transaction.description,
+          products: transaction.products.map(p => ({
+            name: p.name,
+            quantity: p.quantity,
+            unitPrice: p.unitPrice,
+            totalPrice: p.totalPrice
+          }))
+        })
+      }
+    })
+  }, [transactions])
+
+  const calculateTaxDetails = (transaction: Transaction) => {
+    const taxRate = 0.08875;
+    
+    // If this is a manual transaction with products
+    if (transaction.source === 'manual' && transaction.productsTotal !== undefined) {
+      // For discounts, use the actual amount paid (minus any tip)
+      const baseAmount = transaction.amount - (transaction.tip || 0);
+      const preTaxAmount = baseAmount / (1 + taxRate);
+      const taxAmount = baseAmount - preTaxAmount;
+      
+      return {
+        preTaxAmount,
+        taxAmount,
+        taxRate: taxRate * 100
+      };
+    }
+    
+    // For non-manual transactions or those without products, use original calculation
+    const preTaxAmount = transaction.amount / (1 + taxRate);
+    const taxAmount = transaction.amount - preTaxAmount;
+    return {
+      preTaxAmount,
+      taxAmount,
+      taxRate: taxRate * 100
+    };
+  };
 
   const groupedTransactions = useMemo(() => {
     return transactions.reduce((acc: GroupedTransactions, transaction) => {
@@ -51,28 +115,24 @@ export function TransactionsList() {
         acc[dateKey] = {
           transactions: [],
           totalAmount: 0,
+          totalTax: 0,
           count: 0
         }
       }
 
-      acc[dateKey].transactions.push({
-        id: transaction.id,
-        description: transaction.description,
-        amount: transaction.amount,
-        type: transaction.type,
-        source: transaction.source,
-        customer: transaction.customer,
-        paymentMethod: transaction.paymentMethod,
-        date: transaction.date
-      })
+      // Calculate tax for this transaction
+      const { taxAmount } = calculateTaxDetails(transaction);
+
+      acc[dateKey].transactions.push(transaction)
       acc[dateKey].totalAmount += transaction.amount
+      acc[dateKey].totalTax += taxAmount
       acc[dateKey].count += 1
 
       return acc
     }, {})
   }, [transactions])
 
-  const handleEdit = (transaction: any) => {
+  const handleEdit = (transaction: Transaction) => {
     setEditingId(transaction.id)
     setEditingTransaction({
       id: transaction.id,
@@ -81,7 +141,8 @@ export function TransactionsList() {
       type: transaction.type,
       customer: transaction.customer,
       paymentMethod: transaction.paymentMethod,
-      date: transaction.date
+      date: transaction.date,
+      products: transaction.products
     })
   }
 
@@ -93,7 +154,10 @@ export function TransactionsList() {
       const response = await fetch('/api/transactions/manual', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingTransaction)
+        body: JSON.stringify({
+          ...editingTransaction,
+          products: editingTransaction.products || []
+        })
       })
 
       if (!response.ok) {
@@ -115,144 +179,337 @@ export function TransactionsList() {
     setEditingTransaction(null)
   }
 
+  const handleProductQuantityChange = (productIndex: number, newQuantity: number) => {
+    if (!editingTransaction?.products) return;
+    
+    setEditingTransaction(prev => {
+      if (!prev?.products) return prev;
+      
+      const updatedProducts = [...prev.products];
+      const product = updatedProducts[productIndex];
+      
+      if (!product) return prev;
+
+      updatedProducts[productIndex] = {
+        ...product,
+        quantity: newQuantity,
+        totalPrice: product.unitPrice * newQuantity
+      };
+
+      const newTotalAmount = updatedProducts.reduce((sum, p) => sum + p.totalPrice, 0);
+
+      return {
+        ...prev,
+        products: updatedProducts,
+        amount: newTotalAmount
+      };
+    });
+  };
+
+  const renderProducts = (transaction: Transaction) => {
+    if (!transaction) return null;
+
+    if (transaction.source === 'manual' && transaction.products?.length > 0) {
+      return transaction.products.map((product, idx) => (
+        <div key={idx} className="flex items-center">
+          {editingId === transaction.id ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min="1"
+                value={editingTransaction?.products?.[idx]?.quantity || product.quantity}
+                onChange={(e) => {
+                  const newQuantity = parseInt(e.target.value) || 1;
+                  if (newQuantity < 1) return;
+                  handleProductQuantityChange(idx, newQuantity);
+                }}
+                className="w-16 h-6 text-xs rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600"
+              />
+              <span className="text-xs">x</span>
+            </div>
+          ) : (
+            <span>{product.quantity}x</span>
+          )}
+          <span className="ml-2">{product.name}</span>
+          <span className="ml-2 text-gray-500">
+            (${(editingId === transaction.id ? 
+              editingTransaction?.products?.[idx]?.totalPrice : 
+              product.totalPrice).toFixed(2)})
+          </span>
+        </div>
+      ));
+    }
+
+    if (transaction.source === 'square' && transaction.lineItems?.length > 0) {
+      return transaction.lineItems.map((item: any, idx: number) => (
+        <div key={idx} className="flex items-center">
+          <span>{item.quantity}x</span>
+          <span className="ml-2">{item.name}</span>
+          {item.variationName && <span className="ml-1">({item.variationName})</span>}
+          <span className="ml-2 text-gray-500">
+            (${(item.grossSalesMoney.amount / 100).toFixed(2)})
+          </span>
+        </div>
+      ));
+    }
+
+    if (transaction.source === 'shopify' && transaction.line_items?.length > 0) {
+      return transaction.line_items.map((item: any, idx: number) => (
+        <div key={idx} className="flex items-center">
+          <span>{item.quantity}x</span>
+          <span className="ml-2">{item.title}</span>
+          <span className="ml-2 text-gray-500">
+            (${(parseFloat(item.price) * item.quantity).toFixed(2)})
+          </span>
+        </div>
+      ));
+    }
+
+    return (
+      <div className="text-gray-600 dark:text-gray-400">
+        {transaction.description}
+      </div>
+    );
+  };
+
+  const renderTransactionDetails = (transaction: Transaction) => {
+    const { preTaxAmount, taxAmount, taxRate } = calculateTaxDetails(transaction);
+
+    return (
+      <div className="flex-shrink-0 ml-4 px-3 py-2 border border-cyan-600 bg-black/50 rounded">
+        <div className="flex flex-col gap-1 text-xs">
+          {transaction.source === 'manual' && transaction.productsTotal && (
+            <>
+              <div className="text-green-400">
+                Products: ${transaction.productsTotal.toFixed(2)}
+              </div>
+              {transaction.discount && (
+                <div className="text-red-400">
+                  Discount: -${transaction.discount.toFixed(2)}
+                </div>
+              )}
+              <div className="text-green-400">
+                Tax ({taxRate}%): ${taxAmount.toFixed(2)}
+              </div>
+              {transaction.tip && (
+                <div className="text-cyan-400">
+                  Tip: +${transaction.tip.toFixed(2)}
+                </div>
+              )}
+            </>
+          )}
+          <div className="font-bold text-cyan-400">
+            Total: ${transaction.amount.toFixed(2)}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (loading) {
     return (
-      <Card className="p-6">
-        <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Recent Transactions</h2>
-        <p className="text-gray-600 dark:text-gray-400">Loading transactions...</p>
+      <Card className="p-6 font-mono border-2 border-cyan-500 bg-black text-green-400">
+        <h2 className="text-lg font-bold text-cyan-400 mb-4 uppercase tracking-wider">
+          == Recent Transactions ==
+        </h2>
+        <div className="max-h-[400px] overflow-auto pr-2">
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <div className="sticky top-0 z-10 bg-black py-1">
+                <div className="flex flex-col pb-1 border-b border-cyan-600">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-sm font-bold text-cyan-400">
+                      [Loading...]
+                    </h3>
+                    <div className="text-sm">
+                      <span className="text-green-400">
+                        Loading transactions...
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-xs mt-1">
+                    <div className="space-x-4">
+                      <span className="text-green-400">
+                        Total: $0.00
+                      </span>
+                      <span className="text-green-400">
+                        Tax: $0.00
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </Card>
     )
   }
 
   if (error) {
     return (
-      <Card className="p-6">
-        <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Recent Transactions</h2>
-        <p className="text-red-600">Error: {error.message}</p>
+      <Card className="p-6 font-mono border-2 border-cyan-500 bg-black text-green-400">
+        <h2 className="text-lg font-bold text-cyan-400 mb-4 uppercase tracking-wider">
+          == Recent Transactions ==
+        </h2>
+        <div className="max-h-[400px] overflow-auto pr-2">
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <div className="sticky top-0 z-10 bg-black py-1">
+                <div className="flex flex-col pb-1 border-b border-cyan-600">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-sm font-bold text-cyan-400">
+                      [Error]
+                    </h3>
+                    <div className="text-sm">
+                      <span className="text-red-400">
+                        Error: {error.message}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-xs mt-1">
+                    <div className="space-x-4">
+                      <span className="text-green-400">
+                        Total: $0.00
+                      </span>
+                      <span className="text-green-400">
+                        Tax: $0.00
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </Card>
     )
   }
 
   return (
-    <Card className="p-6">
-      <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Recent Transactions</h2>
+    <Card className="p-6 font-mono border-2 border-cyan-500 bg-black text-green-400">
+      <h2 className="text-lg font-bold text-cyan-400 mb-4 uppercase tracking-wider">
+        == Recent Transactions ==
+      </h2>
       <div className="max-h-[400px] overflow-auto pr-2">
-        <div className="space-y-6">
+        <div className="space-y-4">
           {Object.entries(groupedTransactions)
             .sort(([dateA], [dateB]) => 
               new Date(dateB).getTime() - new Date(dateA).getTime()
             )
-            .map(([date, { transactions, totalAmount, count }]) => (
-              <div key={date} className="space-y-2">
-                <div className="sticky top-0 z-10 bg-white dark:bg-gray-900 py-2">
-                  <div className="flex justify-between items-center pb-2 border-b border-gray-200 dark:border-gray-700">
-                    <h3 className="text-sm font-medium text-gray-900 dark:text-white">
-                      {date}
-                    </h3>
-                    <div className="text-sm">
-                      <span className="text-gray-500 dark:text-gray-400">
-                        {count} transaction{count !== 1 ? 's' : ''} •{' '}
-                      </span>
-                      <span className="font-medium text-gray-900 dark:text-white">
-                        ${totalAmount.toFixed(2)}
-                      </span>
+            .map(([date, { transactions, totalAmount, totalTax, count }]) => (
+              <div key={date} className="space-y-1">
+                <div className="sticky top-0 z-10 bg-black py-1">
+                  <div className="flex flex-col pb-1 border-b border-cyan-600">
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-sm font-bold text-cyan-400">
+                        [{date}]
+                      </h3>
+                      <div className="text-sm">
+                        <span className="text-green-400">
+                          {count} transaction{count !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex justify-between text-xs mt-1">
+                      <div className="space-x-4">
+                        <span className="text-green-400">
+                          Total: ${totalAmount.toFixed(2)}
+                        </span>
+                        <span className="text-green-400">
+                          Tax: ${totalTax.toFixed(2)}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
                 
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {transactions.map((transaction) => (
-                    <div key={transaction.id} className="flex justify-between items-start pl-4">
-                      <div className="flex-grow">
-                        {editingId === transaction.id ? (
-                          // Editing mode
-                          <div className="space-y-2">
-                            <input
-                              type="text"
-                              value={editingTransaction?.description || ''}
-                              onChange={e => setEditingTransaction(prev => prev ? { ...prev, description: e.target.value } : null)}
-                              className="block w-full text-sm rounded-md border-gray-300"
-                              placeholder="Description"
-                            />
+                    <div 
+                      key={transaction.id} 
+                      className="relative p-2 border border-cyan-600 bg-black/50 rounded hover:border-cyan-400 transition-colors"
+                    >
+                      <div className="flex gap-4">
+                        <div className="flex-grow">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-base font-bold text-cyan-400">
+                              > ${transaction.amount.toFixed(2)}
+                            </span>
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-cyan-900 text-cyan-400 uppercase">
+                              {transaction.source?.charAt(0).toUpperCase() + transaction.source?.slice(1)}
+                            </span>
                             {transaction.source === 'manual' && (
-                              <>
-                                <input
-                                  type="text"
-                                  value={editingTransaction?.customer || ''}
-                                  onChange={e => setEditingTransaction(prev => prev ? { ...prev, customer: e.target.value } : null)}
-                                  className="block w-full text-sm rounded-md border-gray-300"
-                                  placeholder="Customer"
-                                />
-                                <select
-                                  value={editingTransaction?.paymentMethod || ''}
-                                  onChange={e => setEditingTransaction(prev => prev ? { ...prev, paymentMethod: e.target.value } : null)}
-                                  className="block w-full text-sm rounded-md border-gray-300"
-                                >
-                                  <option value="Venmo">Venmo</option>
-                                  <option value="Cash">Cash</option>
-                                  <option value="Check">Check</option>
-                                  <option value="Other">Other</option>
-                                </select>
-                              </>
+                              <div className="flex gap-2">
+                                {editingId === transaction.id ? (
+                                  <>
+                                    <button
+                                      onClick={handleSave}
+                                      disabled={saving}
+                                      className="text-xs text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                                    >
+                                      {saving ? 'Saving...' : 'Save'}
+                                    </button>
+                                    <button
+                                      onClick={handleCancel}
+                                      className="text-xs text-gray-600 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={() => handleEdit(transaction)}
+                                    className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                  >
+                                    Edit
+                                  </button>
+                                )}
+                              </div>
                             )}
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={editingTransaction?.amount || 0}
-                              onChange={e => setEditingTransaction(prev => prev ? { ...prev, amount: Number(e.target.value) } : null)}
-                              className="block w-full text-sm rounded-md border-gray-300"
-                            />
-                            <div className="flex space-x-2">
-                              <button
-                                onClick={handleSave}
-                                disabled={saving}
-                                className="px-2 py-1 text-xs text-white bg-blue-600 rounded hover:bg-blue-700"
-                              >
-                                {saving ? 'Saving...' : 'Save'}
-                              </button>
-                              <button
-                                onClick={handleCancel}
-                                className="px-2 py-1 text-xs text-gray-600 hover:text-gray-800"
-                              >
-                                Cancel
-                              </button>
-                            </div>
                           </div>
-                        ) : (
-                          // Display mode
-                          <>
-                            <p className="text-sm font-medium text-gray-900 dark:text-white">
-                              {transaction.description}
-                            </p>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                              {transaction.source === 'manual' && (
-                                <>
-                                  {transaction.customer && <span>Customer: {transaction.customer} • </span>}
-                                  {transaction.paymentMethod && <span>via {transaction.paymentMethod}</span>}
-                                </>
-                              )}
-                              {transaction.source && transaction.source !== 'manual' && (
-                                <span className="capitalize">via {transaction.source}</span>
-                              )}
-                            </div>
-                          </>
-                        )}
+
+                          <div className="text-xs space-y-0.5">
+                            {renderProducts(transaction)}
+                          </div>
+
+                          <div className="flex flex-wrap gap-x-3 text-xs text-gray-600 dark:text-gray-400 mt-2">
+                            {transaction.customer && (
+                              <span>
+                                Customer: {transaction.customer}
+                              </span>
+                            )}
+                            {transaction.paymentMethod && (
+                              <span>
+                                Via: {transaction.paymentMethod}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {renderTransactionDetails(transaction)}
                       </div>
-                      <div className="flex items-center space-x-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                          ${transaction.type === 'sale' 
-                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100' 
-                            : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100'}`}>
-                          ${transaction.amount.toFixed(2)}
-                        </span>
-                        {transaction.source === 'manual' && editingId !== transaction.id && (
-                          <button
-                            onClick={() => handleEdit(transaction)}
-                            className="text-sm text-gray-500 hover:text-gray-700"
-                          >
-                            Edit
-                          </button>
+                      <div className="text-sm">
+                        <div className="flex justify-between">
+                          <span>Products Total:</span>
+                          <span>${transaction.productsTotal?.toFixed(2)}</span>
+                        </div>
+                        {transaction.tip && (
+                          <div className="flex justify-between text-green-600">
+                            <span>Tip:</span>
+                            <span>+${transaction.tip.toFixed(2)}</span>
+                          </div>
                         )}
+                        {transaction.discount && (
+                          <div className="flex justify-between text-red-600">
+                            <span>Discount:</span>
+                            <span>-${transaction.discount.toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between font-medium">
+                          <span>Final Amount:</span>
+                          <span>${transaction.amount.toFixed(2)}</span>
+                        </div>
                       </div>
                     </div>
                   ))}

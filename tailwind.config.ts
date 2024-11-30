@@ -1,6 +1,6 @@
 import type { Config } from "tailwindcss";
 
-const config = {
+const config: Config = {
     darkMode: ["class"],
     content: [
     "./pages/**/*.{ts,tsx}",
@@ -10,7 +10,36 @@ const config = {
   ],
   theme: {
   	extend: {
+  		fontFamily: {
+  			mono: [
+  				'IBM Plex Mono',
+  				'VT323',
+  				'Space Mono',
+  				'Courier New',
+  				'monospace',
+  			],
+  		},
   		colors: {
+  			terminal: {
+  				DEFAULT: '#00ff00',
+  				black: '#000000',
+  				green: {
+  					DEFAULT: '#00ff00',
+  					dark: '#008800',
+  				},
+  				cyan: {
+  					DEFAULT: '#00ffff',
+  					dark: '#008888',
+  				},
+  				red: {
+  					DEFAULT: '#ff0000',
+  					dark: '#880000',
+  				},
+  				yellow: {
+  					DEFAULT: '#ffff00',
+  					dark: '#888800',
+  				},
+  			},
   			primary: {
   				DEFAULT: '#d5bcff',
   				50: '#faf7ff',
@@ -39,7 +68,20 @@ const config = {
   				900: '#003380',
   				950: '#001f4d',
   			}
-  		}
+  		},
+  		backgroundImage: {
+  			'crt-lines': 'repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.1) 0px, rgba(0, 0, 0, 0.1) 1px, transparent 1px, transparent 2px)',
+  		},
+  		animation: {
+  			'crt-flicker': 'flicker 0.15s infinite',
+  		},
+  		keyframes: {
+  			flicker: {
+  				'0%': { opacity: '0.9' },
+  				'50%': { opacity: '1' },
+  				'100%': { opacity: '0.9' },
+  			},
+  		},
   	}
   },
   plugins: [require("tailwindcss-animate")],
