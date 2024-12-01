@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   try {
     const db = await getDb()
     const { searchParams } = new URL(request.url)
-    const startDate = searchParams.get('startDate') || '2024-01-01T00:00:00Z'
+    const startDate = '2023-03-28T00:00:00Z'
     const endDate = searchParams.get('endDate') || new Date().toISOString()
 
     console.log('Fetching combined transactions with params:', {

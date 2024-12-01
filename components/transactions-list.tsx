@@ -276,29 +276,29 @@ export function TransactionsList() {
     const { preTaxAmount, taxAmount, taxRate } = calculateTaxDetails(transaction);
 
     return (
-      <div className="flex-shrink-0 ml-4 px-3 py-2 border border-cyan-600 bg-black/50 rounded">
+      <div className="flex-shrink-0 ml-4 px-3 py-2 border border-purple-light bg-purple-pastel/50 rounded">
         <div className="flex flex-col gap-1 text-xs">
           {transaction.source === 'manual' && transaction.productsTotal && (
             <>
-              <div className="text-green-400">
+              <div className="text-green-dark">
                 Products: ${transaction.productsTotal.toFixed(2)}
               </div>
               {transaction.discount && (
-                <div className="text-red-400">
+                <div className="text-red-dark">
                   Discount: -${transaction.discount.toFixed(2)}
                 </div>
               )}
-              <div className="text-green-400">
+              <div className="text-green-dark">
                 Tax ({taxRate}%): ${taxAmount.toFixed(2)}
               </div>
               {transaction.tip && (
-                <div className="text-cyan-400">
+                <div className="text-purple-dark">
                   Tip: +${transaction.tip.toFixed(2)}
                 </div>
               )}
             </>
           )}
-          <div className="font-bold text-cyan-400">
+          <div className="font-bold text-purple-dark">
             Total: ${transaction.amount.toFixed(2)}
           </div>
         </div>
@@ -306,121 +306,43 @@ export function TransactionsList() {
     );
   };
 
-  if (loading) {
-    return (
-      <Card className="p-6 font-mono border-2 border-cyan-500 bg-black text-green-400">
-        <h2 className="text-lg font-bold text-cyan-400 mb-4 uppercase tracking-wider">
-          == Recent Transactions ==
-        </h2>
-        <div className="max-h-[400px] overflow-auto pr-2">
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <div className="sticky top-0 z-10 bg-black py-1">
-                <div className="flex flex-col pb-1 border-b border-cyan-600">
-                  <div className="flex justify-between items-center">
-                    <h3 className="text-sm font-bold text-cyan-400">
-                      [Loading...]
-                    </h3>
-                    <div className="text-sm">
-                      <span className="text-green-400">
-                        Loading transactions...
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex justify-between text-xs mt-1">
-                    <div className="space-x-4">
-                      <span className="text-green-400">
-                        Total: $0.00
-                      </span>
-                      <span className="text-green-400">
-                        Tax: $0.00
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Card>
-    )
-  }
-
-  if (error) {
-    return (
-      <Card className="p-6 font-mono border-2 border-cyan-500 bg-black text-green-400">
-        <h2 className="text-lg font-bold text-cyan-400 mb-4 uppercase tracking-wider">
-          == Recent Transactions ==
-        </h2>
-        <div className="max-h-[400px] overflow-auto pr-2">
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <div className="sticky top-0 z-10 bg-black py-1">
-                <div className="flex flex-col pb-1 border-b border-cyan-600">
-                  <div className="flex justify-between items-center">
-                    <h3 className="text-sm font-bold text-cyan-400">
-                      [Error]
-                    </h3>
-                    <div className="text-sm">
-                      <span className="text-red-400">
-                        Error: {error.message}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex justify-between text-xs mt-1">
-                    <div className="space-x-4">
-                      <span className="text-green-400">
-                        Total: $0.00
-                      </span>
-                      <span className="text-green-400">
-                        Tax: $0.00
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Card>
-    )
-  }
-
   return (
-    <Card className="p-6 font-mono border-2 border-cyan-500 bg-black text-green-400">
-      <h2 className="text-lg font-bold text-cyan-400 mb-4 uppercase tracking-wider">
-        == Recent Transactions ==
-      </h2>
-      <div className="max-h-[400px] overflow-auto pr-2">
+    <Card>
+      <h2 className="text-lg mb-4">Sales</h2>
+      
+      {error && (
+        <div className="p-4 border border-red-200 rounded mb-4">
+          <p className="text-red-600">Error: {error.message}</p>
+        </div>
+      )}
+
+      {loading ? (
         <div className="space-y-4">
+          {[...Array(3)].map((_, i) => (
+            <div 
+              key={i}
+              className="h-16 bg-gray-50 rounded animate-pulse"
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-6">
           {Object.entries(groupedTransactions)
             .sort(([dateA], [dateB]) => 
               new Date(dateB).getTime() - new Date(dateA).getTime()
             )
             .map(([date, { transactions, totalAmount, totalTax, count }]) => (
-              <div key={date} className="space-y-1">
-                <div className="sticky top-0 z-10 bg-black py-1">
-                  <div className="flex flex-col pb-1 border-b border-cyan-600">
-                    <div className="flex justify-between items-center">
-                      <h3 className="text-sm font-bold text-cyan-400">
-                        [{date}]
-                      </h3>
-                      <div className="text-sm">
-                        <span className="text-green-400">
-                          {count} transaction{count !== 1 ? 's' : ''}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex justify-between text-xs mt-1">
-                      <div className="space-x-4">
-                        <span className="text-green-400">
-                          Total: ${totalAmount.toFixed(2)}
-                        </span>
-                        <span className="text-green-400">
-                          Tax: ${totalTax.toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
+              <div key={date} className="space-y-2">
+                <div className="border-b border-gray-200 pb-2">
+                  <div className="flex justify-between">
+                    <h3 className="text-sm">{date}</h3>
+                    <span className="text-sm text-gray-600">
+                      {count} transaction{count !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-600 mt-1">
+                    <span className="mr-4">Total: ${totalAmount.toFixed(2)}</span>
+                    <span>Tax: ${totalTax.toFixed(2)}</span>
                   </div>
                 </div>
                 
@@ -428,15 +350,15 @@ export function TransactionsList() {
                   {transactions.map((transaction) => (
                     <div 
                       key={transaction.id} 
-                      className="relative p-2 border border-cyan-600 bg-black/50 rounded hover:border-cyan-400 transition-colors"
+                      className="p-4 border border-gray-200 rounded"
                     >
                       <div className="flex gap-4">
                         <div className="flex-grow">
                           <div className="flex items-center gap-2 mb-2">
-                            <span className="text-base font-bold text-cyan-400">
-                              > ${transaction.amount.toFixed(2)}
+                            <span className="text-base font-bold text-purple-dark">
+                              ${transaction.amount.toFixed(2)}
                             </span>
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-cyan-900 text-cyan-400 uppercase">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-purple-pastel text-purple-dark uppercase">
                               {transaction.source?.charAt(0).toUpperCase() + transaction.source?.slice(1)}
                             </span>
                             {transaction.source === 'manual' && (
@@ -517,7 +439,7 @@ export function TransactionsList() {
               </div>
             ))}
         </div>
-      </div>
+      )}
     </Card>
   )
 } 

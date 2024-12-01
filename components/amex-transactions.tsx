@@ -599,20 +599,20 @@ export function AmexTransactions() {
   };
 
   return (
-    <Card className="p-6">
+    <Card className="bg-surface-light p-6">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-lg font-medium text-gray-900 dark:text-white">
+          <h2 className="text-lg font-semibold text-purple-dark">
             American Express Purchases
           </h2>
           {error && (
-            <p className="text-sm text-red-600 mt-1">{error}</p>
+            <p className="text-sm text-red-dark mt-1">{error}</p>
           )}
         </div>
         <button
           onClick={handleSync}
           disabled={syncing}
-          className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+          className="button button-secondary"
         >
           {syncing ? 'Syncing...' : 'Sync Emails'}
         </button>
@@ -621,13 +621,13 @@ export function AmexTransactions() {
       {/* New Transactions */}
       {newTransactions.length > 0 && (
         <div className="mb-6">
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <h3 className="text-sm font-semibold text-purple-dark mb-2">
             New Transactions
           </h3>
 
           {/* Add Global JSON Input */}
-          <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <div className="mb-4 p-4 bg-blue-pastel rounded-lg">
+            <label className="block text-xs font-medium text-blue-dark mb-1">
               Match JSON to Transaction
             </label>
             <div className="flex gap-2">
@@ -635,14 +635,14 @@ export function AmexTransactions() {
                 value={globalJsonInput}
                 onChange={(e) => setGlobalJsonInput(e.target.value)}
                 placeholder="Paste JSON here to match with a transaction..."
-                className="flex-1 text-xs rounded-md border-gray-300 dark:bg-gray-800 dark:border-gray-700 font-mono"
+                className="input flex-1 text-xs font-mono"
                 rows={3}
               />
               <button
                 type="button"
                 onClick={handleGlobalJsonMatch}
                 disabled={!globalJsonInput}
-                className="px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 h-fit"
+                className="button button-secondary h-fit"
               >
                 Match
               </button>
@@ -651,11 +651,11 @@ export function AmexTransactions() {
 
           <div className="space-y-4">
             {newTransactions.map((transaction) => (
-              <div key={transaction.id} className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded">
+              <div key={transaction.id} className="p-4 rounded-lg bg-surface border border-purple-pastel">
                 <div className="flex justify-between items-start mb-3">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs text-gray-600 dark:text-gray-400">
+                      <span className="text-xs text-purple-dark">
                         {new Date(transaction.date).toLocaleDateString('en-US', {
                           year: 'numeric',
                           month: 'long',
@@ -664,19 +664,19 @@ export function AmexTransactions() {
                         })}
                       </span>
                     </div>
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                    <span className="text-sm font-medium text-purple-dark">
                       ${transaction.amount.toFixed(2)}
                     </span>
                     {transaction.products?.length > 0 && (
                       <div className="text-xs mt-1">
-                        <span className="text-gray-600 dark:text-gray-400">
+                        <span className="text-blue-dark">
                           Products Total: ${calculateProductsTotal(transaction.products).toFixed(2)}
                         </span>
                         {calculateDifference(transaction) !== 0 && (
                           <span className={`ml-2 ${
                             calculateDifference(transaction) > 0 
-                              ? 'text-red-600 dark:text-red-400' 
-                              : 'text-orange-600 dark:text-orange-400'
+                              ? 'text-red-dark' 
+                              : 'text-yellow-dark'
                           }`}>
                             ({calculateDifference(transaction) > 0 ? '+' : ''}
                             ${calculateDifference(transaction).toFixed(2)} difference)
@@ -689,14 +689,14 @@ export function AmexTransactions() {
                     <button
                       onClick={() => handleDelete(transaction.id)}
                       disabled={deleting[transaction.id]}
-                      className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 disabled:opacity-50"
+                      className="text-xs text-red-dark hover:text-red-DEFAULT disabled:opacity-50"
                     >
                       {deleting[transaction.id] ? 'Deleting...' : 'Delete'}
                     </button>
                     <button
                       onClick={() => handleSaveTransaction(transaction)}
                       disabled={saving[transaction.id] || !transaction.supplier || !(transaction.products?.length)}
-                      className="text-xs text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 disabled:opacity-50"
+                      className="text-xs text-blue-dark hover:text-blue-DEFAULT disabled:opacity-50"
                     >
                       {saving[transaction.id] ? 'Saving...' : 'Save'}
                     </button>
@@ -710,18 +710,7 @@ export function AmexTransactions() {
                     placeholder="Enter supplier name"
                     value={transaction.supplier || ''}
                     onChange={(e) => handleSetSupplier(transaction.id, e.target.value)}
-                    className="w-full text-sm rounded-md border-gray-300 dark:bg-gray-800 dark:border-gray-700"
-                  />
-                </div>
-
-                {/* Add this new input for supplier order number */}
-                <div className="mb-3">
-                  <input
-                    type="text"
-                    placeholder="Enter supplier order number"
-                    value={transaction.supplierOrderNumber || ''}
-                    onChange={(e) => handleSetSupplierOrderNumber(transaction.id, e.target.value)}
-                    className="w-full text-sm rounded-md border-gray-300 dark:bg-gray-800 dark:border-gray-700"
+                    className="input w-full text-sm"
                   />
                 </div>
 
@@ -729,7 +718,7 @@ export function AmexTransactions() {
                 {transaction.products?.length > 0 && (
                   <div className="mb-3 space-y-2">
                     {transaction.products.map((product, idx) => (
-                      <div key={idx} className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
+                      <div key={idx} className="flex items-center justify-between text-xs text-purple-dark">
                         <div className="flex items-center gap-2">
                           <input
                             type="number"
@@ -922,7 +911,10 @@ export function AmexTransactions() {
           </div>
         )}
         {savedTransactions.map((transaction) => (
-          <div key={transaction.id} className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
+          <div 
+            key={transaction.id}
+            className="p-4 rounded-lg bg-surface hover:bg-surface-dark transition-colors border border-purple-pastel"
+          >
             {editingSavedTransaction === transaction.id ? (
               <div className="w-full space-y-4">
                 <div className="flex items-center gap-2">
@@ -1126,8 +1118,8 @@ export function AmexTransactions() {
                         {calculateDifference(transaction) !== 0 && (
                           <span className={`ml-2 ${
                             calculateDifference(transaction) > 0 
-                              ? 'text-red-600' 
-                              : 'text-orange-600'
+                              ? 'text-red-dark' 
+                              : 'text-yellow-dark'
                           }`}>
                             ({calculateDifference(transaction) > 0 ? '+' : ''}
                             ${calculateDifference(transaction).toFixed(2)} difference)
@@ -1199,7 +1191,7 @@ export function AmexTransactions() {
                   <button
                     onClick={() => handleDelete(transaction.id)}
                     disabled={deleting[transaction.id]}
-                    className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 disabled:opacity-50"
+                    className="text-xs text-red-dark hover:text-red-DEFAULT dark:text-red-400 dark:hover:text-red-300 disabled:opacity-50"
                   >
                     {deleting[transaction.id] ? 'Deleting...' : 'Delete'}
                   </button>
@@ -1215,19 +1207,6 @@ export function AmexTransactions() {
           </div>
         ))}
       </div>
-
-      {/* Delete Button */}
-      {selectedIds.size > 0 && (
-        <div className="mt-4 flex justify-end">
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 disabled:opacity-50"
-          >
-            {deleting ? 'Deleting...' : `Delete (${selectedIds.size})`}
-          </button>
-        </div>
-      )}
     </Card>
   )
 } 

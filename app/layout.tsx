@@ -1,12 +1,11 @@
-import { ColorThemeProvider } from '@/lib/contexts/ColorThemeContext'
 import { Header } from '@/components/header'
 import './globals.css'
-import { IBM_Plex_Mono } from 'next/font/google'
+import { Quicksand } from 'next/font/google'
 
-const ibmPlexMono = IBM_Plex_Mono({ 
+const quicksand = Quicksand({ 
   subsets: ['latin'],
-  weight: ['400', '700'],
-  variable: '--font-mono',
+  weight: ['300', '400', '500', '700'],
+  variable: '--font-quicksand',
 })
 
 export default function RootLayout({
@@ -15,14 +14,12 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body>
-        <ColorThemeProvider>
-          <Header />
-          <main>
-            {children}
-          </main>
-        </ColorThemeProvider>
+    <html lang="en" className={quicksand.variable}>
+      <body className="min-h-screen bg-white font-quicksand">
+        <Header />
+        <main>
+          {children}
+        </main>
       </body>
     </html>
   )

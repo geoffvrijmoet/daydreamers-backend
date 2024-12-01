@@ -1,71 +1,149 @@
+'use client'
+
 import { Card } from "@/components/ui/card";
 import { SalesCalendar } from "@/components/sales-calendar";
 import { TransactionsList } from "@/components/transactions-list";
 import { AmexTransactions } from "@/components/amex-transactions";
 import { ManualTransactionForm } from '@/components/manual-transaction-form'
 import { PurchaseForm } from '@/components/purchase-form'
+import { useMetrics } from '@/lib/hooks/useMetrics'
 
 export default function Home() {
+  const { metrics, loading } = useMetrics()
+
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen">
       <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-8 flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-              Daydreamers Pet Supply Dashboard
-            </h1>
-            <p className="mt-2 text-gray-600 dark:text-gray-400">
-              Track your sales, purchases, and inventory
-            </p>
+        {/* Top Section */}
+        <div className="flex justify-between mb-8">
+          {/* Quick Actions */}
+          <div className="flex flex-col gap-2">
+            <PurchaseForm />
+            <ManualTransactionForm />
+            <button className="button">
+              Update Inventory
+            </button>
           </div>
-          <a
-            href="/products"
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-400 hover:bg-primary-500"
-          >
-            Manage Products
-          </a>
+
+          {/* Metrics */}
+          <div className="flex gap-4">
+            <Card className="w-52">
+              <h3 className="text-xs mb-3">Revenue</h3>
+              <div className="space-y-2">
+                <div>
+                  <p className="text-lg">
+                    {loading ? '...' : `$${metrics?.mtd.totalRevenue.toFixed(2)}`}
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    MTD {loading ? '' : `${metrics?.trends.revenueTrend > 0 ? '↑' : '↓'} ${Math.abs(metrics?.trends.revenueTrend || 0).toFixed(1)}%`}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm">
+                    {loading ? '...' : `$${metrics?.ytd.totalRevenue.toFixed(2)}`}
+                  </p>
+                  <p className="text-xs text-gray-600">YTD</p>
+                </div>
+                <div>
+                  <p className="text-sm">
+                    {loading ? '...' : `$${metrics?.lifetime.totalRevenue.toFixed(2)}`}
+                  </p>
+                  <p className="text-xs text-gray-600">Lifetime</p>
+                </div>
+              </div>
+            </Card>
+            
+            <Card className="w-52">
+              <h3 className="text-xs mb-3">Sales</h3>
+              <div className="space-y-2">
+                <div>
+                  <p className="text-lg">
+                    {loading ? '...' : `$${metrics?.mtd.totalSales.toFixed(2)}`}
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    MTD (Tax: ${loading ? '...' : metrics?.mtd.totalTaxCollected.toFixed(2)})
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm">
+                    {loading ? '...' : `$${metrics?.ytd.totalSales.toFixed(2)}`}
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    YTD (Tax: ${loading ? '...' : metrics?.ytd.totalTaxCollected.toFixed(2)})
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm">
+                    {loading ? '...' : `$${metrics?.lifetime.totalSales.toFixed(2)}`}
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    Lifetime (Tax: ${loading ? '...' : metrics?.lifetime.totalTaxCollected.toFixed(2)})
+                  </p>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="w-52">
+              <h3 className="text-xs mb-3">Profit</h3>
+              <div className="space-y-2">
+                <div>
+                  <p className="text-lg">
+                    {loading ? '...' : `$${metrics?.mtd.totalProfit.toFixed(2)}`}
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    MTD ({loading ? '...' : `${metrics?.mtd.profitMargin.toFixed(1)}%`})
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm">
+                    {loading ? '...' : `$${metrics?.ytd.totalProfit.toFixed(2)}`}
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    YTD ({loading ? '...' : `${metrics?.ytd.profitMargin.toFixed(1)}%`})
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm">
+                    {loading ? '...' : `$${metrics?.lifetime.totalProfit.toFixed(2)}`}
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    Lifetime ({loading ? '...' : `${metrics?.lifetime.profitMargin.toFixed(1)}%`})
+                  </p>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="w-52">
+              <h3 className="text-xs mb-3">Expenses</h3>
+              <div className="space-y-2">
+                <div>
+                  <p className="text-lg">
+                    {loading ? '...' : `$${metrics?.mtd.totalExpenses.toFixed(2)}`}
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    MTD {loading ? '' : `${metrics?.trends.expensesTrend > 0 ? '↑' : '↓'} ${Math.abs(metrics?.trends.expensesTrend || 0).toFixed(1)}%`}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm">
+                    {loading ? '...' : `$${metrics?.ytd.totalExpenses.toFixed(2)}`}
+                  </p>
+                  <p className="text-xs text-gray-600">YTD</p>
+                </div>
+                <div>
+                  <p className="text-sm">
+                    {loading ? '...' : `$${metrics?.lifetime.totalExpenses.toFixed(2)}`}
+                  </p>
+                  <p className="text-xs text-gray-600">Lifetime</p>
+                </div>
+              </div>
+            </Card>
+          </div>
         </div>
 
         {/* Recent Transactions */}
         <div className="mb-8">
           <TransactionsList />
-        </div>
-
-        {/* Quick Actions */}
-        <div className="flex gap-4 mb-8">
-          <PurchaseForm />
-          <ManualTransactionForm />
-          <button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700">
-            Update Inventory
-          </button>
-        </div>
-
-        {/* Metrics Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card className="p-6">
-            <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Sales (MTD)</h3>
-            <p className="mt-2 text-3xl font-semibold text-gray-900 dark:text-white">$12,426</p>
-            <p className="mt-2 text-sm text-green-600">↑ 12% from last month</p>
-          </Card>
-          
-          <Card className="p-6">
-            <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Purchases (MTD)</h3>
-            <p className="mt-2 text-3xl font-semibold text-gray-900 dark:text-white">$8,124</p>
-            <p className="mt-2 text-sm text-red-600">↑ 8% from last month</p>
-          </Card>
-
-          <Card className="p-6">
-            <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Profit Margin</h3>
-            <p className="mt-2 text-3xl font-semibold text-gray-900 dark:text-white">34.6%</p>
-            <p className="mt-2 text-sm text-green-600">↑ 2% from last month</p>
-          </Card>
-
-          <Card className="p-6">
-            <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Low Stock Items</h3>
-            <p className="mt-2 text-3xl font-semibold text-gray-900 dark:text-white">12</p>
-            <p className="mt-2 text-sm text-yellow-600">Needs attention</p>
-          </Card>
         </div>
 
         {/* Main Content Area */}
