@@ -1,19 +1,31 @@
-export type Transaction = {
+export type BaseTransaction = {
   id: string
   date: string
   type: 'sale' | 'purchase'
   amount: number
   description: string
-  source?: 'square' | 'shopify' | 'gmail' | 'manual'
+  source: 'square' | 'shopify' | 'gmail' | 'manual'
+  preTaxAmount?: number
+  taxAmount?: number
   customer?: string
   paymentMethod?: string
   products?: Array<{
-    productId: string
     name: string
     quantity: number
     unitPrice: number
     totalPrice: number
   }>
+  lineItems?: Array<any> // Square specific
+  line_items?: Array<any> // Shopify specific
+  productsTotal?: number
+  tip?: number
+  discount?: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface Transaction extends BaseTransaction {
+  _id?: string
 }
 
 export type TransactionItem = {
