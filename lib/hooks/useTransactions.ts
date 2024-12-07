@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Transaction } from '@/types'
+import { startOfDay, endOfDay } from 'date-fns'
 
 type UseTransactionsOptions = {
   startDate?: string
@@ -15,8 +16,16 @@ export function useTransactions(options?: UseTransactionsOptions) {
     try {
       setLoading(true)
       const queryParams = new URLSearchParams()
-      if (options?.startDate) queryParams.set('startDate', options.startDate)
-      if (options?.endDate) queryParams.set('endDate', options.endDate)
+      
+      if (options?.startDate) {
+        const start = startOfDay(new Date(options.startDate))
+        queryParams.set('startDate', start.toISOString())
+      }
+      
+      if (options?.endDate) {
+        const end = endOfDay(new Date(options.endDate))
+        queryParams.set('endDate', end.toISOString())
+      }
       
       const response = await fetch(`/api/transactions/combined?${queryParams.toString()}`)
       if (!response.ok) {

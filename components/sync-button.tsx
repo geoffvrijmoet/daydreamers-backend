@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { CalendarIcon } from 'lucide-react'
+import { startOfDay, endOfDay } from 'date-fns'
 
 export function SyncButton() {
   const { syncTransactions, syncing, error } = useSyncTransactions()
@@ -18,8 +19,8 @@ export function SyncButton() {
   const handleSync = async () => {
     try {
       const result = await syncTransactions({
-        startDate: startDate?.toISOString(),
-        endDate: endDate?.toISOString()
+        startDate: startDate ? startOfDay(startDate).toISOString() : undefined,
+        endDate: endDate ? endOfDay(endDate).toISOString() : undefined
       })
       setLastSyncResult(result)
     } catch (err) {

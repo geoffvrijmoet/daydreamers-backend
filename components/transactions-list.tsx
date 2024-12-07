@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 import { CalendarIcon } from "lucide-react"
+import { addDays, subDays, startOfYear, startOfDay } from 'date-fns'
 
 type Transaction = {
   id: string
@@ -317,75 +318,185 @@ export function TransactionsList() {
     );
   };
 
+  const handleQuickSelect = (range: string) => {
+    const today = new Date()
+    
+    switch (range) {
+      case 'today':
+        setStartDate(today)
+        setEndDate(today)
+        break
+      case '1d':
+        setStartDate(subDays(today, 1))
+        setEndDate(today)
+        break
+      case '2d':
+        setStartDate(subDays(today, 2))
+        setEndDate(today)
+        break
+      case '7d':
+        setStartDate(subDays(today, 6)) // 6 days ago + today = 7 days
+        setEndDate(today)
+        break
+      case '30d':
+        setStartDate(subDays(today, 29)) // 29 days ago + today = 30 days
+        setEndDate(today)
+        break
+      case 'year':
+        setStartDate(startOfYear(today))
+        setEndDate(today)
+        break
+    }
+    refreshTransactions()
+  }
+
+  const getActiveRange = () => {
+    if (!startDate || !endDate) return null
+    const today = new Date()
+    const start = startOfDay(startDate)
+    const end = startOfDay(endDate)
+
+    if (start.getTime() === end.getTime() && start.getTime() === startOfDay(today).getTime()) {
+      return 'today'
+    }
+    if (start.getTime() === startOfDay(subDays(today, 1)).getTime() && end.getTime() === startOfDay(today).getTime()) {
+      return '1d'
+    }
+    if (start.getTime() === startOfDay(subDays(today, 2)).getTime() && end.getTime() === startOfDay(today).getTime()) {
+      return '2d'
+    }
+    if (start.getTime() === startOfDay(subDays(today, 6)).getTime() && end.getTime() === startOfDay(today).getTime()) {
+      return '7d'
+    }
+    if (start.getTime() === startOfDay(subDays(today, 29)).getTime() && end.getTime() === startOfDay(today).getTime()) {
+      return '30d'
+    }
+    if (start.getTime() === startOfDay(startOfYear(today)).getTime() && end.getTime() === startOfDay(today).getTime()) {
+      return 'year'
+    }
+    return null
+  }
+
+  const activeRange = getActiveRange()
+
   return (
     <Card>
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex flex-col gap-4 mb-4">
         <h2 className="text-lg">Sales</h2>
         
-        <div className="flex gap-2">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "justify-start text-left font-normal w-[140px]",
-                  !startDate && "text-muted-foreground"
-                )}
-              >
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {startDate ? format(startDate, "MMM d, yyyy") : <span>Start date</span>}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="single"
-                selected={startDate}
-                onSelect={(date) => {
-                  setStartDate(date)
-                  refreshTransactions()
-                }}
-                initialFocus
-              />
-            </PopoverContent>
-          </Popover>
+        <div className="flex flex-wrap items-center gap-4">
+          {/* Quick select buttons */}
+          <div className="flex flex-wrap gap-1">
+            <Button 
+              variant={activeRange === 'year' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleQuickSelect('year')}
+            >
+              This Year
+            </Button>
+            <Button 
+              variant={activeRange === '30d' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleQuickSelect('30d')}
+            >
+              Last 30d
+            </Button>
+            <Button 
+              variant={activeRange === '7d' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleQuickSelect('7d')}
+            >
+              Last 7d
+            </Button>
+            <Button 
+              variant={activeRange === '2d' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleQuickSelect('2d')}
+            >
+              2d ago
+            </Button>
+            <Button 
+              variant={activeRange === '1d' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleQuickSelect('1d')}
+            >
+              1d ago
+            </Button>
+            <Button 
+              variant={activeRange === 'today' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleQuickSelect('today')}
+            >
+              Today
+            </Button>
+          </div>
 
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "justify-start text-left font-normal w-[140px]",
-                  !endDate && "text-muted-foreground"
-                )}
-              >
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {endDate ? format(endDate, "MMM d, yyyy") : <span>End date</span>}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="single"
-                selected={endDate}
-                onSelect={(date) => {
-                  setEndDate(date)
-                  refreshTransactions()
-                }}
-                initialFocus
-              />
-            </PopoverContent>
-          </Popover>
+          {/* Date selectors */}
+          <div className="flex gap-2 ml-auto">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "justify-start text-left font-normal w-[120px] px-2",
+                    !startDate && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-1 h-4 w-4" />
+                  {startDate ? format(startDate, "MMM d, yyyy") : <span>Start</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={startDate}
+                  onSelect={(date) => {
+                    setStartDate(date)
+                    refreshTransactions()
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
 
-          <Button 
-            variant="outline"
-            onClick={() => {
-              setStartDate(undefined)
-              setEndDate(undefined)
-              refreshTransactions()
-            }}
-            className="px-2"
-          >
-            Clear
-          </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "justify-start text-left font-normal w-[120px] px-2",
+                    !endDate && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-1 h-4 w-4" />
+                  {endDate ? format(endDate, "MMM d, yyyy") : <span>End</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={endDate}
+                  onSelect={(date) => {
+                    setEndDate(date)
+                    refreshTransactions()
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+
+            <Button 
+              variant="outline"
+              onClick={() => {
+                setStartDate(undefined)
+                setEndDate(undefined)
+                refreshTransactions()
+              }}
+              className="px-2"
+            >
+              Clear
+            </Button>
+          </div>
         </div>
       </div>
       

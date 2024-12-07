@@ -5,7 +5,7 @@ export async function GET(request: Request) {
   try {
     const db = await getDb()
     const { searchParams } = new URL(request.url)
-    const startDate = searchParams.get('startDate') || '2023-01-01T00:00:00Z'
+    const startDate = searchParams.get('startDate') || '2023-01-01T00:00:00.000Z'
     const endDate = searchParams.get('endDate') || new Date().toISOString()
 
     console.log('Fetching sales transactions from MongoDB with params:', {
@@ -31,13 +31,17 @@ export async function GET(request: Request) {
       newest: newestTransaction[0]?.date
     })
 
+    // Create date objects for comparison
+    const start = new Date(startDate)
+    const end = new Date(endDate)
+
     // Fetch only sales transactions from MongoDB within date range
     const transactions = await db.collection('transactions')
       .find({
         type: 'sale',
         date: {
-          $gte: startDate,
-          $lte: endDate
+          $gte: start.toISOString(),
+          $lte: end.toISOString()
         }
       })
       .sort({ date: -1 })
@@ -45,8 +49,8 @@ export async function GET(request: Request) {
 
     console.log('Total sales transactions by source and date range:', {
       dateRange: {
-        start: startDate,
-        end: endDate
+        start: start.toISOString(),
+        end: end.toISOString()
       },
       counts: {
         manual: transactions.filter(t => t.source === 'manual').length,

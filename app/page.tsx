@@ -1,7 +1,6 @@
 'use client'
 
 import { Card } from "@/components/ui/card";
-import { SalesCalendar } from "@/components/sales-calendar";
 import { TransactionsList } from "@/components/transactions-list";
 import { AmexTransactions } from "@/components/amex-transactions";
 import { ManualTransactionForm } from '@/components/manual-transaction-form'
@@ -143,15 +142,10 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Recent Transactions */}
-        <div className="mb-8">
-          <TransactionsList />
-        </div>
-
         {/* Main Content Area */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
-            <SalesCalendar />
+            <TransactionsList />
           </div>
           <div>
             <AmexTransactions />
