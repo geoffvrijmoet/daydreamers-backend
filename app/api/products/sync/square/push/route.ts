@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { squareClient } from '@/lib/square'
 import { getDb } from '@/lib/db'
-import { Product } from '@/types'
+import { ObjectId } from 'mongodb'
 
 export async function POST(request: Request) {
   try {
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
                     amount: BigInt(Math.round(product.retailPrice * 100)),
                     currency: 'USD'
                   },
-                  pricing_type: 'FIXED_PRICING',
+                  pricingType: 'FIXED_PRICING',
                   sku: product.sku
                 }
               }
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
                   amount: BigInt(Math.round(product.retailPrice * 100)),
                   currency: 'USD'
                 },
-                pricing_type: 'FIXED_PRICING',
+                pricingType: 'FIXED_PRICING',
                 sku: product.sku
               }
             }

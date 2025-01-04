@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
 import { Product } from '@/types'
-import { parseISO } from 'date-fns'
 
 type SelectedProduct = {
   productId: string

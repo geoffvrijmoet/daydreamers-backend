@@ -72,7 +72,7 @@ export function PurchaseInvoiceForm({ products, onSuccess }: PurchaseInvoiceForm
     setItems(items.filter((_, i) => i !== index))
   }
 
-  function updateItem(index: number, field: keyof InvoiceItem, value: any) {
+  function updateItem(index: number, field: keyof InvoiceItem, value: string | number) {
     const newItems = [...items]
     newItems[index] = { ...newItems[index], [field]: value }
     setItems(newItems)

@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
+import { ObjectId } from 'mongodb'
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
-    const { searchParams } = new URL(request.url)
-    const includeInactive = searchParams.get('includeInactive') === 'true'
     
     const db = await getDb()
     

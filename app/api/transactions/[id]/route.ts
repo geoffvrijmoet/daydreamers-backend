@@ -7,9 +7,8 @@ export async function PUT(
 ) {
   try {
     const db = await getDb()
-    const data = await request.json()
-
-    const { _id, ...updateData } = data
+    const updateData = await request.json()
+    delete updateData._id
 
     const result = await db.collection('transactions').updateOne(
       { id: params.id },
