@@ -1,12 +1,20 @@
-import { Header } from '@/components/header'
+import {
+  ClerkProvider,
+  SignInButton,
+  SignedIn,
+  SignedOut,
+  UserButton
+} from '@clerk/nextjs'
 import './globals.css'
+import type { Metadata } from 'next'
 import { Quicksand } from 'next/font/google'
 
-const quicksand = Quicksand({ 
-  subsets: ['latin'],
-  weight: ['300', '400', '500', '700'],
-  variable: '--font-quicksand',
-})
+const quicksand = Quicksand({ subsets: ['latin'] })
+
+export const metadata: Metadata = {
+  title: 'Daydreamers Pet Supply',
+  description: 'Inventory and sales management for Daydreamers Pet Supply',
+}
 
 export default function RootLayout({
   children,
@@ -14,13 +22,18 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={quicksand.variable}>
-      <body className="min-h-screen bg-white font-quicksand">
-        <Header />
-        <main>
+    <ClerkProvider>
+      <html lang="en">
+        <body className={quicksand.className}>
+          <SignedOut>
+            <SignInButton />
+          </SignedOut>
+          <SignedIn>
+            <UserButton />
+          </SignedIn>
           {children}
-        </main>
-      </body>
-    </html>
+        </body>
+      </html>
+    </ClerkProvider>
   )
 }

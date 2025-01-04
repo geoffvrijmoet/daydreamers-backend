@@ -10,6 +10,7 @@
     "update-amex": "ts-node -r tsconfig-paths/register -r dotenv/config scripts/update-amex-transactions.ts"
   },
   "dependencies": {
+    "@clerk/nextjs": "^6.9.6",
     "@prisma/client": "^6.0.0",
     "@radix-ui/react-dialog": "^1.1.2",
     "@radix-ui/react-popover": "^1.1.2",
