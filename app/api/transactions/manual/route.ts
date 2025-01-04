@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
+import { fromEasternTime } from '@/lib/utils/dates'
 
 export async function POST(request: Request) {
   try {
@@ -11,12 +12,14 @@ export async function POST(request: Request) {
     const taxableAmount = (data.productsTotal || 0) + (data.shipping || 0)
     const taxAmount = taxableAmount * taxRate
 
+    // Convert the date to UTC while treating it as Eastern Time
     const transaction = {
       ...data,
+      date: fromEasternTime(data.date || new Date()),
       preTaxAmount: taxableAmount,
       taxAmount,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      createdAt: fromEasternTime(new Date()),
+      updatedAt: fromEasternTime(new Date())
     }
 
     await db.collection('transactions').insertOne(transaction)
@@ -36,22 +39,17 @@ export async function PUT(request: Request) {
     const db = await getDb()
     const { id, ...updates } = await request.json()
 
-    // If date is being updated, ensure it's in NY timezone
-    if (updates.date) {
-      const date = new Date(updates.date)
-      const nyDate = new Date(date.toLocaleString('en-US', {
-        timeZone: 'America/New_York'
-      }))
-      updates.date = nyDate.toISOString().replace('Z', '-05:00')
+    // Convert any dates to UTC while treating them as Eastern Time
+    const updateData = {
+      ...updates,
+      date: updates.date ? fromEasternTime(updates.date) : undefined,
+      updatedAt: fromEasternTime(new Date())
     }
 
     const result = await db.collection('transactions').findOneAndUpdate(
       { id },
       { 
-        $set: {
-          ...updates,
-          updatedAt: new Date().toISOString().replace('Z', '-05:00')
-        }
+        $set: updateData
       },
       { returnDocument: 'after' }
     )

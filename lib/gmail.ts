@@ -62,6 +62,7 @@ export class GmailService {
       })
 
       if (!response.data.messages) {
+        console.log('No messages found matching the query')
         return []
       }
 
@@ -69,9 +70,14 @@ export class GmailService {
       
       for (const message of response.data.messages) {
         try {
+          if (!message.id) {
+            console.log('Skipping message with no ID')
+            continue
+          }
+
           const email = await gmail.users.messages.get({
             userId: 'me',
-            id: message.id!,
+            id: message.id,
             format: 'full'
           })
 
@@ -79,11 +85,13 @@ export class GmailService {
           const subject = headers?.find(header => header.name?.toLowerCase() === 'subject')?.value
 
           if (!subject?.includes("Large Purchase Approved")) {
+            console.log(`Skipping email with subject: ${subject}`)
             continue
           }
 
           const body = email.data.payload?.parts?.[0]?.body?.data || email.data.payload?.body?.data
           if (!body) {
+            console.log(`No body found for email ${message.id}`)
             continue
           }
 
@@ -91,35 +99,47 @@ export class GmailService {
           const amountMatch = decodedBody.match(/\$(\d+,?\d*\.\d{2})\*/i)
           
           if (!amountMatch) {
+            console.log(`No amount found in email ${message.id}`)
             continue
           }
 
-          const amount = Number(amountMatch[1].replace(',', ''));
+          const amountStr = amountMatch[1].replace(',', '')
+          const parsedAmount = Number(amountStr)
 
-          transactions.push({
-            id: `${message.id!}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          if (isNaN(parsedAmount)) {
+            console.log(`Invalid amount format in email ${message.id}: ${amountStr}`)
+            continue
+          }
+
+          const transaction: EmailTransaction = {
+            id: `${message.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             date: email.data.internalDate 
               ? new Date(parseInt(email.data.internalDate)).toISOString()
               : new Date().toISOString(),
-            amount: amount,
-            description: `Charge for $${amount.toFixed(2)}`,
+            amount: parsedAmount,
+            description: `Charge for $${parsedAmount.toFixed(2)}`,
             merchant: '',
             cardLast4: '****',
-            emailId: message.id!,
+            emailId: message.id,
             source: 'gmail',
             type: 'purchase'
-          })
+          }
 
-        } catch {
+          transactions.push(transaction)
+          console.log(`Successfully processed transaction from email ${message.id} for amount $${parsedAmount}`)
+
+        } catch (error) {
+          console.error(`Error processing email ${message.id}:`, error)
           continue
         }
       }
 
+      console.log(`Successfully processed ${transactions.length} transactions`)
       return transactions
 
-    } catch (err) {
-      console.error('Error fetching Amex emails:', err)
-      throw err
+    } catch (error) {
+      console.error('Error fetching Amex emails:', error)
+      throw error
     }
   }
 

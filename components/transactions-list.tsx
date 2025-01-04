@@ -10,6 +10,7 @@ import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 import { CalendarIcon } from "lucide-react"
 import { subDays, startOfYear, startOfDay } from 'date-fns'
+import { toEasternTime, formatInEasternTime } from '@/lib/utils/dates'
 
 interface TransactionData {
   _id: string
@@ -137,13 +138,8 @@ export function TransactionsList() {
 
   const groupedTransactions = useMemo(() => {
     return transactions.reduce((acc: GroupedTransactions, transaction) => {
-      const transactionDate = new Date(transaction.date)
-      const dateKey = transactionDate.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        timeZone: 'America/New_York'
-      })
+      const transactionDate = toEasternTime(transaction.date)
+      const dateKey = formatInEasternTime(transactionDate, 'MMMM d, yyyy')
 
       if (!acc[dateKey]) {
         acc[dateKey] = {
@@ -277,7 +273,7 @@ export function TransactionsList() {
           <span className="ml-2">{item.name}</span>
           {item.variationName && <span className="ml-1">({item.variationName})</span>}
           <span className="ml-2 text-gray-500">
-            (${(item.grossSalesMoney.amount / 100).toFixed(2)})
+            (${((item.grossSalesMoney?.amount ?? item.price * 100) / 100).toFixed(2)})
           </span>
         </div>
       ));
@@ -337,7 +333,7 @@ export function TransactionsList() {
   };
 
   const handleQuickSelect = (range: string) => {
-    const today = new Date()
+    const today = toEasternTime(new Date())
     
     switch (range) {
       case 'today':
@@ -370,7 +366,7 @@ export function TransactionsList() {
 
   const getActiveRange = () => {
     if (!startDate || !endDate) return null
-    const today = new Date()
+    const today = toEasternTime(new Date())
     const start = startOfDay(startDate)
     const end = startOfDay(endDate)
 

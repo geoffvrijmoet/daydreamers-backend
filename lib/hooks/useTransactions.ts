@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Transaction } from '@/types'
 import { startOfDay, endOfDay } from 'date-fns'
 import { logger } from '@/lib/utils/logger'
+import { fromEasternTime } from '@/lib/utils/dates'
 
 interface UseTransactionsOptions {
   startDate?: string;
@@ -29,12 +30,12 @@ export function useTransactions(options?: UseTransactionsOptions): UseTransactio
       
       if (options?.startDate) {
         const start = startOfDay(new Date(options.startDate));
-        queryParams.set('startDate', start.toISOString());
+        queryParams.set('startDate', fromEasternTime(start));
       }
       
       if (options?.endDate) {
         const end = endOfDay(new Date(options.endDate));
-        queryParams.set('endDate', end.toISOString());
+        queryParams.set('endDate', fromEasternTime(end));
       }
       
       const response = await fetch(`/api/transactions/combined?${queryParams.toString()}`);
