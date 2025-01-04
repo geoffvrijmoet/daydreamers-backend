@@ -45,7 +45,7 @@ export function SalesCalendar() {
         <div className="absolute inset-0 bg-gradient-to-br from-glass-primary to-glass-secondary rounded-xl" />
         <div className="relative">
           <h2 className="text-lg font-medium text-primary-900 mb-4">Sales Calendar</h2>
-          <p className="text-red-600">Error: {error.message}</p>
+          <p className="text-red-600">Error: {typeof error === 'string' ? error : (error as Error).message}</p>
         </div>
       </Card>
     )
