@@ -9,9 +9,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 import { CalendarIcon } from "lucide-react"
-import { addDays, subDays, startOfYear, startOfDay } from 'date-fns'
+import { subDays, startOfYear, startOfDay } from 'date-fns'
 
-type Transaction = {
+interface TransactionData {
+  _id: string
   id: string
   description: string
   amount: number
@@ -26,9 +27,31 @@ type Transaction = {
     unitPrice: number
     totalPrice: number
   }>
+  lineItems?: Array<{
+    name: string
+    quantity: number
+    price: number
+    grossSalesMoney: {
+      amount: number
+    }
+    variationName?: string
+  }>
+  line_items?: Array<{
+    title: string
+    quantity: number
+    price: string
+  }>
   productsTotal?: number
+  taxAmount: number
+  totalAmount: number
   tip?: number
   discount?: number
+  status: string
+  voidReason?: string
+  voidedAt?: string
+  supplier?: string
+  supplierOrderNumber?: string
+  notes?: string
 }
 
 type GroupedTransactions = {
@@ -66,7 +89,7 @@ export function TransactionsList() {
     endDate: endDate?.toISOString()
   })
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
+  const [editingTransaction, setEditingTransaction] = useState<TransactionData | null>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -86,28 +109,27 @@ export function TransactionsList() {
     })
   }, [transactions])
 
-  const calculateTaxDetails = (transaction: Transaction) => {
+  const calculateTaxDetails = (transaction: Partial<TransactionData>) => {
     const taxRate = 0.08875;
     
     // If this is a manual transaction with products
     if (transaction.source === 'manual' && transaction.productsTotal !== undefined) {
       // For discounts, use the actual amount paid (minus any tip)
-      const baseAmount = transaction.amount - (transaction.tip || 0);
+      const baseAmount = (transaction.amount ?? 0) - (transaction.tip ?? 0);
       const preTaxAmount = baseAmount / (1 + taxRate);
       const taxAmount = baseAmount - preTaxAmount;
       
       return {
-        preTaxAmount,
         taxAmount,
         taxRate: taxRate * 100
       };
     }
     
     // For non-manual transactions or those without products, use original calculation
-    const preTaxAmount = transaction.amount / (1 + taxRate);
-    const taxAmount = transaction.amount - preTaxAmount;
+    const baseAmount = transaction.amount ?? 0;
+    const preTaxAmount = baseAmount / (1 + taxRate);
+    const taxAmount = baseAmount - preTaxAmount;
     return {
-      preTaxAmount,
       taxAmount,
       taxRate: taxRate * 100
     };
@@ -132,11 +154,11 @@ export function TransactionsList() {
         }
       }
 
-      // Calculate tax for this transaction
-      const { taxAmount } = calculateTaxDetails(transaction);
+      const typedTransaction = transaction as unknown as TransactionData;
+      const { taxAmount } = calculateTaxDetails(typedTransaction);
 
-      acc[dateKey].transactions.push(transaction)
-      acc[dateKey].totalAmount += transaction.amount
+      acc[dateKey].transactions.push(typedTransaction)
+      acc[dateKey].totalAmount += typedTransaction.amount
       acc[dateKey].totalTax += taxAmount
       acc[dateKey].count += 1
 
@@ -144,18 +166,9 @@ export function TransactionsList() {
     }, {})
   }, [transactions])
 
-  const handleEdit = (transaction: Transaction) => {
-    setEditingId(transaction.id)
-    setEditingTransaction({
-      id: transaction.id,
-      description: transaction.description,
-      amount: transaction.amount,
-      type: transaction.type,
-      customer: transaction.customer,
-      paymentMethod: transaction.paymentMethod,
-      date: transaction.date,
-      products: transaction.products
-    })
+  const handleEdit = (transaction: TransactionData) => {
+    setEditingId(transaction._id)
+    setEditingTransaction(transaction)
   }
 
   const handleSave = async () => {
@@ -218,18 +231,23 @@ export function TransactionsList() {
     });
   };
 
-  const renderProducts = (transaction: Transaction) => {
+  const formatSource = (source: string | undefined) => {
+    if (!source) return '';
+    return source.charAt(0).toUpperCase() + source.slice(1);
+  }
+
+  const renderProducts = (transaction: TransactionData) => {
     if (!transaction) return null;
 
-    if (transaction.source === 'manual' && transaction.products?.length > 0) {
+    if (transaction.source === 'manual' && transaction.products && transaction.products.length > 0) {
       return transaction.products.map((product, idx) => (
         <div key={idx} className="flex items-center">
-          {editingId === transaction.id ? (
+          {editingId === transaction._id ? (
             <div className="flex items-center gap-1">
               <input
                 type="number"
                 min="1"
-                value={editingTransaction?.products?.[idx]?.quantity || product.quantity}
+                value={editingTransaction?.products?.[idx]?.quantity ?? product.quantity}
                 onChange={(e) => {
                   const newQuantity = parseInt(e.target.value) || 1;
                   if (newQuantity < 1) return;
@@ -244,16 +262,16 @@ export function TransactionsList() {
           )}
           <span className="ml-2">{product.name}</span>
           <span className="ml-2 text-gray-500">
-            (${(editingId === transaction.id ? 
-              editingTransaction?.products?.[idx]?.totalPrice : 
-              product.totalPrice).toFixed(2)})
+            (${(editingId === transaction._id && editingTransaction?.products?.[idx]?.totalPrice 
+              ? editingTransaction.products[idx].totalPrice 
+              : product.totalPrice).toFixed(2)})
           </span>
         </div>
       ));
     }
 
-    if (transaction.source === 'square' && transaction.lineItems?.length > 0) {
-      return transaction.lineItems.map((item: any, idx: number) => (
+    if (transaction.source === 'square' && transaction.lineItems && transaction.lineItems.length > 0) {
+      return transaction.lineItems.map((item, idx) => (
         <div key={idx} className="flex items-center">
           <span>{item.quantity}x</span>
           <span className="ml-2">{item.name}</span>
@@ -265,8 +283,8 @@ export function TransactionsList() {
       ));
     }
 
-    if (transaction.source === 'shopify' && transaction.line_items?.length > 0) {
-      return transaction.line_items.map((item: any, idx: number) => (
+    if (transaction.source === 'shopify' && transaction.line_items && transaction.line_items.length > 0) {
+      return transaction.line_items.map((item, idx) => (
         <div key={idx} className="flex items-center">
           <span>{item.quantity}x</span>
           <span className="ml-2">{item.title}</span>
@@ -284,8 +302,8 @@ export function TransactionsList() {
     );
   };
 
-  const renderTransactionDetails = (transaction: Transaction) => {
-    const { preTaxAmount, taxAmount, taxRate } = calculateTaxDetails(transaction);
+  const renderTransactionDetails = (transaction: TransactionData) => {
+    const { taxAmount, taxRate } = calculateTaxDetails(transaction);
 
     return (
       <div className="flex-shrink-0 ml-4 px-3 py-2 border border-purple-light bg-purple-pastel/50 rounded">
@@ -378,6 +396,27 @@ export function TransactionsList() {
   }
 
   const activeRange = getActiveRange()
+
+  const handleVoidTransaction = async (transaction: TransactionData) => {
+    if (!confirm('Are you sure you want to void this transaction? This will exclude it from revenue calculations.')) {
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/transactions/${transaction._id}/void`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to void transaction')
+      }
+
+      refreshTransactions()
+    } catch (error) {
+      console.error('Error voiding transaction:', error)
+    }
+  }
 
   return (
     <Card>
@@ -521,110 +560,130 @@ export function TransactionsList() {
             .sort(([dateA], [dateB]) => 
               new Date(dateB).getTime() - new Date(dateA).getTime()
             )
-            .map(([date, { transactions, totalAmount, totalTax, count }]) => (
+            .map(([date, { transactions: dayTransactions }]) => (
               <div key={date} className="space-y-2">
                 <div className="border-b border-gray-200 pb-2">
                   <div className="flex justify-between">
                     <h3 className="text-sm">{date}</h3>
                     <span className="text-sm text-gray-600">
-                      {count} transaction{count !== 1 ? 's' : ''}
+                      {dayTransactions.length} transaction{dayTransactions.length !== 1 ? 's' : ''}
                     </span>
                   </div>
                   <div className="text-sm text-gray-600 mt-1">
-                    <span className="mr-4">Total: ${totalAmount.toFixed(2)}</span>
-                    <span>Tax: ${totalTax.toFixed(2)}</span>
+                    <span className="mr-4">Total: ${(dayTransactions.reduce((sum, t) => sum + t.amount, 0)).toFixed(2)}</span>
+                    <span>Tax: ${(dayTransactions.reduce((sum, t) => sum + calculateTaxDetails(t).taxAmount, 0)).toFixed(2)}</span>
                   </div>
                 </div>
                 
                 <div className="space-y-2">
-                  {transactions.map((transaction) => (
-                    <div 
-                      key={transaction.id} 
-                      className="p-4 border border-gray-200 rounded"
-                    >
-                      <div className="flex gap-4">
-                        <div className="flex-grow">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="text-base font-bold text-purple-dark">
-                              ${transaction.amount.toFixed(2)}
-                            </span>
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-purple-pastel text-purple-dark uppercase">
-                              {transaction.source?.charAt(0).toUpperCase() + transaction.source?.slice(1)}
-                            </span>
-                            {transaction.source === 'manual' && (
-                              <div className="flex gap-2">
-                                {editingId === transaction.id ? (
+                  {dayTransactions.map((transaction) => {
+                    const typedTransaction = transaction as unknown as TransactionData;
+                    return (
+                      <div 
+                        key={typedTransaction._id} 
+                        className="p-4 border border-gray-200 rounded"
+                      >
+                        <div className="flex gap-4">
+                          <div className="flex-grow">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-base font-bold text-purple-dark">
+                                ${typedTransaction.amount.toFixed(2)}
+                              </span>
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-purple-pastel text-purple-dark uppercase">
+                                {formatSource(typedTransaction.source)}
+                              </span>
+                              {typedTransaction.status === 'void' && (
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-600">
+                                  VOID
+                                </span>
+                              )}
+                              <div className="flex gap-2 ml-auto">
+                                {typedTransaction.source === 'manual' && (
                                   <>
-                                    <button
-                                      onClick={handleSave}
-                                      disabled={saving}
-                                      className="text-xs text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
-                                    >
-                                      {saving ? 'Saving...' : 'Save'}
-                                    </button>
-                                    <button
-                                      onClick={handleCancel}
-                                      className="text-xs text-gray-600 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                                    >
-                                      Cancel
-                                    </button>
+                                    {editingId === typedTransaction._id ? (
+                                      <>
+                                        <button
+                                          onClick={handleSave}
+                                          disabled={saving}
+                                          className="text-xs text-green-600 hover:text-green-700"
+                                        >
+                                          {saving ? 'Saving...' : 'Save'}
+                                        </button>
+                                        <button
+                                          onClick={handleCancel}
+                                          className="text-xs text-gray-600 hover:text-gray-700"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleEdit(typedTransaction)}
+                                        className="text-xs text-blue-600 hover:text-blue-700"
+                                      >
+                                        Edit
+                                      </button>
+                                    )}
                                   </>
-                                ) : (
-                                  <button
-                                    onClick={() => handleEdit(transaction)}
-                                    className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                )}
+                                {typedTransaction.status !== 'void' && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleVoidTransaction(typedTransaction)}
+                                    className="text-xs text-red-600 hover:text-red-700"
                                   >
-                                    Edit
-                                  </button>
+                                    Void
+                                  </Button>
                                 )}
                               </div>
-                            )}
+                            </div>
+
+                            <div className="text-xs space-y-0.5">
+                              {renderProducts(typedTransaction)}
+                            </div>
+
+                            <div className="flex flex-wrap gap-x-3 text-xs text-gray-600 dark:text-gray-400 mt-2">
+                              {typedTransaction.customer && (
+                                <span>
+                                  Customer: {typedTransaction.customer}
+                                </span>
+                              )}
+                              {typedTransaction.paymentMethod && (
+                                <span>
+                                  Via: {typedTransaction.paymentMethod}
+                                </span>
+                              )}
+                            </div>
                           </div>
 
-                          <div className="text-xs space-y-0.5">
-                            {renderProducts(transaction)}
+                          {renderTransactionDetails(typedTransaction)}
+                        </div>
+                        <div className="text-sm">
+                          <div className="flex justify-between">
+                            <span>Products Total:</span>
+                            <span>${typedTransaction.productsTotal?.toFixed(2)}</span>
                           </div>
-
-                          <div className="flex flex-wrap gap-x-3 text-xs text-gray-600 dark:text-gray-400 mt-2">
-                            {transaction.customer && (
-                              <span>
-                                Customer: {transaction.customer}
-                              </span>
-                            )}
-                            {transaction.paymentMethod && (
-                              <span>
-                                Via: {transaction.paymentMethod}
-                              </span>
-                            )}
+                          {typedTransaction.tip && (
+                            <div className="flex justify-between text-green-600">
+                              <span>Tip:</span>
+                              <span>+${typedTransaction.tip.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {typedTransaction.discount && (
+                            <div className="flex justify-between text-red-600">
+                              <span>Discount:</span>
+                              <span>-${typedTransaction.discount.toFixed(2)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between font-medium">
+                            <span>Final Amount:</span>
+                            <span>${typedTransaction.amount.toFixed(2)}</span>
                           </div>
                         </div>
-
-                        {renderTransactionDetails(transaction)}
                       </div>
-                      <div className="text-sm">
-                        <div className="flex justify-between">
-                          <span>Products Total:</span>
-                          <span>${transaction.productsTotal?.toFixed(2)}</span>
-                        </div>
-                        {transaction.tip && (
-                          <div className="flex justify-between text-green-600">
-                            <span>Tip:</span>
-                            <span>+${transaction.tip.toFixed(2)}</span>
-                          </div>
-                        )}
-                        {transaction.discount && (
-                          <div className="flex justify-between text-red-600">
-                            <span>Discount:</span>
-                            <span>-${transaction.discount.toFixed(2)}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between font-medium">
-                          <span>Final Amount:</span>
-                          <span>${transaction.amount.toFixed(2)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}

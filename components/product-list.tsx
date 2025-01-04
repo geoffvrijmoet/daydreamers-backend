@@ -66,8 +66,6 @@ function CostAnalysis({ product }: { product: Product }) {
     ? (product.lastPurchasePrice - product.costHistory[1].unitPrice) / product.costHistory[1].unitPrice * 100
     : 0
 
-  const profitMargin = calculateProfitMargin(product.retailPrice, averageCost)
-  const profitPerUnit = calculateProfitPerUnit(product.retailPrice, averageCost)
   const preTaxPrice = getPreTaxPrice(product.retailPrice)
 
   return (
@@ -105,7 +103,6 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
   const [sortBy, setSortBy] = useState<'name' | 'profit' | 'stock'>('name')
   const [filterLowStock, setFilterLowStock] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
-  const [deletingProduct, setDeletingProduct] = useState<string | null>(null)
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
   const [showBulkDelete, setShowBulkDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -113,25 +110,6 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
   useEffect(() => {
     console.log('ProductList received products:', products)
   }, [products])
-
-  async function handleDelete(productId: string) {
-    try {
-      const response = await fetch(`/api/products/${productId}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' }
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to delete product')
-      }
-
-      onUpdate() // Refresh product list
-    } catch (err) {
-      console.error('Delete error:', err)
-    } finally {
-      setDeletingProduct(null)
-    }
-  }
 
   async function handleBulkDelete() {
     try {
@@ -189,6 +167,11 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
 
   return (
     <div className="space-y-4">
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded">
+          <p className="text-red-600">{error}</p>
+        </div>
+      )}
       {/* Controls */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex gap-4">
@@ -337,7 +320,10 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
               {/* Delete Button */}
               <div className="mt-4 flex justify-end space-x-2">
                 <button
-                  onClick={() => setDeletingProduct(product.id)}
+                  onClick={() => {
+                    setSelectedProducts([product.id])
+                    setShowBulkDelete(true)
+                  }}
                   className="text-sm text-red-600 hover:text-red-700"
                 >
                   Delete

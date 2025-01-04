@@ -10,9 +10,24 @@ import { cn } from '@/lib/utils'
 import { CalendarIcon } from 'lucide-react'
 import { startOfDay, endOfDay } from 'date-fns'
 
+interface SyncResult {
+  square: {
+    details: Array<{
+      action: string;
+      id: string;
+    }>;
+  };
+  shopify: {
+    details: Array<{
+      action: string;
+      id: string;
+    }>;
+  };
+}
+
 export function SyncButton() {
   const { syncTransactions, syncing, error } = useSyncTransactions()
-  const [lastSyncResult, setLastSyncResult] = useState<any>(null)
+  const [lastSyncResult, setLastSyncResult] = useState<SyncResult | null>(null)
   const [startDate, setStartDate] = useState<Date>()
   const [endDate, setEndDate] = useState<Date>()
 
@@ -94,8 +109,8 @@ export function SyncButton() {
 
       {lastSyncResult && (
         <div className="text-xs space-y-1">
-          <p>Square: Created {lastSyncResult.square.details.filter((d: any) => d.action === 'created').length} transactions</p>
-          <p>Shopify: Created {lastSyncResult.shopify.details.filter((d: any) => d.action === 'created').length} transactions</p>
+          <p>Square: Created {lastSyncResult.square.details.filter((d) => d.action === 'created').length} transactions</p>
+          <p>Shopify: Created {lastSyncResult.shopify.details.filter((d) => d.action === 'created').length} transactions</p>
         </div>
       )}
     </div>

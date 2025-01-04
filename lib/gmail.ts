@@ -1,7 +1,6 @@
 import { google } from 'googleapis'
 import { OAuth2Client } from 'google-auth-library'
 import { EmailTransaction, GmailCredentials } from '@/types'
-import { gmail_v1 } from 'googleapis/build/src/apis/gmail/v1'
 
 const GMAIL_CREDENTIALS = {
   client_id: process.env.GMAIL_CLIENT_ID,
@@ -50,7 +49,7 @@ export class GmailService {
     }
   }
 
-  async fetchAmexEmails(since: Date = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)) {
+  async fetchAmexEmails() {
     const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client })
     
     try {
@@ -77,7 +76,7 @@ export class GmailService {
           })
 
           const headers = email.data.payload?.headers
-          const subject = headers?.find(h => h.name.toLowerCase() === 'subject')?.value
+          const subject = headers?.find(header => header.name?.toLowerCase() === 'subject')?.value
 
           if (!subject?.includes("Large Purchase Approved")) {
             continue
@@ -111,15 +110,16 @@ export class GmailService {
             type: 'purchase'
           })
 
-        } catch (error) {
+        } catch {
           continue
         }
       }
 
       return transactions
 
-    } catch (error) {
-      throw error
+    } catch (err) {
+      console.error('Error fetching Amex emails:', err)
+      throw err
     }
   }
 

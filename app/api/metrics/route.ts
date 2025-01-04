@@ -1,7 +1,71 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 
-export async function GET() {
+interface MetricsResponse {
+  mtd: {
+    totalRevenue: number;
+    totalSales: number;
+    totalTaxCollected: number;
+    totalProfit: number;
+    profitMargin: number;
+    totalExpenses: number;
+  };
+  ytd: {
+    totalRevenue: number;
+    totalSales: number;
+    totalTaxCollected: number;
+    totalProfit: number;
+    profitMargin: number;
+    totalExpenses: number;
+  };
+  lifetime: {
+    totalRevenue: number;
+    totalSales: number;
+    totalTaxCollected: number;
+    totalProfit: number;
+    profitMargin: number;
+    totalExpenses: number;
+  };
+  trends: {
+    revenueTrend: number;
+    salesTrend: number;
+    expensesTrend: number;
+  };
+}
+
+interface Transaction {
+  type: 'sale' | 'purchase';
+  status: string;
+  preTaxAmount?: number;
+  amount: number;
+  taxAmount?: number;
+}
+
+function calculatePeriodMetrics(transactions: Transaction[]) {
+  // Filter out void transactions
+  const activeTransactions = transactions.filter(t => t.status !== 'void')
+  
+  const sales = activeTransactions.filter(t => t.type === 'sale')
+  const totalSales = sales.reduce((sum, t) => sum + (t.preTaxAmount || t.amount), 0)
+  const totalTaxCollected = sales.reduce((sum, t) => sum + (t.taxAmount || 0), 0)
+  const totalRevenue = totalSales + totalTaxCollected
+  const expenses = activeTransactions
+    .filter(t => t.type === 'purchase')
+    .reduce((sum, t) => sum + t.amount, 0)
+  const totalProfit = totalSales - expenses
+  const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0
+
+  return {
+    totalRevenue,
+    totalSales,
+    totalTaxCollected,
+    totalProfit,
+    profitMargin,
+    totalExpenses: expenses
+  }
+}
+
+export async function GET(): Promise<NextResponse<MetricsResponse | { error: string }>> {
   try {
     const db = await getDb()
     
@@ -51,27 +115,6 @@ export async function GET() {
       .toArray()
 
     // Calculate metrics for each period
-    function calculatePeriodMetrics(transactions: any[]) {
-      const sales = transactions.filter(t => t.type === 'sale')
-      const totalSales = sales.reduce((sum, t) => sum + (t.preTaxAmount || t.amount), 0)
-      const totalTaxCollected = sales.reduce((sum, t) => sum + (t.taxAmount || 0), 0)
-      const totalRevenue = totalSales + totalTaxCollected
-      const expenses = transactions
-        .filter(t => t.type === 'purchase')
-        .reduce((sum, t) => sum + t.amount, 0)
-      const totalProfit = totalSales - expenses
-      const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0
-
-      return {
-        totalRevenue,
-        totalSales,
-        totalTaxCollected,
-        totalProfit,
-        profitMargin,
-        totalExpenses: expenses
-      }
-    }
-
     const mtd = calculatePeriodMetrics(mtdTransactions)
     const ytd = calculatePeriodMetrics(ytdTransactions)
     const lifetime = calculatePeriodMetrics(allTransactions)

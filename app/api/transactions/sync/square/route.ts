@@ -73,8 +73,8 @@ export async function POST(request: Request) {
           ? `Square: ${order.lineItems[0].name}${order.lineItems.length > 1 ? ` (+${order.lineItems.length - 1} more)` : ''}`
           : `Square Order ${order.id}`,
         source: 'square',
-        lineItems: order.lineItems,
-        customer: order.customerId,
+        lineItems: order.lineItems || [],
+        customer: order.customerId || undefined,
         paymentMethod: order.tenders?.[0]?.type,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()

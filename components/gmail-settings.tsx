@@ -11,7 +11,6 @@ export function GmailSettings() {
   async function handleConnect() {
     try {
       setAuthError(null)
-      // Get auth URL
       const response = await fetch('/api/gmail/auth')
       const { authUrl } = await response.json()
 
@@ -46,7 +45,7 @@ export function GmailSettings() {
           }
         }
       })
-    } catch (error) {
+    } catch {
       setAuthError('Failed to start Gmail authentication')
     }
   }
@@ -55,8 +54,23 @@ export function GmailSettings() {
     try {
       await fetch('/api/gmail/credentials', { method: 'DELETE' })
       await checkStatus() // Refresh the connection status
-    } catch (error) {
+    } catch {
       setAuthError('Failed to disconnect Gmail')
+    }
+  }
+
+  const handleFetchAmexTransactions = async () => {
+    try {
+      const response = await fetch('/api/gmail/amex/fetch', {
+        method: 'GET',
+      })
+      if (!response.ok) {
+        throw new Error('Failed to fetch Amex transactions')
+      }
+      const data = await response.json()
+      console.log('Fetched Amex transactions:', data)
+    } catch (err) {
+      console.error('Error fetching Amex transactions:', err)
     }
   }
 
@@ -82,12 +96,20 @@ export function GmailSettings() {
             </span>
             <span className="text-sm text-gray-900 dark:text-white">Connected to Gmail</span>
           </div>
-          <button
-            onClick={handleDisconnect}
-            className="text-sm text-red-600 hover:text-red-800"
-          >
-            Disconnect Gmail
-          </button>
+          <div className="space-y-2">
+            <button
+              onClick={handleDisconnect}
+              className="text-sm text-red-600 hover:text-red-800"
+            >
+              Disconnect Gmail
+            </button>
+            <button
+              onClick={handleFetchAmexTransactions}
+              className="block text-sm text-blue-600 hover:text-blue-800"
+            >
+              Fetch Amex Transactions
+            </button>
+          </div>
         </div>
       ) : (
         <button

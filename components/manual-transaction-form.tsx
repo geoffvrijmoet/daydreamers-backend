@@ -4,14 +4,8 @@ import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
-import { 
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Product } from '@/types'
+import { parseISO } from 'date-fns'
 
 type SelectedProduct = {
   productId: string
@@ -22,12 +16,17 @@ type SelectedProduct = {
 }
 
 export function ManualTransactionForm() {
+  const [isOpen, setIsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [selectedProducts, setSelectedProducts] = useState<SelectedProduct[]>([])
   const [customer, setCustomer] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('')
   const [manualTotal, setManualTotal] = useState<number | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [shippingAmount, setShippingAmount] = useState<number>(0)
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
 
   // Fetch available products
   useEffect(() => {
@@ -44,10 +43,13 @@ export function ManualTransactionForm() {
     fetchProducts()
   }, [])
 
-  const handleAddProduct = (productId: string) => {
-    const product = products.find(p => p.id === productId)
-    if (!product) return
+  // Filter products based on search query
+  const filteredProducts = products.filter(product => 
+    product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    product.sku.toLowerCase().includes(searchQuery.toLowerCase())
+  )
 
+  const handleProductSelect = (product: Product) => {
     setSelectedProducts(prev => [...prev, {
       productId: product.id,
       name: product.name,
@@ -55,7 +57,9 @@ export function ManualTransactionForm() {
       unitPrice: product.retailPrice,
       totalPrice: product.retailPrice
     }])
-    setManualTotal(null) // Reset manual total when products change
+    setManualTotal(null)
+    setSearchQuery('')
+    setShowSuggestions(false)
   }
 
   const handleQuantityChange = (index: number, quantity: number) => {
@@ -78,12 +82,15 @@ export function ManualTransactionForm() {
   }
 
   const calculateTotals = () => {
-    const subtotal = selectedProducts.reduce((sum, item) => sum + item.totalPrice, 0)
+    const productsSubtotal = selectedProducts.reduce((sum, item) => sum + item.totalPrice, 0)
+    const subtotal = productsSubtotal + shippingAmount // Shipping is taxable
     const finalTotal = manualTotal ?? subtotal
     const adjustment = finalTotal - subtotal // This will be positive for tips, negative for discounts
 
     return { 
-      subtotal, 
+      productsSubtotal,
+      shipping: shippingAmount,
+      subtotal, // This is the taxable amount (products + shipping)
       finalTotal,
       tip: adjustment > 0 ? adjustment : 0,
       discount: adjustment < 0 ? -adjustment : 0
@@ -100,15 +107,16 @@ export function ManualTransactionForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'sale',
+          date,
           amount: finalTotal,
-          productsTotal: subtotal,
+          productsTotal: subtotal - shippingAmount,
+          shipping: shippingAmount,
           products: selectedProducts,
           tip: tip || undefined,
           discount: discount || undefined,
           customer,
           paymentMethod,
-          source: 'manual',
-          date: new Date().toISOString()
+          source: 'manual'
         })
       })
 
@@ -119,6 +127,7 @@ export function ManualTransactionForm() {
       setManualTotal(null)
       setCustomer('')
       setPaymentMethod('')
+      setShippingAmount(0) // Reset shipping
 
     } catch (error) {
       console.error('Error creating transaction:', error)
@@ -127,26 +136,80 @@ export function ManualTransactionForm() {
     }
   }
 
-  const { subtotal, finalTotal, tip, discount } = calculateTotals()
+  const { productsSubtotal, subtotal, finalTotal, tip, discount } = calculateTotals()
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
+      >
+        Add Sale
+      </button>
+    )
+  }
 
   return (
     <Card className="p-4">
-      <h3 className="font-medium mb-4">Add Manual Sale</h3>
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="font-medium">Add Manual Sale</h3>
+        <button
+          onClick={() => setIsOpen(false)}
+          className="text-gray-400 hover:text-gray-500"
+        >
+          Cancel
+        </button>
+      </div>
+
+      {/* Add date selector before product selection */}
+      <div className="mb-4">
+        <label className="text-sm mb-1 block">Date</label>
+        <Input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="w-full"
+        />
+      </div>
 
       {/* Product Selection */}
       <div className="space-y-4 mb-4">
-        <Select onValueChange={handleAddProduct}>
-          <SelectTrigger>
-            <SelectValue placeholder="Add product..." />
-          </SelectTrigger>
-          <SelectContent>
-            {products.map(product => (
-              <SelectItem key={product.id} value={product.id}>
-                {product.name} - ${product.retailPrice.toFixed(2)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="relative">
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={e => {
+              setSearchQuery(e.target.value)
+              setShowSuggestions(true)
+            }}
+            onFocus={() => setShowSuggestions(true)}
+            placeholder="Search for a product..."
+            className="w-full"
+          />
+          {showSuggestions && searchQuery && (
+            <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700 max-h-60 overflow-auto">
+              {filteredProducts.length > 0 ? (
+                filteredProducts.map(product => (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => handleProductSelect(product)}
+                    className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <div className="text-sm font-medium">{product.name}</div>
+                    <div className="text-xs text-gray-500">
+                      SKU: {product.sku} - ${product.retailPrice.toFixed(2)}
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="px-4 py-2 text-sm text-gray-500">
+                  No products found
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Selected Products List */}
         <div className="space-y-2">
@@ -186,6 +249,19 @@ export function ManualTransactionForm() {
           onChange={(e) => setPaymentMethod(e.target.value)}
         />
         <div>
+          <label className="text-sm mb-1 block">Shipping Amount ($)</label>
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            value={shippingAmount}
+            onChange={(e) => {
+              setShippingAmount(parseFloat(e.target.value) || 0)
+              setManualTotal(null) // Reset manual total when shipping changes
+            }}
+          />
+        </div>
+        <div>
           <label className="text-sm mb-1 block">Total Amount ($)</label>
           <Input
             type="number"
@@ -202,6 +278,16 @@ export function ManualTransactionForm() {
       <div className="space-y-1 mb-4 text-sm">
         <div className="flex justify-between">
           <span>Products Subtotal:</span>
+          <span>${productsSubtotal.toFixed(2)}</span>
+        </div>
+        {shippingAmount > 0 && (
+          <div className="flex justify-between">
+            <span>Shipping:</span>
+            <span>+${shippingAmount.toFixed(2)}</span>
+          </div>
+        )}
+        <div className="flex justify-between font-medium">
+          <span>Taxable Subtotal:</span>
           <span>${subtotal.toFixed(2)}</span>
         </div>
         {tip > 0 && (

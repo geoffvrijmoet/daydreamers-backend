@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { gmailService } from '@/lib/gmail'
 import { getDb } from '@/lib/db'
 
-export async function POST(request: Request) {
+export async function GET() {
   try {
     const db = await getDb()
     const credentials = await db.collection('credentials').findOne({ type: 'gmail' })
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       .project({ emailId: 1 })
       .toArray()
     
-    const existingEmailIds = new Set(existingTransactions.map(t => t.emailId))
+    const existingEmailIds = new Set(existingTransactions.map((t: { emailId: string }) => t.emailId))
 
     // Fetch new transactions from Gmail
     gmailService.setCredentials(credentials.data)

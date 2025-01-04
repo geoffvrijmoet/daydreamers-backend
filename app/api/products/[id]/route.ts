@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 import { ObjectId } from 'mongodb'
-import { squareClient } from '@/lib/square'
 
 export async function DELETE(
   request: Request,

@@ -22,6 +22,10 @@ export type BaseTransaction = {
   discount?: number
   createdAt?: string
   updatedAt?: string
+  shipping?: number
+  status?: 'active' | 'void'  // default to 'active' if not specified
+  voidReason?: string
+  voidedAt?: string
 }
 
 export interface Transaction extends BaseTransaction {

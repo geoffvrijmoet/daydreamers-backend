@@ -1,65 +1,31 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
-    const body = await req.json()
-    console.log('Received transaction body:', body)
-    
-    // Generate a unique ID combining timestamp and random string
-    const timestamp = Date.now()
-    const random = Math.random().toString(36).substring(2, 10)
-    const uniqueId = `manual_${timestamp}_${random}`
-    
-    // Convert date to Eastern Time
-    const date = new Date(body.date)
-    const nyDate = new Date(date.toLocaleString('en-US', {
-      timeZone: 'America/New_York'
-    }))
-    
-    // Calculate tip/discount
-    const productsTotal = body.products?.reduce((sum: number, product: any) => 
-      sum + (parseFloat(product.totalPrice) || 0), 0) || 0
-    const difference = parseFloat(body.amount) - productsTotal
-    const tip = difference > 0 ? difference : undefined
-    const discount = difference < 0 ? Math.abs(difference) : undefined
-    
     const db = await getDb()
-    const transaction = await db.collection('transactions').insertOne({
-      id: uniqueId,
-      date: nyDate.toISOString().replace('Z', '-05:00'),
-      amount: parseFloat(body.amount),
-      type: body.type,
-      paymentMethod: body.paymentMethod,
-      customer: body.customer,
-      vendor: body.vendor,
-      supplierOrderNumber: body.supplierOrderNumber,
-      products: body.products?.map((product: any) => ({
-        productId: product.productId,
-        name: product.name,
-        quantity: parseInt(product.quantity),
-        unitPrice: parseFloat(product.unitPrice),
-        totalPrice: parseFloat(product.totalPrice)
-      })) || [],
-      productsTotal,
-      tip,
-      discount,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      source: "manual",
-    })
-    
-    return NextResponse.json({ 
-      id: uniqueId,
-      ...body,
-      productsTotal,
-      tip,
-      discount
-    })
+    const data = await request.json()
+
+    // Calculate tax on products + shipping
+    const taxRate = 0.08875
+    const taxableAmount = (data.productsTotal || 0) + (data.shipping || 0)
+    const taxAmount = taxableAmount * taxRate
+
+    const transaction = {
+      ...data,
+      preTaxAmount: taxableAmount,
+      taxAmount,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+
+    await db.collection('transactions').insertOne(transaction)
+
+    return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Failed to create transaction:', error)
+    console.error('Error creating manual transaction:', error)
     return NextResponse.json(
-      { error: 'Failed to create transaction', details: error instanceof Error ? error.message : 'Unknown error' },
+      { error: error instanceof Error ? error.message : 'Failed to create transaction' },
       { status: 500 }
     )
   }
