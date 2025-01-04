@@ -49,11 +49,11 @@ export class GmailService {
     }
   }
 
-  async fetchAmexEmails() {
+  async fetchAmexEmails(since?: Date) {
     const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client })
     
     try {
-      const query = 'from:AmericanExpress@welcome.americanexpress.com'
+      const query = `from:AmericanExpress@welcome.americanexpress.com${since ? ` after:${Math.floor(since.getTime() / 1000)}` : ''}`
       
       const response = await gmail.users.messages.list({
         userId: 'me',

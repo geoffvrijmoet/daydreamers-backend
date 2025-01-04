@@ -15,7 +15,7 @@ export async function GET(request: Request) {
       )
     }
 
-    gmailService.setCredentials(credentials)
+    gmailService.setCredentials(credentials.data)
 
     const { searchParams } = new URL(request.url)
     const since = searchParams.get('since')
