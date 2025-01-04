@@ -1,4 +1,4 @@
-const { getDb } = require('../lib/db')
+import { getDb } from '../lib/db'
 
 async function updateAmexTransactions() {
   const db = await getDb()

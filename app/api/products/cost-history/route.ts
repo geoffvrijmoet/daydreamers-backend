@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
-import { CostHistoryEntry } from '@/types'
+import { CostHistoryEntry, Product } from '@/types'
 import { ObjectId } from 'mongodb'
 
 export async function POST(request: Request) {
@@ -19,10 +19,10 @@ export async function POST(request: Request) {
     }
 
     // Update product with new cost history entry and recalculate averages
-    const result = await db.collection('products').findOneAndUpdate(
+    const result = await db.collection<Product>('products').findOneAndUpdate(
       { _id: new ObjectId(productId) },
       {
-        $push: { costHistory: costEntry },
+        $push: { costHistory: { $each: [costEntry] } },
         $inc: {
           totalPurchased: costEntry.quantity,
           totalSpent: costEntry.totalPrice,
