@@ -40,7 +40,7 @@ export async function POST(request: Request) {
         return { action: 'skipped', id: order.id }
       }
 
-      const transaction: Transaction = {
+      const transaction: Omit<Transaction, '_id'> = {
         id: shopifyId,
         date: order.created_at ?? new Date().toISOString(),
         type: 'sale',
@@ -51,7 +51,13 @@ export async function POST(request: Request) {
           ? `Shopify: ${order.line_items[0].title}${order.line_items.length > 1 ? ` (+${order.line_items.length - 1} more)` : ''}`
           : `Shopify Order #${order.order_number}`,
         source: 'shopify',
-        line_items: order.line_items,
+        line_items: order.line_items?.map(item => ({
+          name: item.title,
+          quantity: item.quantity,
+          price: Number(item.price),
+          sku: item.sku,
+          variant_id: item.variant_id?.toString()
+        })),
         customer: `${order.customer?.first_name} ${order.customer?.last_name}`.trim(),
         paymentMethod: order.gateway,
         createdAt: new Date().toISOString(),

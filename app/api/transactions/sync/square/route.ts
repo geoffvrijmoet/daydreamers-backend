@@ -56,7 +56,7 @@ export async function POST(request: Request) {
         return { action: 'skipped', id: order.id }
       }
 
-      const transaction: Transaction = {
+      const transaction: Omit<Transaction, '_id'> = {
         id: squareId,
         date: order.createdAt ?? new Date().toISOString(),
         type: 'sale',
@@ -73,7 +73,12 @@ export async function POST(request: Request) {
           ? `Square: ${order.lineItems[0].name}${order.lineItems.length > 1 ? ` (+${order.lineItems.length - 1} more)` : ''}`
           : `Square Order ${order.id}`,
         source: 'square',
-        lineItems: order.lineItems || [],
+        lineItems: order.lineItems?.map(item => ({
+          name: item.name || '',
+          quantity: Number(item.quantity),
+          price: Number(item.basePriceMoney?.amount || 0) / 100,
+          sku: item.catalogObjectId || undefined
+        })) || [],
         customer: order.customerId || undefined,
         paymentMethod: order.tenders?.[0]?.type,
         createdAt: new Date().toISOString(),

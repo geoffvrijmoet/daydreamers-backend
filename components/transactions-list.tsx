@@ -541,7 +541,7 @@ export function TransactionsList() {
       
       {error && (
         <div className="p-4 border border-red-200 rounded mb-4">
-          <p className="text-red-600">Error: {error.message}</p>
+          <p className="text-red-600">Error: {typeof error === 'string' ? error : (error as Error).message}</p>
         </div>
       )}
 

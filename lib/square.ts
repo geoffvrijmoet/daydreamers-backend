@@ -1,4 +1,5 @@
 import { Client, Environment } from 'square'
+import { logger } from './utils/logger'
 
 if (!process.env.SQUARE_ACCESS_TOKEN) {
   throw new Error('SQUARE_ACCESS_TOKEN is not defined')
@@ -14,35 +15,52 @@ export const squareClient = new Client({
   userAgentDetail: 'Daydreamers Pet Supply'
 })
 
-// Enhanced validation function with better error logging
-export async function validateSquareCredentials() {
+interface SquareValidationResult {
+  success: boolean;
+  locationName?: string;
+  error?: string;
+}
+
+export async function validateSquareCredentials(): Promise<SquareValidationResult> {
   try {
-    console.log('Attempting to validate Square credentials...')
-    console.log('Environment:', Environment.Production)
-    console.log('Location ID:', process.env.SQUARE_LOCATION_ID)
-    console.log('Token Preview:', process.env.SQUARE_ACCESS_TOKEN?.substring(0, 6) + '...')
+    logger.info('Validating Square credentials', {
+      environment: Environment.Production,
+      locationId: process.env.SQUARE_LOCATION_ID,
+      tokenPreview: process.env.SQUARE_ACCESS_TOKEN?.substring(0, 6) + '...'
+    });
 
     const { result } = await squareClient.locationsApi.retrieveLocation(
       process.env.SQUARE_LOCATION_ID!
-    )
+    );
     
-    if (result.location) {
-      console.log('Successfully connected to Square location:', result.location.name)
-      return true
+    if (result.location?.name) {
+      logger.info('Successfully connected to Square location', {
+        locationName: result.location.name
+      });
+      return {
+        success: true,
+        locationName: result.location.name
+      };
     }
     
-    console.error('Location not found in response')
-    return false
+    logger.error('Location not found in response');
+    return {
+      success: false,
+      error: 'Location not found in response'
+    };
   } catch (error) {
     if (error instanceof Error) {
-      console.error('Square Validation Error:', {
+      logger.error('Square Validation Error', {
         message: error.message,
         name: error.name,
         stack: error.stack
-      })
+      });
     } else {
-      console.error('Unknown Square Error:', error)
+      logger.error('Unknown Square Error', { error });
     }
-    return false
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred'
+    };
   }
 } 

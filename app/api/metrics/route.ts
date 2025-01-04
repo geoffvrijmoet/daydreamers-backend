@@ -115,10 +115,10 @@ export async function GET(): Promise<NextResponse<MetricsResponse | { error: str
       .toArray()
 
     // Calculate metrics for each period
-    const mtd = calculatePeriodMetrics(mtdTransactions)
-    const ytd = calculatePeriodMetrics(ytdTransactions)
-    const lifetime = calculatePeriodMetrics(allTransactions)
-    const lastMonth = calculatePeriodMetrics(lastMonthTransactions)
+    const mtd = calculatePeriodMetrics(mtdTransactions as unknown as Transaction[])
+    const ytd = calculatePeriodMetrics(ytdTransactions as unknown as Transaction[])
+    const lifetime = calculatePeriodMetrics(allTransactions as unknown as Transaction[])
+    const lastMonth = calculatePeriodMetrics(lastMonthTransactions as unknown as Transaction[])
 
     // Calculate trends
     const revenueTrend = lastMonth.totalRevenue > 0 

@@ -1,47 +1,56 @@
 'use client'
 
-import { Button } from '@/components/ui/button'
-import { Calendar } from '@/components/ui/calendar'
-import { useSyncTransactions } from '@/lib/hooks/useSyncTransactions'
 import { useState } from 'react'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { format } from 'date-fns'
-import { cn } from '@/lib/utils'
+import { startOfDay, endOfDay, format } from 'date-fns'
+import { useSyncTransactions } from '@/lib/hooks/useSyncTransactions'
+import { Button } from './ui/button'
+import { Calendar } from './ui/calendar'
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { CalendarIcon } from 'lucide-react'
-import { startOfDay, endOfDay } from 'date-fns'
-
-interface SyncResult {
-  square: {
-    details: Array<{
-      action: string;
-      id: string;
-    }>;
-  };
-  shopify: {
-    details: Array<{
-      action: string;
-      id: string;
-    }>;
-  };
-}
+import { cn } from '@/lib/utils'
 
 export function SyncButton() {
-  const { syncTransactions, syncing, error } = useSyncTransactions()
-  const [lastSyncResult, setLastSyncResult] = useState<SyncResult | null>(null)
-  const [startDate, setStartDate] = useState<Date>()
-  const [endDate, setEndDate] = useState<Date>()
+  const [startDate, setStartDate] = useState<Date | undefined>(undefined);
+  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [lastSyncResult, setLastSyncResult] = useState<{
+    square: { created: number; skipped: number };
+    shopify: { created: number; skipped: number };
+  } | null>(null);
+  const { syncTransactions, syncing } = useSyncTransactions();
 
   const handleSync = async () => {
+    if (!startDate || !endDate) {
+      setSyncError('Please select both start and end dates');
+      return;
+    }
+
     try {
       const result = await syncTransactions({
-        startDate: startDate ? startOfDay(startDate).toISOString() : undefined,
-        endDate: endDate ? endOfDay(endDate).toISOString() : undefined
-      })
-      setLastSyncResult(result)
+        startDate: startOfDay(startDate).toISOString(),
+        endDate: endOfDay(endDate).toISOString()
+      });
+
+      setLastSyncResult({
+        square: {
+          created: result.square.created || 0,
+          skipped: result.square.skipped || 0
+        },
+        shopify: {
+          created: result.shopify.created || 0,
+          skipped: result.shopify.skipped || 0
+        }
+      });
+      
+      if (result.square.error || result.shopify.error) {
+        setSyncError(result.square.error || result.shopify.error || 'Sync partially failed');
+      } else {
+        setSyncError(null);
+      }
     } catch (err) {
-      console.error('Sync failed:', err)
+      setSyncError(err instanceof Error ? err.message : 'Failed to sync transactions');
     }
-  }
+  };
 
   return (
     <div className="space-y-2">
@@ -101,18 +110,18 @@ export function SyncButton() {
         </Button>
       </div>
 
-      {error && (
+      {syncError && (
         <p className="text-sm text-red-600">
-          {error}
+          {syncError}
         </p>
       )}
 
       {lastSyncResult && (
         <div className="text-xs space-y-1">
-          <p>Square: Created {lastSyncResult.square.details.filter((d) => d.action === 'created').length} transactions</p>
-          <p>Shopify: Created {lastSyncResult.shopify.details.filter((d) => d.action === 'created').length} transactions</p>
+          <p>Square: Created {lastSyncResult.square.created} transactions</p>
+          <p>Shopify: Created {lastSyncResult.shopify.created} transactions</p>
         </div>
       )}
     </div>
-  )
+  );
 } 

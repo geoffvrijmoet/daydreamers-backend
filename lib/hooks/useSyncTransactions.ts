@@ -5,11 +5,24 @@ type SyncOptions = {
   endDate?: string
 }
 
+type SyncResult = {
+  square: {
+    created: number;
+    skipped: number;
+    error?: string;
+  };
+  shopify: {
+    created: number;
+    skipped: number;
+    error?: string;
+  };
+}
+
 export function useSyncTransactions() {
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const syncTransactions = async (options?: SyncOptions) => {
+  const syncTransactions = async (options?: SyncOptions): Promise<SyncResult> => {
     try {
       setSyncing(true)
       setError(null)
@@ -25,7 +38,7 @@ export function useSyncTransactions() {
         { method: 'POST' }
       )
       const squareResult = await squareResponse.json()
-      if (!squareResponse.ok) throw new Error(squareResult.error)
+      if (!squareResponse.ok) throw new Error(squareResult.error || 'Square sync failed')
 
       // Run Shopify sync
       const shopifyResponse = await fetch(
@@ -33,14 +46,23 @@ export function useSyncTransactions() {
         { method: 'POST' }
       )
       const shopifyResult = await shopifyResponse.json()
-      if (!shopifyResponse.ok) throw new Error(shopifyResult.error)
+      if (!shopifyResponse.ok) throw new Error(shopifyResult.error || 'Shopify sync failed')
 
       return {
-        square: squareResult,
-        shopify: shopifyResult
+        square: {
+          created: squareResult.created || 0,
+          skipped: squareResult.skipped || 0,
+          error: squareResult.error
+        },
+        shopify: {
+          created: shopifyResult.created || 0,
+          skipped: shopifyResult.skipped || 0,
+          error: shopifyResult.error
+        }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to sync transactions')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to sync transactions'
+      setError(errorMessage)
       throw err
     } finally {
       setSyncing(false)

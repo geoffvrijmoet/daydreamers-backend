@@ -15,8 +15,8 @@ export type BaseTransaction = {
     unitPrice: number
     totalPrice: number
   }>
-  lineItems?: Array<any> // Square specific
-  line_items?: Array<any> // Shopify specific
+  lineItems?: Array<LineItem> // Square specific
+  line_items?: Array<LineItem> // Shopify specific
   productsTotal?: number
   tip?: number
   discount?: number
@@ -28,8 +28,18 @@ export type BaseTransaction = {
   voidedAt?: string
 }
 
+interface LineItem {
+  name: string;
+  quantity: number;
+  price: number;
+  sku?: string;
+  variant_id?: string;
+}
+
 export interface Transaction extends BaseTransaction {
   _id?: string
+  lineItems?: Array<LineItem>; // Square specific
+  line_items?: Array<LineItem>; // Shopify specific
 }
 
 export type TransactionItem = {

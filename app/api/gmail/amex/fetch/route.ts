@@ -17,7 +17,7 @@ export async function GET() {
       .project({ emailId: 1 })
       .toArray()
     
-    const existingEmailIds = new Set(existingTransactions.map((t: { emailId: string }) => t.emailId))
+    const existingEmailIds = new Set(existingTransactions.map((t) => (t as { emailId: string }).emailId))
 
     // Fetch new transactions from Gmail
     gmailService.setCredentials(credentials.data)

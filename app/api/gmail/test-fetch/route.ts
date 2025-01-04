@@ -1,84 +1,105 @@
-import { google } from 'googleapis'
-import { NextResponse } from 'next/server'
-import { gmailService } from '@/lib/gmail'
-import { getDb } from '@/lib/db'
+import { NextResponse } from 'next/server';
+import { google } from 'googleapis';
+import { getDb } from '@/lib/db';
+import { gmailService } from '@/lib/gmail';
+import { logger } from '@/lib/utils/logger';
+
+interface GmailHeader {
+  name: string;
+  value: string;
+}
+
+interface GmailTestEmail {
+  id: string;
+  subject?: string;
+  from?: string;
+  date?: string;
+  snippet?: string;
+  fullBody?: string;
+}
 
 export async function GET() {
   try {
-    console.log('Starting Gmail API test for Amex Large Transaction emails...')
+    logger.info('Starting Gmail API test for Amex Large Transaction emails');
     
     // Get credentials
-    const db = await getDb()
-    const credentials = await db.collection('credentials').findOne({ type: 'gmail' })
+    const db = await getDb();
+    const credentials = await db.collection('credentials').findOne({ type: 'gmail' });
     
     if (!credentials?.data) {
-      console.log('No Gmail credentials found')
-      return NextResponse.json({ error: 'Gmail not authenticated' }, { status: 401 })
+      logger.warn('No Gmail credentials found');
+      return NextResponse.json(
+        { error: 'Gmail not authenticated' },
+        { status: 401 }
+      );
     }
 
-    // Set credentials
-    gmailService.setCredentials(credentials.data)
-
-    // Test Gmail API access
-    const gmail = google.gmail({ version: 'v1', auth: gmailService.oauth2Client })
+    // Set credentials and get Gmail API instance
+    gmailService.setCredentials(credentials.data);
+    const gmail = google.gmail({ version: 'v1', auth: gmailService.getAuth() });
     
     // First, test basic profile access
-    console.log('Testing profile access...')
-    const profile = await gmail.users.getProfile({ userId: 'me' })
-    console.log('Successfully accessed Gmail profile:', profile.data.emailAddress)
+    logger.info('Testing profile access');
+    const profile = await gmail.users.getProfile({ userId: 'me' });
+    logger.info('Successfully accessed Gmail profile', {
+      email: profile.data.emailAddress
+    });
 
     // Search specifically for Large Transaction Approved emails
-    const query = 'from:AmericanExpress@welcome.americanexpress.com subject:"Large Transaction Approved"'
-    console.log('Using query:', query)
+    const query = 'from:AmericanExpress@welcome.americanexpress.com subject:"Large Transaction Approved"';
+    logger.info('Searching for emails', { query });
 
     const response = await gmail.users.messages.list({
       userId: 'me',
       q: query,
       maxResults: 10
-    })
+    });
 
     if (!response.data.messages) {
-      console.log('No Large Transaction emails found')
-      return NextResponse.json({ message: 'No Large Transaction emails found' })
+      logger.info('No Large Transaction emails found');
+      return NextResponse.json({ message: 'No Large Transaction emails found' });
     }
 
-    console.log(`Found ${response.data.messages.length} Large Transaction emails`)
-    const foundEmails = []
+    logger.info('Found Large Transaction emails', {
+      count: response.data.messages.length
+    });
+
+    const foundEmails: GmailTestEmail[] = [];
 
     // Get details of each email
     for (const message of response.data.messages) {
+      if (!message.id) continue;
+
       const email = await gmail.users.messages.get({
         userId: 'me',
-        id: message.id!,
+        id: message.id,
         format: 'full'
-      })
+      });
 
-      const headers = email.data.payload?.headers
-      const subject = headers?.find(h => h?.name?.toLowerCase() === 'subject')?.value
-      const from = headers?.find(h => h?.name?.toLowerCase() === 'from')?.value
-      const date = headers?.find(h => h?.name?.toLowerCase() === 'date')?.value
+      const headers = email.data.payload?.headers as GmailHeader[] | undefined;
+      const emailDetails: GmailTestEmail = {
+        id: message.id,
+        subject: headers?.find(h => h.name.toLowerCase() === 'subject')?.value,
+        from: headers?.find(h => h.name.toLowerCase() === 'from')?.value,
+        date: headers?.find(h => h.name.toLowerCase() === 'date')?.value,
+        snippet: email.data.snippet || undefined
+      };
 
       // Get the email body
-      const body = email.data.payload?.parts?.[0]?.body?.data || email.data.payload?.body?.data
-      const decodedBody = body ? Buffer.from(body, 'base64').toString('utf-8') : null
+      const body = email.data.payload?.parts?.[0]?.body?.data || email.data.payload?.body?.data;
+      if (body) {
+        emailDetails.fullBody = Buffer.from(body, 'base64').toString('utf-8');
+      }
 
-      foundEmails.push({
+      logger.info('Processed email', {
         id: message.id,
-        subject,
-        from,
-        date,
-        snippet: email.data.snippet,
-        fullBody: decodedBody
-      })
+        subject: emailDetails.subject,
+        from: emailDetails.from,
+        date: emailDetails.date,
+        bodyPreview: emailDetails.fullBody?.substring(0, 100)
+      });
 
-      // Log details for debugging
-      console.log('Email details:', {
-        id: message.id,
-        subject,
-        from,
-        date,
-        bodyPreview: decodedBody?.substring(0, 200)
-      })
+      foundEmails.push(emailDetails);
     }
 
     return NextResponse.json({
@@ -86,13 +107,13 @@ export async function GET() {
       profile: profile.data.emailAddress,
       totalEmails: foundEmails.length,
       emails: foundEmails
-    })
+    });
 
   } catch (error) {
-    console.error('Gmail test error:', error)
+    logger.error('Gmail test error', { error });
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Gmail test failed' },
+      { error: error instanceof Error ? error.message : 'Failed to test Gmail connection' },
       { status: 500 }
-    )
+    );
   }
 } 
