@@ -36,7 +36,7 @@ export default function Home() {
                     {loading ? '...' : `$${metrics?.mtd.totalRevenue.toFixed(2)}`}
                   </p>
                   <p className="text-xs text-gray-600">
-                    MTD {loading ? '' : `${metrics?.trends.revenueTrend > 0 ? '↑' : '↓'} ${Math.abs(metrics?.trends.revenueTrend || 0).toFixed(1)}%`}
+                    MTD {loading ? '' : `${(metrics?.trends?.revenueTrend ?? 0) > 0 ? '↑' : '↓'} ${Math.abs(metrics?.trends?.revenueTrend ?? 0).toFixed(1)}%`}
                   </p>
                 </div>
                 <div>
@@ -122,7 +122,7 @@ export default function Home() {
                     {loading ? '...' : `$${metrics?.mtd.totalExpenses.toFixed(2)}`}
                   </p>
                   <p className="text-xs text-gray-600">
-                    MTD {loading ? '' : `${metrics?.trends.expensesTrend > 0 ? '↑' : '↓'} ${Math.abs(metrics?.trends.expensesTrend || 0).toFixed(1)}%`}
+                    MTD {loading ? '' : `${(metrics?.trends?.expensesTrend ?? 0) > 0 ? '↑' : '↓'} ${Math.abs(metrics?.trends?.expensesTrend ?? 0).toFixed(1)}%`}
                   </p>
                 </div>
                 <div>

@@ -1,23 +1,24 @@
 import { useState, useEffect } from 'react'
 
-type Metrics = {
-  // Revenue metrics
-  totalRevenue: number // Total including tax
-  totalSales: number // Revenue without tax
+type MetricsPeriod = {
+  totalRevenue: number
+  totalSales: number
   totalTaxCollected: number
-  
-  // Profit metrics
   totalProfit: number
   profitMargin: number
-  
-  // Expenses
   totalExpenses: number
-  
-  // Trends
-  revenueTrend: number
-  salesTrend: number
-  profitTrend: number
-  expensesTrend: number
+}
+
+type Metrics = {
+  mtd: MetricsPeriod
+  ytd: MetricsPeriod
+  lifetime: MetricsPeriod
+  trends: {
+    revenueTrend: number
+    salesTrend: number
+    profitTrend: number
+    expensesTrend: number
+  }
 }
 
 export function useMetrics() {
