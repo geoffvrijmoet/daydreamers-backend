@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
@@ -42,11 +42,23 @@ export function ManualTransactionForm() {
     fetchProducts()
   }, [])
 
-  // Filter products based on search query
-  const filteredProducts = products.filter(product => 
-    product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    product.sku.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  // Filter and group products based on search query
+  const filteredAndGroupedProducts = useMemo(() => {
+    const filtered = products.filter(product => 
+      product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      product.sku.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+
+    // Group by parent product name (everything before " - ")
+    return filtered.reduce((groups, product) => {
+      const parentName = product.name.split(' - ')[0]
+      if (!groups[parentName]) {
+        groups[parentName] = []
+      }
+      groups[parentName].push(product)
+      return groups
+    }, {} as Record<string, Product[]>)
+  }, [products, searchQuery])
 
   const handleProductSelect = (product: Product) => {
     setSelectedProducts(prev => [...prev, {
@@ -187,19 +199,30 @@ export function ManualTransactionForm() {
           />
           {showSuggestions && searchQuery && (
             <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700 max-h-60 overflow-auto">
-              {filteredProducts.length > 0 ? (
-                filteredProducts.map(product => (
-                  <button
-                    key={product.id}
-                    type="button"
-                    onClick={() => handleProductSelect(product)}
-                    className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
-                  >
-                    <div className="text-sm font-medium">{product.name}</div>
-                    <div className="text-xs text-gray-500">
-                      SKU: {product.sku} - ${product.retailPrice.toFixed(2)}
+              {Object.keys(filteredAndGroupedProducts).length > 0 ? (
+                Object.entries(filteredAndGroupedProducts).map(([parentName, variants]) => (
+                  <div key={parentName} className="border-b last:border-b-0 border-gray-200 dark:border-gray-700">
+                    <div className="px-4 py-2 bg-gray-50 dark:bg-gray-700">
+                      <h3 className="text-sm font-medium text-gray-900 dark:text-white">{parentName}</h3>
                     </div>
-                  </button>
+                    <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {variants.map(product => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          onClick={() => handleProductSelect(product)}
+                          className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          <div className="text-sm text-gray-600 dark:text-gray-300">
+                            {product.name.split(' - ')[1] || 'Default'}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            SKU: {product.sku} - ${(product.retailPrice || 0).toFixed(2)}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))
               ) : (
                 <div className="px-4 py-2 text-sm text-gray-500">

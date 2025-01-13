@@ -47,7 +47,7 @@ interface TransactionData {
   totalAmount: number
   tip?: number
   discount?: number
-  status: string
+  status: 'completed' | 'cancelled' | 'refunded'
   voidReason?: string
   voidedAt?: string
   supplier?: string
@@ -57,25 +57,7 @@ interface TransactionData {
 
 type GroupedTransactions = {
   [date: string]: {
-    transactions: Array<{
-      id: string
-      description: string
-      amount: number
-      type: 'sale' | 'purchase'
-      source?: 'square' | 'shopify' | 'gmail' | 'manual'
-      customer?: string
-      paymentMethod?: string
-      date: string
-      products?: Array<{
-        name: string
-        quantity: number
-        unitPrice: number
-        totalPrice: number
-      }>
-      productsTotal?: number
-      tip?: number
-      discount?: number
-    }>
+    transactions: Array<TransactionData>
     totalAmount: number
     totalTax: number
     count: number
@@ -95,11 +77,12 @@ export function TransactionsList() {
 
   useEffect(() => {
     transactions.forEach(transaction => {
-      if (transaction.products?.length) {
-        console.log(`Products for transaction ${transaction.id}:`, {
-          date: transaction.date,
-          description: transaction.description,
-          products: transaction.products.map(p => ({
+      const typedTransaction = transaction as unknown as TransactionData
+      if (typedTransaction.products?.length) {
+        console.log(`Products for transaction ${typedTransaction.id}:`, {
+          date: typedTransaction.date,
+          description: typedTransaction.description,
+          products: typedTransaction.products.map(p => ({
             name: p.name,
             quantity: p.quantity,
             unitPrice: p.unitPrice,
@@ -154,9 +137,13 @@ export function TransactionsList() {
       const { taxAmount } = calculateTaxDetails(typedTransaction);
 
       acc[dateKey].transactions.push(typedTransaction)
-      acc[dateKey].totalAmount += typedTransaction.amount
-      acc[dateKey].totalTax += taxAmount
-      acc[dateKey].count += 1
+      
+      // Only add to totals if transaction is not cancelled or refunded
+      if (typedTransaction.status === 'completed') {
+        acc[dateKey].totalAmount += typedTransaction.amount
+        acc[dateKey].totalTax += taxAmount
+        acc[dateKey].count += 1
+      }
 
       return acc
     }, {})
@@ -228,7 +215,7 @@ export function TransactionsList() {
   };
 
   const formatSource = (source: string | undefined) => {
-    if (!source) return '';
+    if (!source) return 'Unknown';
     return source.charAt(0).toUpperCase() + source.slice(1);
   }
 
@@ -270,7 +257,7 @@ export function TransactionsList() {
       return transaction.lineItems.map((item, idx) => (
         <div key={idx} className="flex items-center">
           <span>{item.quantity}x</span>
-          <span className="ml-2">{item.name}</span>
+          <span className="ml-2">{item.name ?? 'Unnamed Product'}</span>
           {item.variationName && <span className="ml-1">({item.variationName})</span>}
           <span className="ml-2 text-gray-500">
             (${((item.grossSalesMoney?.amount ?? item.price * 100) / 100).toFixed(2)})
@@ -283,9 +270,9 @@ export function TransactionsList() {
       return transaction.line_items.map((item, idx) => (
         <div key={idx} className="flex items-center">
           <span>{item.quantity}x</span>
-          <span className="ml-2">{item.title}</span>
+          <span className="ml-2">{item.title ?? 'Unnamed Product'}</span>
           <span className="ml-2 text-gray-500">
-            (${(parseFloat(item.price) * item.quantity).toFixed(2)})
+            (${((parseFloat(item.price ?? '0') * item.quantity)).toFixed(2)})
           </span>
         </div>
       ));
@@ -304,26 +291,31 @@ export function TransactionsList() {
     return (
       <div className="flex-shrink-0 ml-4 px-3 py-2 border border-purple-light bg-purple-pastel/50 rounded">
         <div className="flex flex-col gap-1 text-xs">
-          {transaction.source === 'manual' && transaction.productsTotal && (
-            <>
-              <div className="text-green-dark">
-                Products: ${transaction.productsTotal.toFixed(2)}
-              </div>
-              {transaction.discount && (
-                <div className="text-red-dark">
-                  Discount: -${transaction.discount.toFixed(2)}
-                </div>
-              )}
-              <div className="text-green-dark">
-                Tax ({taxRate}%): ${taxAmount.toFixed(2)}
-              </div>
-              {transaction.tip && (
-                <div className="text-purple-dark">
-                  Tip: +${transaction.tip.toFixed(2)}
-                </div>
-              )}
-            </>
+          {/* Show pre-tax amount for all transactions */}
+          <div className="text-green-dark">
+            Pre-tax: ${(transaction.amount - taxAmount).toFixed(2)}
+          </div>
+
+          {/* Show tax for all transactions */}
+          <div className="text-green-dark">
+            Tax ({taxRate}%): ${taxAmount.toFixed(2)}
+          </div>
+
+          {/* Show discount if present */}
+          {transaction.discount && (
+            <div className="text-red-dark">
+              Discount: -${transaction.discount.toFixed(2)}
+            </div>
           )}
+
+          {/* Show tip if present */}
+          {transaction.tip && (
+            <div className="text-purple-dark">
+              Tip: +${transaction.tip.toFixed(2)}
+            </div>
+          )}
+
+          {/* Show total for all transactions */}
           <div className="font-bold text-purple-dark">
             Total: ${transaction.amount.toFixed(2)}
           </div>
@@ -556,133 +548,152 @@ export function TransactionsList() {
             .sort(([dateA], [dateB]) => 
               new Date(dateB).getTime() - new Date(dateA).getTime()
             )
-            .map(([date, { transactions: dayTransactions }]) => (
-              <div key={date} className="space-y-2">
-                <div className="border-b border-gray-200 pb-2">
-                  <div className="flex justify-between">
-                    <h3 className="text-sm">{date}</h3>
-                    <span className="text-sm text-gray-600">
-                      {dayTransactions.length} transaction{dayTransactions.length !== 1 ? 's' : ''}
-                    </span>
+            .map(([date, { transactions: dayTransactions }]) => {
+              // Calculate totals only for completed transactions
+              const completedTransactions = dayTransactions.filter(t => t.status === 'completed')
+              const totalAmount = completedTransactions.reduce((sum, t) => sum + t.amount, 0)
+              const totalTax = completedTransactions.reduce((sum, t) => sum + calculateTaxDetails(t).taxAmount, 0)
+
+              return (
+                <div key={date} className="space-y-2">
+                  <div className="border-b border-gray-200 pb-2">
+                    <div className="flex justify-between">
+                      <h3 className="text-sm">{date}</h3>
+                      <span className="text-sm text-gray-600">
+                        {completedTransactions.length} transaction{completedTransactions.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <div className="text-sm text-gray-600 mt-1">
+                      <span className="mr-4">Total: ${totalAmount.toFixed(2)}</span>
+                      <span>Tax: ${totalTax.toFixed(2)}</span>
+                    </div>
                   </div>
-                  <div className="text-sm text-gray-600 mt-1">
-                    <span className="mr-4">Total: ${(dayTransactions.reduce((sum, t) => sum + t.amount, 0)).toFixed(2)}</span>
-                    <span>Tax: ${(dayTransactions.reduce((sum, t) => sum + calculateTaxDetails(t).taxAmount, 0)).toFixed(2)}</span>
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  {dayTransactions.map((transaction) => {
-                    const typedTransaction = transaction as unknown as TransactionData;
-                    return (
-                      <div 
-                        key={typedTransaction._id} 
-                        className="p-4 border border-gray-200 rounded"
-                      >
-                        <div className="flex gap-4">
-                          <div className="flex-grow">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="text-base font-bold text-purple-dark">
-                                ${typedTransaction.amount.toFixed(2)}
-                              </span>
-                              <span className="text-xs px-1.5 py-0.5 rounded bg-purple-pastel text-purple-dark uppercase">
-                                {formatSource(typedTransaction.source)}
-                              </span>
-                              {typedTransaction.status === 'void' && (
-                                <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-600">
-                                  VOID
+
+                  <div className="space-y-2">
+                    {dayTransactions.map((transaction) => {
+                      const typedTransaction = transaction as unknown as TransactionData;
+                      const isInactive = typedTransaction.status === 'cancelled' || typedTransaction.status === 'refunded'
+
+                      return (
+                        <div 
+                          key={typedTransaction._id} 
+                          className={cn(
+                            "p-4 border border-gray-200 rounded",
+                            isInactive && "opacity-60"
+                          )}
+                        >
+                          <div className="flex gap-4">
+                            <div className="flex-grow">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className={cn(
+                                  "text-base font-bold text-purple-dark",
+                                  isInactive && "line-through"
+                                )}>
+                                  ${typedTransaction.amount.toFixed(2)}
                                 </span>
-                              )}
-                              <div className="flex gap-2 ml-auto">
-                                {typedTransaction.source === 'manual' && (
-                                  <>
-                                    {editingId === typedTransaction._id ? (
-                                      <>
-                                        <button
-                                          onClick={handleSave}
-                                          disabled={saving}
-                                          className="text-xs text-green-600 hover:text-green-700"
-                                        >
-                                          {saving ? 'Saving...' : 'Save'}
-                                        </button>
-                                        <button
-                                          onClick={handleCancel}
-                                          className="text-xs text-gray-600 hover:text-gray-700"
-                                        >
-                                          Cancel
-                                        </button>
-                                      </>
-                                    ) : (
-                                      <button
-                                        onClick={() => handleEdit(typedTransaction)}
-                                        className="text-xs text-blue-600 hover:text-blue-700"
-                                      >
-                                        Edit
-                                      </button>
-                                    )}
-                                  </>
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-purple-pastel text-purple-dark uppercase">
+                                  {formatSource(typedTransaction.source)}
+                                </span>
+                                {typedTransaction.status !== 'completed' && (
+                                  <span className={cn(
+                                    "text-xs px-1.5 py-0.5 rounded",
+                                    typedTransaction.status === 'cancelled' && "bg-red-100 text-red-600",
+                                    typedTransaction.status === 'refunded' && "bg-yellow-100 text-yellow-600"
+                                  )}>
+                                    {typedTransaction.status?.toUpperCase() ?? 'UNKNOWN'}
+                                  </span>
                                 )}
-                                {typedTransaction.status !== 'void' && (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleVoidTransaction(typedTransaction)}
-                                    className="text-xs text-red-600 hover:text-red-700"
-                                  >
-                                    Void
-                                  </Button>
+                                <div className="flex gap-2 ml-auto">
+                                  {typedTransaction.source === 'manual' && (
+                                    <>
+                                      {editingId === typedTransaction._id ? (
+                                        <>
+                                          <button
+                                            onClick={handleSave}
+                                            disabled={saving}
+                                            className="text-xs text-green-600 hover:text-green-700"
+                                          >
+                                            {saving ? 'Saving...' : 'Save'}
+                                          </button>
+                                          <button
+                                            onClick={handleCancel}
+                                            className="text-xs text-gray-600 hover:text-gray-700"
+                                          >
+                                            Cancel
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <button
+                                          onClick={() => handleEdit(typedTransaction)}
+                                          className="text-xs text-blue-600 hover:text-blue-700"
+                                        >
+                                          Edit
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                  {typedTransaction.status === 'completed' && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleVoidTransaction(typedTransaction)}
+                                      className="text-xs text-red-600 hover:text-red-700"
+                                    >
+                                      Void
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="text-xs space-y-0.5">
+                                {renderProducts(typedTransaction)}
+                              </div>
+
+                              <div className="flex flex-wrap gap-x-3 text-xs text-gray-600 dark:text-gray-400 mt-2">
+                                {typedTransaction.customer && (
+                                  <span>
+                                    Customer: {typedTransaction.customer}
+                                  </span>
+                                )}
+                                {typedTransaction.paymentMethod && (
+                                  <span>
+                                    Via: {typedTransaction.paymentMethod}
+                                  </span>
                                 )}
                               </div>
                             </div>
 
-                            <div className="text-xs space-y-0.5">
-                              {renderProducts(typedTransaction)}
-                            </div>
-
-                            <div className="flex flex-wrap gap-x-3 text-xs text-gray-600 dark:text-gray-400 mt-2">
-                              {typedTransaction.customer && (
-                                <span>
-                                  Customer: {typedTransaction.customer}
-                                </span>
-                              )}
-                              {typedTransaction.paymentMethod && (
-                                <span>
-                                  Via: {typedTransaction.paymentMethod}
-                                </span>
-                              )}
-                            </div>
+                            {renderTransactionDetails(typedTransaction)}
                           </div>
-
-                          {renderTransactionDetails(typedTransaction)}
-                        </div>
-                        <div className="text-sm">
-                          <div className="flex justify-between">
-                            <span>Products Total:</span>
-                            <span>${typedTransaction.productsTotal?.toFixed(2)}</span>
-                          </div>
-                          {typedTransaction.tip && (
-                            <div className="flex justify-between text-green-600">
-                              <span>Tip:</span>
-                              <span>+${typedTransaction.tip.toFixed(2)}</span>
+                          <div className="text-sm">
+                            <div className="flex justify-between">
+                              <span>Products Total:</span>
+                              <span>${typedTransaction.productsTotal?.toFixed(2)}</span>
                             </div>
-                          )}
-                          {typedTransaction.discount && (
-                            <div className="flex justify-between text-red-600">
-                              <span>Discount:</span>
-                              <span>-${typedTransaction.discount.toFixed(2)}</span>
+                            {typedTransaction.tip && (
+                              <div className="flex justify-between text-green-600">
+                                <span>Tip:</span>
+                                <span>+${typedTransaction.tip.toFixed(2)}</span>
+                              </div>
+                            )}
+                            {typedTransaction.discount && (
+                              <div className="flex justify-between text-red-600">
+                                <span>Discount:</span>
+                                <span>-${typedTransaction.discount.toFixed(2)}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between font-medium">
+                              <span>Final Amount:</span>
+                              <span>${typedTransaction.amount.toFixed(2)}</span>
                             </div>
-                          )}
-                          <div className="flex justify-between font-medium">
-                            <span>Final Amount:</span>
-                            <span>${typedTransaction.amount.toFixed(2)}</span>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
         </div>
       )}
     </Card>

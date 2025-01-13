@@ -1,45 +1,37 @@
-export type BaseTransaction = {
-  id: string
+import { ObjectId } from 'mongodb'
+
+export interface BaseTransaction {
   date: string
-  type: 'sale' | 'purchase'
+  type: 'sale' | 'purchase' | 'refund'
   amount: number
   description: string
-  source: 'square' | 'shopify' | 'gmail' | 'manual'
-  preTaxAmount?: number
-  taxAmount?: number
-  customer?: string
-  paymentMethod?: string
-  products?: Array<{
-    name: string
-    quantity: number
-    unitPrice: number
-    totalPrice: number
-  }>
-  lineItems?: Array<LineItem> // Square specific
-  line_items?: Array<LineItem> // Shopify specific
-  productsTotal?: number
-  tip?: number
-  discount?: number
-  createdAt?: string
-  updatedAt?: string
-  shipping?: number
-  status?: 'active' | 'void'  // default to 'active' if not specified
-  voidReason?: string
-  voidedAt?: string
-}
-
-interface LineItem {
-  name: string;
-  quantity: number;
-  price: number;
-  sku?: string;
-  variant_id?: string;
+  source: 'square' | 'shopify' | 'amex'
 }
 
 export interface Transaction extends BaseTransaction {
-  _id?: string
-  lineItems?: Array<LineItem>; // Square specific
-  line_items?: Array<LineItem>; // Shopify specific
+  _id: ObjectId
+  id: string
+  date: string
+  type: 'sale' | 'refund'
+  amount: number
+  preTaxAmount?: number
+  taxAmount?: number
+  description: string
+  source: 'square' | 'shopify' | 'amex'
+  lineItems?: {
+    name: string
+    quantity: number
+    price: number
+    sku?: string
+    variant_id?: string
+  }[]
+  customer?: string
+  paymentMethod?: string
+  status: 'completed' | 'cancelled' | 'refunded'
+  refundAmount?: number
+  refundDate?: string
+  createdAt: string
+  updatedAt: string
 }
 
 export type TransactionItem = {

@@ -23,11 +23,11 @@ export async function POST(request: Request) {
     const orders = await shopifyClient.order.list({
       created_at_min: lastSyncTime,
       created_at_max: now,
-      status: 'any',
+      status: 'any', // Get all orders including cancelled
       limit: 100
     })
 
-    console.log(`Found ${orders.length} new Shopify orders since ${lastSyncTime}`)
+    console.log(`Found ${orders.length} Shopify orders since ${lastSyncTime}`)
 
     // Process each order
     const operations = orders.map(async (order) => {
@@ -35,9 +35,13 @@ export async function POST(request: Request) {
 
       // Check if transaction already exists
       const existing = await db.collection('transactions').findOne({ id: shopifyId })
-      if (existing) {
-        console.log(`Shopify order ${order.id} already synced`)
-        return { action: 'skipped', id: order.id }
+
+      // Determine transaction status
+      let status: 'completed' | 'cancelled' | 'refunded' = 'completed'
+      if (order.cancelled_at) {
+        status = 'cancelled'
+      } else if (order.refunds?.length > 0) {
+        status = 'refunded'
       }
 
       const transaction: Omit<Transaction, '_id'> = {
@@ -51,7 +55,7 @@ export async function POST(request: Request) {
           ? `Shopify: ${order.line_items[0].title}${order.line_items.length > 1 ? ` (+${order.line_items.length - 1} more)` : ''}`
           : `Shopify Order #${order.order_number}`,
         source: 'shopify',
-        line_items: order.line_items?.map(item => ({
+        lineItems: order.line_items?.map(item => ({
           name: item.title,
           quantity: item.quantity,
           price: Number(item.price),
@@ -60,17 +64,47 @@ export async function POST(request: Request) {
         })),
         customer: `${order.customer?.first_name} ${order.customer?.last_name}`.trim(),
         paymentMethod: order.gateway,
-        createdAt: new Date().toISOString(),
+        status,
+        refundAmount: order.refunds?.reduce((sum, refund) => 
+          sum + Number(refund.transactions?.[0]?.amount || 0), 0) || undefined,
+        refundDate: order.refunds?.[0]?.created_at,
+        createdAt: order.created_at ?? new Date().toISOString(),
         updatedAt: new Date().toISOString()
       }
 
-      await db.collection('transactions').insertOne(transaction)
+      if (existing) {
+        // If transaction exists but status has changed, update it
+        if (existing.status !== status) {
+          await db.collection('transactions').updateOne(
+            { _id: existing._id },
+            { 
+              $set: { 
+                status,
+                refundAmount: transaction.refundAmount,
+                refundDate: transaction.refundDate,
+                updatedAt: transaction.updatedAt
+              } 
+            }
+          )
+          console.log(`Updated Shopify order ${order.id} status to ${status}`)
+          return { action: 'updated', id: order.id }
+        }
+        console.log(`Shopify order ${order.id} already synced`)
+        return { action: 'skipped', id: order.id }
+      }
+
+      // Create new transaction
+      await db.collection('transactions').insertOne({
+        ...transaction,
+        createdAt: new Date().toISOString()
+      })
       console.log(`Synced Shopify order ${order.id}`)
       return { action: 'created', id: order.id }
     })
 
     const results = await Promise.all(operations)
     const created = results.filter(r => r.action === 'created').length
+    const updated = results.filter(r => r.action === 'updated').length
     const skipped = results.filter(r => r.action === 'skipped').length
 
     // Update last successful sync time
@@ -80,17 +114,17 @@ export async function POST(request: Request) {
         $set: { 
           lastSuccessfulSync: now,
           lastSyncStatus: 'success',
-          lastSyncResults: { created, skipped },
+          lastSyncResults: { created, updated, skipped },
           updatedAt: now
         }
       },
       { upsert: true }
     )
 
-    console.log('Shopify sync complete:', { created, skipped })
+    console.log('Shopify sync complete:', { created, updated, skipped })
 
     return NextResponse.json({
-      message: `Sync complete. Created: ${created}, Skipped: ${skipped} transactions`,
+      message: `Sync complete. Created: ${created}, Updated: ${updated}, Skipped: ${skipped} transactions`,
       details: results
     })
 
