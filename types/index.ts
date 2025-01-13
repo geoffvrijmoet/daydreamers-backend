@@ -74,6 +74,7 @@ export type Product = {
   category?: string
   lastRestockDate?: string
   squareId?: string
+  squareParentId?: string
   shopifyId?: string
   barcode?: string
   active: boolean

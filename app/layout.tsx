@@ -8,6 +8,7 @@ import {
 import './globals.css'
 import type { Metadata } from 'next'
 import { Quicksand } from 'next/font/google'
+import { Header } from '@/components/header'
 
 const quicksand = Quicksand({ subsets: ['latin'] })
 
@@ -25,13 +26,22 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en">
         <body className={quicksand.className}>
-          <SignedOut>
-            <SignInButton />
-          </SignedOut>
-          <SignedIn>
-            <UserButton />
-          </SignedIn>
-          {children}
+          <div className="min-h-screen flex flex-col">
+            <div className="flex justify-end p-4">
+              <SignedOut>
+                <SignInButton />
+              </SignedOut>
+              <SignedIn>
+                <UserButton />
+              </SignedIn>
+            </div>
+            <SignedIn>
+              <Header />
+            </SignedIn>
+            <main className="flex-1">
+              {children}
+            </main>
+          </div>
         </body>
       </html>
     </ClerkProvider>

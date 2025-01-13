@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "update-amex": "ts-node -r tsconfig-paths/register -r dotenv/config scripts/update-amex-transactions.ts"
+    "update-amex": "ts-node -r tsconfig-paths/register -r dotenv/config scripts/update-amex-transactions.ts",
+    "create-customers": "node scripts/create-customers.js"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.9.6",

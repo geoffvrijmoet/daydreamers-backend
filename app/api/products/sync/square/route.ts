@@ -2,135 +2,98 @@ import { NextResponse } from 'next/server'
 import { squareClient } from '@/lib/square'
 import { getDb } from '@/lib/db'
 
-export async function POST() {
+type ReviewedProduct = {
+  id: string
+  name: string
+  description?: string
+  sku: string
+  price: number
+  minimumStock: number
+  supplier: string
+  category: string
+}
+
+export async function POST(request: Request) {
   try {
     const db = await getDb()
-    console.log('\n=== Starting Square Catalog Sync ===')
+    console.log('Starting Square catalog sync...')
 
-    // Get all catalog items from Square
+    // Get reviewed products from request
+    const { products } = await request.json() as { products: ReviewedProduct[] }
+    
+    // Get Square catalog items to get parent IDs
     const { result } = await squareClient.catalogApi.listCatalog(undefined, 'ITEM')
     const squareProducts = result.objects || []
 
-    // Track all variations for logging
-    const allVariations: { name: string, variations: number }[] = []
-    
-    console.log('\nProcessing products and their variations...')
-    const updates = await Promise.all(squareProducts.flatMap(async (squareProduct) => {
-      if (squareProduct.type !== 'ITEM' || !squareProduct.itemData) {
-        return []
+    // Create a map of variation IDs to parent product IDs
+    const parentIdMap = new Map<string, string>()
+    squareProducts.forEach(item => {
+      if (item.type === 'ITEM' && item.itemData) {
+        item.itemData.variations?.forEach(variation => {
+          if (variation.id) {
+            parentIdMap.set(variation.id, item.id)
+          }
+        })
       }
+    })
 
-      const item = squareProduct.itemData
-      const isIceCream = item.name?.toLowerCase().includes('ice cream')
-      
-      // Log product variations count
-      allVariations.push({
-        name: item.name || '',
-        variations: item.variations?.length || 0
+    // Process each reviewed product
+    const updates = await Promise.all(products.map(async (reviewedProduct) => {
+      // Look for existing product by Square ID
+      const existingProduct = await db.collection('products').findOne({
+        squareId: reviewedProduct.id
       })
 
-      if (isIceCream) {
-        console.log(`\nProcessing ice cream product: ${item.name}`)
-        console.log('Square product details:', {
-          id: squareProduct.id,
-          name: item.name,
-          variations: item.variations?.length || 0,
-          categoryId: item.categoryId
-        })
+      const productData = {
+        name: reviewedProduct.name,
+        description: reviewedProduct.description || '',
+        sku: reviewedProduct.sku,
+        retailPrice: reviewedProduct.price,
+        currentStock: 0, // Will be updated from inventory
+        minimumStock: reviewedProduct.minimumStock,
+        lastPurchasePrice: existingProduct?.lastPurchasePrice || 0,
+        averageCost: existingProduct?.averageCost || 0,
+        supplier: reviewedProduct.supplier,
+        category: reviewedProduct.category,
+        squareId: reviewedProduct.id,
+        squareParentId: parentIdMap.get(reviewedProduct.id),
+        active: true,
+        costHistory: existingProduct?.costHistory || [],
+        totalSpent: existingProduct?.totalSpent || 0,
+        totalPurchased: existingProduct?.totalPurchased || 0,
+        updatedAt: new Date().toISOString()
       }
 
-      // Process each variation as a separate product
-      return (item.variations || []).map(async (variation) => {
-        if (!variation.itemVariationData) return null
-
-        const variationData = variation.itemVariationData
-        const priceAmount = variationData.priceMoney?.amount
-        const price = priceAmount ? Number(priceAmount.toString()) : 0
-
-        // Generate a unique name for the variation
-        const variationName = variationData.name 
-          ? `${item.name} - ${variationData.name}`
-          : item.name || ''
-
-        if (isIceCream) {
-          console.log('Processing variation:', {
-            id: variation.id,
-            name: variationName,
-            sku: variationData.sku,
-            price: price / 100
-          })
-        }
-
-        // Generate a SKU if none exists
-        const sku = variationData.sku || `SQUARE-${variation.id}`
-
-        // Look for existing product by variation ID
-        const existingProduct = await db.collection('products').findOne({
-          squareId: variation.id  // Use variation ID instead of parent product ID
-        })
-
-        if (isIceCream) {
-          console.log('Database lookup result:', existingProduct ? 'Found' : 'Not found')
-        }
-
-        const productData = {
-          name: variationName,
-          description: item.description || '',
-          sku: sku,
-          retailPrice: Number(price) / 100,
-          currentStock: 0, // Will be updated from inventory
-          minimumStock: existingProduct?.minimumStock || 5,
-          lastPurchasePrice: existingProduct?.lastPurchasePrice || 0,
-          averageCost: existingProduct?.averageCost || 0,
-          supplier: existingProduct?.supplier || '',
-          category: item.categoryId || '',
-          squareId: variation.id,  // Store variation ID
-          squareParentId: squareProduct.id,  // Store parent product ID
-          active: true,
-          costHistory: existingProduct?.costHistory || [],
-          totalSpent: existingProduct?.totalSpent || 0,
-          totalPurchased: existingProduct?.totalPurchased || 0,
-          updatedAt: new Date().toISOString()
-        }
-
-        if (existingProduct) {
-          // Update existing product
-          await db.collection('products').updateOne(
-            { _id: existingProduct._id },
-            { 
-              $set: {
-                ...productData,
-                lastPurchasePrice: existingProduct.lastPurchasePrice,
-                averageCost: existingProduct.averageCost,
-                costHistory: existingProduct.costHistory,
-                totalSpent: existingProduct.totalSpent,
-                totalPurchased: existingProduct.totalPurchased
-              }
+      if (existingProduct) {
+        // Update existing product
+        await db.collection('products').updateOne(
+          { _id: existingProduct._id },
+          { 
+            $set: {
+              ...productData,
+              lastPurchasePrice: existingProduct.lastPurchasePrice,
+              averageCost: existingProduct.averageCost,
+              costHistory: existingProduct.costHistory,
+              totalSpent: existingProduct.totalSpent,
+              totalPurchased: existingProduct.totalPurchased
             }
-          )
-          return { action: 'updated', id: existingProduct._id, name: variationName }
-        } else {
-          // Create new product
-          const result = await db.collection('products').insertOne({
-            ...productData,
-            createdAt: new Date().toISOString()
-          })
-          return { action: 'created', id: result.insertedId, name: variationName }
-        }
-      })
+          }
+        )
+        return { action: 'updated', id: existingProduct._id, name: reviewedProduct.name }
+      } else {
+        // Create new product
+        const result = await db.collection('products').insertOne({
+          ...productData,
+          createdAt: new Date().toISOString()
+        })
+        return { action: 'created', id: result.insertedId, name: reviewedProduct.name }
+      }
     }))
-
-    // Flatten and filter out nulls
-    const results = (await Promise.all(updates.flat())).filter(Boolean)
-    const created = results.filter(r => r?.action === 'created').length
-    const updated = results.filter(r => r?.action === 'updated').length
 
     // Get inventory counts for variations
     console.log('\nFetching inventory counts...')
     const { result: inventoryResult } = await squareClient.inventoryApi.batchRetrieveInventoryCounts({
-      catalogObjectIds: squareProducts
-        .filter(p => p.type === 'ITEM')
-        .flatMap(p => p.itemData?.variations?.map(v => v.id) || [])
+      catalogObjectIds: products.map(p => p.id)
     })
 
     // Update inventory counts
@@ -151,17 +114,14 @@ export async function POST() {
       }))
     }
 
-    console.log('\n=== Sync Summary ===')
-    console.log('Products with variations:')
-    allVariations.forEach(p => {
-      console.log(`- ${p.name}: ${p.variations} variation(s)`)
-    })
-    console.log(`Created: ${created}, Updated: ${updated} variations`)
+    const created = updates.filter(r => r.action === 'created').length
+    const updated = updates.filter(r => r.action === 'updated').length
 
     return NextResponse.json({
       message: `Sync complete. Created: ${created}, Updated: ${updated} products`,
-      details: results
+      details: updates
     })
+
   } catch (error) {
     console.error('Error syncing Square products:', error)
     return NextResponse.json(

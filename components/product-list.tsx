@@ -155,6 +155,25 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
     .filter(p => showInactive || p.active !== false)
     .filter(p => !filterLowStock || p.currentStock <= p.minimumStock)
 
+  // Group products by Square parent ID
+  const groupedProducts = filteredProducts.reduce((groups, product) => {
+    if (!product.squareParentId) {
+      // Products without a parent ID get their own card
+      return [...groups, [product]]
+    }
+
+    const existingGroup = groups.find(group => 
+      group[0].squareParentId === product.squareParentId
+    )
+
+    if (existingGroup) {
+      existingGroup.push(product)
+      return groups
+    }
+
+    return [...groups, [product]]
+  }, [] as Product[][])
+
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
       // Select all visible (filtered) products
@@ -232,106 +251,141 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
 
       {/* Product Cards */}
       <div className="space-y-4">
-        {filteredProducts.map(product => (
-          <Card key={product.id} className="p-4">
-            <div className="flex items-start gap-4">
-              <input
-                type="checkbox"
-                checked={selectedProducts.includes(product.id)}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setSelectedProducts(prev => [...prev, product.id])
-                  } else {
-                    setSelectedProducts(prev => prev.filter(id => id !== product.id))
-                  }
-                }}
-                className="mt-1 rounded border-gray-300"
-              />
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                    {product.name}
-                  </h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    SKU: {product.sku}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">
-                    Stock: {product.currentStock} 
-                    {product.currentStock <= product.minimumStock && (
-                      <span className="ml-2 text-xs text-red-600">Low Stock</span>
-                    )}
-                  </p>
-                </div>
-              </div>
+        {groupedProducts.map(group => {
+          // Get the main product name from the first product in the group
+          const mainProductName = group[0].name.split(' - ')[0]
 
-              {/* Cost Basis & Profit Information */}
-              <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
-                <div>
-                  <p className="text-gray-500 dark:text-gray-400">Cost Basis</p>
-                  <p className="font-medium text-gray-900 dark:text-white">
-                    ${product.averageCost.toFixed(2)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500 dark:text-gray-400">Retail Price (with tax)</p>
-                  <p className="font-medium text-gray-900 dark:text-white">
-                    ${product.retailPrice.toFixed(2)}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Pre-tax: ${getPreTaxPrice(product.retailPrice).toFixed(2)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500 dark:text-gray-400">Profit Margin</p>
-                  <p className={`font-medium ${
-                    calculateProfitMargin(product.retailPrice, product.averageCost) >= 30
-                      ? 'text-green-600'
-                      : 'text-yellow-600'
-                  }`}>
-                    {calculateProfitMargin(product.retailPrice, product.averageCost).toFixed(1)}%
-                  </p>
-                </div>
-              </div>
+          return (
+            <Card key={group[0].id} className="p-4">
+              {/* Main product name at the top */}
+              <h2 className="text-xl font-medium text-gray-900 dark:text-white text-center mb-6">
+                {mainProductName}
+              </h2>
 
-              {/* Cost History & Analysis */}
-              <CostHistory entries={product.costHistory} />
-              <CostAnalysis product={product} />
-
-              {/* Additional Info */}
-              <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
-                <p>
-                  Profit per Unit: ${calculateProfitPerUnit(product.retailPrice, product.averageCost).toFixed(2)} • 
-                  Total Investment: ${(product.averageCost * product.currentStock).toFixed(2)}
-                </p>
-                {product.supplier && (
-                  <p className="mt-1">Supplier: {product.supplier}</p>
-                )}
-              </div>
-
-              {/* Add inactive indicator */}
-              {!product.active && (
-                <div className="mt-2 text-sm text-gray-500">
-                  This product is hidden
-                </div>
-              )}
-
-              {/* Delete Button */}
-              <div className="mt-4 flex justify-end space-x-2">
-                <button
-                  onClick={() => {
-                    setSelectedProducts([product.id])
-                    setShowBulkDelete(true)
+              <div className="flex items-start gap-4">
+                {/* Checkbox for the entire group */}
+                <input
+                  type="checkbox"
+                  checked={group.every(p => selectedProducts.includes(p.id))}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedProducts(prev => [...prev, ...group.map(p => p.id)])
+                    } else {
+                      setSelectedProducts(prev => 
+                        prev.filter(id => !group.find(p => p.id === id))
+                      )
+                    }
                   }}
-                  className="text-sm text-red-600 hover:text-red-700"
-                >
-                  Delete
-                </button>
+                  className="mt-1 rounded border-gray-300"
+                />
+                <div className="flex-1">
+                  {group.map((product, index) => {
+                    // Get the variant name (everything after the hyphen)
+                    const variantName = product.name.split(' - ')[1] || ''
+
+                    // Get background color class based on index
+                    const bgColorClass = [
+                      'bg-blue-pastel',
+                      'bg-purple-pastel',
+                      'bg-green-pastel',
+                      'bg-yellow-pastel'
+                    ][index % 4]
+
+                    return (
+                      <div 
+                        key={product.id} 
+                        className={`${index > 0 ? 'mt-6' : ''} p-4 rounded-lg ${bgColorClass}`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                              {variantName}
+                            </h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              SKU: {product.sku}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-medium text-gray-900 dark:text-white">
+                              Stock: {product.currentStock} 
+                              {product.currentStock <= product.minimumStock && (
+                                <span className="ml-2 text-xs text-red-600">Low Stock</span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Cost Basis & Profit Information */}
+                        <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400">Cost Basis</p>
+                            <p className="font-medium text-gray-900 dark:text-white">
+                              ${product.averageCost.toFixed(2)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400">Retail Price (with tax)</p>
+                            <p className="font-medium text-gray-900 dark:text-white">
+                              ${product.retailPrice.toFixed(2)}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              Pre-tax: ${getPreTaxPrice(product.retailPrice).toFixed(2)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 dark:text-gray-400">Profit Margin</p>
+                            <p className={`font-medium ${
+                              calculateProfitMargin(product.retailPrice, product.averageCost) >= 30
+                                ? 'text-green-600'
+                                : 'text-yellow-600'
+                            }`}>
+                              {calculateProfitMargin(product.retailPrice, product.averageCost).toFixed(1)}%
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Cost History & Analysis */}
+                        <CostHistory entries={product.costHistory} />
+                        <CostAnalysis product={product} />
+
+                        {/* Additional Info */}
+                        <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
+                          <p>
+                            Profit per Unit: ${calculateProfitPerUnit(product.retailPrice, product.averageCost).toFixed(2)} • 
+                            Total Investment: ${(product.averageCost * product.currentStock).toFixed(2)}
+                          </p>
+                          {product.supplier && (
+                            <p className="mt-1">Supplier: {product.supplier}</p>
+                          )}
+                        </div>
+
+                        {/* Add inactive indicator */}
+                        {!product.active && (
+                          <div className="mt-2 text-sm text-gray-500">
+                            This product is hidden
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+
+                  {/* Delete Button */}
+                  <div className="mt-4 flex justify-end space-x-2">
+                    <button
+                      onClick={() => {
+                        setSelectedProducts(group.map(p => p.id))
+                        setShowBulkDelete(true)
+                      }}
+                      className="text-sm text-red-600 hover:text-red-700"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
-          </Card>
-        ))}
+            </Card>
+          )
+        })}
       </div>
 
       {/* Bulk Delete Confirmation Modal */}

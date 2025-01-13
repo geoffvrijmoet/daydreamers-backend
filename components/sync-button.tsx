@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { startOfDay, endOfDay, format } from 'date-fns'
 import { useSyncTransactions } from '@/lib/hooks/useSyncTransactions'
 import { Button } from './ui/button'
@@ -8,6 +8,8 @@ import { Calendar } from './ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { CalendarIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+const LAST_SYNC_DATE_KEY = 'lastSyncEndDate'
 
 export function SyncButton() {
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
@@ -18,6 +20,41 @@ export function SyncButton() {
     shopify: { created: number; skipped: number };
   } | null>(null);
   const { syncTransactions, syncing } = useSyncTransactions();
+
+  // Load last sync date on mount
+  useEffect(() => {
+    async function fetchLastSyncDate() {
+      try {
+        // Set end date to today by default
+        setEndDate(new Date())
+
+        // Try to get the last sync date from the database
+        const response = await fetch('/api/transactions/sync/last')
+        if (response.ok) {
+          const data = await response.json()
+          if (data.lastSuccessfulSync) {
+            setStartDate(new Date(data.lastSuccessfulSync))
+            return
+          }
+        }
+
+        // Fall back to localStorage if database fetch fails
+        const lastSyncDate = localStorage.getItem(LAST_SYNC_DATE_KEY)
+        if (lastSyncDate) {
+          setStartDate(new Date(lastSyncDate))
+        }
+      } catch (error) {
+        console.error('Error fetching last sync date:', error)
+        // Fall back to localStorage
+        const lastSyncDate = localStorage.getItem(LAST_SYNC_DATE_KEY)
+        if (lastSyncDate) {
+          setStartDate(new Date(lastSyncDate))
+        }
+      }
+    }
+
+    fetchLastSyncDate()
+  }, [])
 
   const handleSync = async () => {
     if (!startDate || !endDate) {
@@ -30,6 +67,9 @@ export function SyncButton() {
         startDate: startOfDay(startDate).toISOString(),
         endDate: endOfDay(endDate).toISOString()
       });
+
+      // Store the end date in localStorage as backup
+      localStorage.setItem(LAST_SYNC_DATE_KEY, endDate.toISOString())
 
       setLastSyncResult({
         square: {
