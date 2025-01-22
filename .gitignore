@@ -40,3 +40,7 @@ next-env.d.ts
 # IDE
 .idea
 .vscode
+
+# Scripts
+scripts/create-suppliers.ts
+scripts/dedupe-transactions.ts

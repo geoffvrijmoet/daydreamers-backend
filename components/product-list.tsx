@@ -3,11 +3,32 @@
 import { useState, useEffect } from 'react'
 import { Product, CostHistoryEntry } from '@/types'
 import { Card } from "@/components/ui/card"
-import { calculateProfitMargin, calculateProfitPerUnit, getPreTaxPrice } from '@/lib/utils/pricing'
+import { calculateProfitPerUnit, getPreTaxPrice } from '@/lib/utils/pricing'
+import { Input } from "@/components/ui/input"
 
 type ProductListProps = {
   products: Product[]
   onUpdate: () => void
+}
+
+type EditableFields = {
+  name: string
+  sku: string
+  description: string
+  currentStock: number
+  minimumStock: number
+  retailPrice: number
+  wholesalePrice: number
+  lastPurchasePrice: number
+  supplier: string
+  category: string
+  active: boolean
+}
+
+type EditingProduct = {
+  id: string
+  field: keyof EditableFields
+  value: EditableFields[keyof EditableFields]
 }
 
 function CostHistory({ entries }: { entries: CostHistoryEntry[] }) {
@@ -106,6 +127,8 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
   const [showBulkDelete, setShowBulkDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [editingProduct, setEditingProduct] = useState<EditingProduct | null>(null)
+  const [editingPrice, setEditingPrice] = useState<number | null>(null)
 
   useEffect(() => {
     console.log('ProductList received products:', products)
@@ -135,6 +158,60 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
       console.error('Bulk delete error:', err)
       setError(err instanceof Error ? err.message : 'Failed to delete products')
     }
+  }
+
+  const handleUpdatePrice = async (productId: string) => {
+    try {
+      const response = await fetch(`/api/products/${productId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          lastPurchasePrice: editingPrice,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to update price')
+      }
+
+      setEditingPrice(null)
+      onUpdate() // Refresh the product list
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update price')
+    }
+  }
+
+  const handleUpdateField = async (productId: string, field: keyof EditableFields, value: EditableFields[keyof EditableFields]) => {
+    try {
+      const response = await fetch(`/api/products/${productId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          [field]: value,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to update product')
+      }
+
+      setEditingProduct(null)
+      onUpdate() // Refresh the product list
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update product')
+    }
+  }
+
+  const startEditing = (product: Product, field: keyof EditableFields) => {
+    setEditingProduct({
+      id: product.id,
+      field,
+      value: product[field] as EditableFields[keyof EditableFields]
+    })
   }
 
   // Sort and filter products
@@ -251,141 +328,269 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
 
       {/* Product Cards */}
       <div className="space-y-4">
-        {groupedProducts.map(group => {
-          // Get the main product name from the first product in the group
-          const mainProductName = group[0].name.split(' - ')[0]
-
-          return (
-            <Card key={group[0].id} className="p-4">
-              {/* Main product name at the top */}
-              <h2 className="text-xl font-medium text-gray-900 dark:text-white text-center mb-6">
-                {mainProductName}
-              </h2>
-
-              <div className="flex items-start gap-4">
-                {/* Checkbox for the entire group */}
-                <input
-                  type="checkbox"
-                  checked={group.every(p => selectedProducts.includes(p.id))}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setSelectedProducts(prev => [...prev, ...group.map(p => p.id)])
-                    } else {
-                      setSelectedProducts(prev => 
-                        prev.filter(id => !group.find(p => p.id === id))
-                      )
-                    }
-                  }}
-                  className="mt-1 rounded border-gray-300"
-                />
-                <div className="flex-1">
-                  {group.map((product, index) => {
-                    // Get the variant name (everything after the hyphen)
-                    const variantName = product.name.split(' - ')[1] || ''
-
-                    // Get background color class based on index
-                    const bgColorClass = [
-                      'bg-blue-pastel',
-                      'bg-purple-pastel',
-                      'bg-green-pastel',
-                      'bg-yellow-pastel'
-                    ][index % 4]
-
-                    return (
-                      <div 
-                        key={product.id} 
-                        className={`${index > 0 ? 'mt-6' : ''} p-4 rounded-lg ${bgColorClass}`}
-                      >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                              {variantName}
-                            </h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
-                              SKU: {product.sku}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-sm font-medium text-gray-900 dark:text-white">
-                              Stock: {product.currentStock} 
-                              {product.currentStock <= product.minimumStock && (
-                                <span className="ml-2 text-xs text-red-600">Low Stock</span>
-                              )}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Cost Basis & Profit Information */}
-                        <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
-                          <div>
-                            <p className="text-gray-500 dark:text-gray-400">Cost Basis</p>
-                            <p className="font-medium text-gray-900 dark:text-white">
-                              ${product.averageCost.toFixed(2)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-gray-500 dark:text-gray-400">Retail Price (with tax)</p>
-                            <p className="font-medium text-gray-900 dark:text-white">
-                              ${product.retailPrice.toFixed(2)}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              Pre-tax: ${getPreTaxPrice(product.retailPrice).toFixed(2)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-gray-500 dark:text-gray-400">Profit Margin</p>
-                            <p className={`font-medium ${
-                              calculateProfitMargin(product.retailPrice, product.averageCost) >= 30
-                                ? 'text-green-600'
-                                : 'text-yellow-600'
-                            }`}>
-                              {calculateProfitMargin(product.retailPrice, product.averageCost).toFixed(1)}%
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Cost History & Analysis */}
-                        <CostHistory entries={product.costHistory} />
-                        <CostAnalysis product={product} />
-
-                        {/* Additional Info */}
-                        <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
-                          <p>
-                            Profit per Unit: ${calculateProfitPerUnit(product.retailPrice, product.averageCost).toFixed(2)} • 
-                            Total Investment: ${(product.averageCost * product.currentStock).toFixed(2)}
-                          </p>
-                          {product.supplier && (
-                            <p className="mt-1">Supplier: {product.supplier}</p>
-                          )}
-                        </div>
-
-                        {/* Add inactive indicator */}
-                        {!product.active && (
-                          <div className="mt-2 text-sm text-gray-500">
-                            This product is hidden
-                          </div>
-                        )}
+        {groupedProducts.map(group => (
+          <Card key={group[0].id} className="p-4">
+            <div className="space-y-4">
+              {group.map(product => (
+                <div key={product.id} className="space-y-4">
+                  {/* Product Name */}
+                  <div className="flex items-center justify-between">
+                    {editingProduct?.id === product.id && editingProduct.field === 'name' ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={editingProduct.value as string}
+                          onChange={(e) => setEditingProduct({ ...editingProduct, value: e.target.value })}
+                          className="w-64"
+                        />
+                        <button
+                          onClick={() => handleUpdateField(product.id, 'name', editingProduct.value)}
+                          className="text-xs text-green-600 hover:text-green-700"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditingProduct(null)}
+                          className="text-xs text-gray-500 hover:text-gray-600"
+                        >
+                          Cancel
+                        </button>
                       </div>
-                    )
-                  })}
-
-                  {/* Delete Button */}
-                  <div className="mt-4 flex justify-end space-x-2">
-                    <button
-                      onClick={() => {
-                        setSelectedProducts(group.map(p => p.id))
-                        setShowBulkDelete(true)
-                      }}
-                      className="text-sm text-red-600 hover:text-red-700"
-                    >
-                      Delete
-                    </button>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-lg font-medium">{product.name}</h3>
+                        <button
+                          onClick={() => startEditing(product, 'name')}
+                          className="text-xs text-gray-500 hover:text-gray-600"
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    )}
                   </div>
+
+                  {/* SKU */}
+                  <div>
+                    {editingProduct?.id === product.id && editingProduct.field === 'sku' ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={editingProduct.value as string}
+                          onChange={(e) => setEditingProduct({ ...editingProduct, value: e.target.value })}
+                          className="w-48"
+                        />
+                        <button
+                          onClick={() => handleUpdateField(product.id, 'sku', editingProduct.value)}
+                          className="text-xs text-green-600 hover:text-green-700"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditingProduct(null)}
+                          className="text-xs text-gray-500 hover:text-gray-600"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm text-gray-500">SKU: {product.sku}</p>
+                        <button
+                          onClick={() => startEditing(product, 'sku')}
+                          className="text-xs text-gray-500 hover:text-gray-600"
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Stock Information */}
+                  <div className="grid grid-cols-3 gap-4">
+                    {/* Current Stock */}
+                    <div>
+                      <p className="text-gray-500 dark:text-gray-400">Current Stock</p>
+                      {editingProduct?.id === product.id && editingProduct.field === 'currentStock' ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            value={editingProduct.value as number}
+                            onChange={(e) => setEditingProduct({ ...editingProduct, value: Number(e.target.value) })}
+                            className="w-24"
+                          />
+                          <button
+                            onClick={() => handleUpdateField(product.id, 'currentStock', editingProduct.value)}
+                            className="text-xs text-green-600 hover:text-green-700"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditingProduct(null)}
+                            className="text-xs text-gray-500 hover:text-gray-600"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-gray-900 dark:text-white">{product.currentStock}</p>
+                          <button
+                            onClick={() => startEditing(product, 'currentStock')}
+                            className="text-xs text-gray-500 hover:text-gray-600"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Retail Price */}
+                    <div>
+                      <p className="text-gray-500 dark:text-gray-400">Retail Price (with tax)</p>
+                      {editingProduct?.id === product.id && editingProduct.field === 'retailPrice' ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={editingProduct.value as number}
+                            onChange={(e) => setEditingProduct({ ...editingProduct, value: Number(e.target.value) })}
+                            className="w-24"
+                          />
+                          <button
+                            onClick={() => handleUpdateField(product.id, 'retailPrice', editingProduct.value)}
+                            className="text-xs text-green-600 hover:text-green-700"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditingProduct(null)}
+                            className="text-xs text-gray-500 hover:text-gray-600"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-gray-900 dark:text-white">${product.retailPrice.toFixed(2)}</p>
+                          <button
+                            onClick={() => startEditing(product, 'retailPrice')}
+                            className="text-xs text-gray-500 hover:text-gray-600"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                      <p className="text-xs text-gray-500">Pre-tax: ${getPreTaxPrice(product.retailPrice).toFixed(2)}</p>
+                    </div>
+
+                    {/* Last Purchase Price */}
+                    <div>
+                      <p className="text-gray-500 dark:text-gray-400">Last Purchase Price</p>
+                      {editingProduct?.id === product.id && editingProduct.field === 'lastPurchasePrice' ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={editingProduct.value as number}
+                            onChange={(e) => setEditingProduct({ ...editingProduct, value: Number(e.target.value) })}
+                            className="w-24"
+                          />
+                          <button
+                            onClick={() => handleUpdateField(product.id, 'lastPurchasePrice', editingProduct.value)}
+                            className="text-xs text-green-600 hover:text-green-700"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditingProduct(null)}
+                            className="text-xs text-gray-500 hover:text-gray-600"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-gray-900 dark:text-white">${product.lastPurchasePrice.toFixed(2)}</p>
+                          <button
+                            onClick={() => startEditing(product, 'lastPurchasePrice')}
+                            className="text-xs text-gray-500 hover:text-gray-600"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Supplier */}
+                  <div>
+                    {editingProduct?.id === product.id && editingProduct.field === 'supplier' ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={editingProduct.value as string}
+                          onChange={(e) => setEditingProduct({ ...editingProduct, value: e.target.value })}
+                          className="w-48"
+                        />
+                        <button
+                          onClick={() => handleUpdateField(product.id, 'supplier', editingProduct.value)}
+                          className="text-xs text-green-600 hover:text-green-700"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditingProduct(null)}
+                          className="text-xs text-gray-500 hover:text-gray-600"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm text-gray-500">Supplier: {product.supplier || 'None'}</p>
+                        <button
+                          onClick={() => startEditing(product, 'supplier')}
+                          className="text-xs text-gray-500 hover:text-gray-600"
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Cost History & Analysis */}
+                  <CostHistory entries={product.costHistory} />
+                  <CostAnalysis product={product} />
+
+                  {/* Additional Info */}
+                  <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
+                    <p>
+                      Profit per Unit: ${calculateProfitPerUnit(product.retailPrice, product.averageCost).toFixed(2)} • 
+                      Total Investment: ${(product.averageCost * product.currentStock).toFixed(2)}
+                    </p>
+                  </div>
+
+                  {/* Add inactive indicator */}
+                  {!product.active && (
+                    <div className="mt-2 text-sm text-gray-500">
+                      This product is hidden
+                    </div>
+                  )}
                 </div>
+              ))}
+
+              {/* Delete Button */}
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={() => {
+                    setSelectedProducts(group.map(p => p.id))
+                    setShowBulkDelete(true)
+                  }}
+                  className="text-sm text-red-600 hover:text-red-700"
+                >
+                  Delete
+                </button>
               </div>
-            </Card>
-          )
-        })}
+            </div>
+          </Card>
+        ))}
       </div>
 
       {/* Bulk Delete Confirmation Modal */}

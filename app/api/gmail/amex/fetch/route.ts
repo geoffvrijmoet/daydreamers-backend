@@ -13,7 +13,10 @@ export async function GET() {
 
     // First, get all existing Gmail transaction emailIds from MongoDB
     const existingTransactions = await db.collection('transactions')
-      .find({ source: 'gmail' })
+      .find({ 
+        source: 'gmail',
+        type: 'purchase'
+      })
       .project({ emailId: 1 })
       .toArray()
     

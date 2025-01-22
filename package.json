@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "update-amex": "ts-node -r tsconfig-paths/register -r dotenv/config scripts/update-amex-transactions.ts",
-    "create-customers": "node scripts/create-customers.js"
+    "create-customers": "node scripts/create-customers.js",
+    "dedupe": "ts-node -r tsconfig-paths/register -r dotenv/config scripts/dedupe-transactions.ts",
+    "create-suppliers": "ts-node -r tsconfig-paths/register -r dotenv/config scripts/create-suppliers.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.9.6",
@@ -25,6 +27,7 @@
     "dotenv": "^16.4.5",
     "google-auth-library": "^9.15.0",
     "googleapis": "^144.0.0",
+    "jsdom": "^26.0.0",
     "lucide-react": "^0.460.0",
     "mongodb": "^6.11.0",
     "next": "14.2.16",
@@ -40,6 +43,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@types/jsdom": "^21.1.7",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

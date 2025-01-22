@@ -46,7 +46,7 @@ export type CostHistoryEntry = {
   quantity: number
   unitPrice: number
   totalPrice: number
-  source: 'square' | 'shopify' | 'gmail'
+  source: 'square' | 'shopify' | 'gmail' | 'manual'
   invoiceId?: string
   notes?: string
 }

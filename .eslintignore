@@ -1,2 +1,4 @@
-scripts/create-customers.js
-lib/db.js 
+scripts/*
+lib/db.js
+scripts/create-suppliers.ts
+scripts/dedupe-transactions.ts 
