@@ -427,15 +427,16 @@ export function TransactionsList() {
   };
 
   const renderTransactionStatus = (transaction: TransactionData) => {
+    const status = transaction?.status || 'unknown';
     return (
       <span className={cn(
         "px-2 py-1 text-xs rounded",
-        transaction.status === 'completed' ? "bg-green-100 text-green-700" :
-        transaction.status === 'cancelled' ? "bg-red-100 text-red-700" :
-        transaction.status === 'refunded' ? "bg-yellow-100 text-yellow-700" :
+        status === 'completed' ? "bg-green-100 text-green-700" :
+        status === 'cancelled' ? "bg-red-100 text-red-700" :
+        status === 'refunded' ? "bg-yellow-100 text-yellow-700" :
         "bg-gray-100 text-gray-700"
       )}>
-        {transaction.status.toUpperCase()}
+        {status.toUpperCase()}
       </span>
     )
   }

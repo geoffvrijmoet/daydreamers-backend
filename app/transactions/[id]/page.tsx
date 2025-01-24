@@ -105,8 +105,6 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
   const [error, setError] = useState<string | null>(null)
   const [profitDetails, setProfitDetails] = useState<TransactionProfitDetails | null>(null)
   const [saving, setSaving] = useState(false)
-  const [savingProfit, setSavingProfit] = useState(false)
-  const [profitError, setProfitError] = useState<string | null>(null)
   const [fetchingFees, setFetchingFees] = useState(false)
 
   // Move these calculations into the component scope
@@ -349,8 +347,8 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
       
       const totalItemRevenue = itemRevenues.reduce((sum, item) => sum + item.revenue, 0);
 
-      transaction.lineItems.forEach((item, index) => {
-        console.log(`[Profit Calc] Processing item ${index + 1}:`, {
+      transaction.lineItems.forEach(item => {
+        console.log(`[Profit Calc] Processing item:`, {
           name: item.name,
           quantity: item.quantity,
           price: item.price,
@@ -369,11 +367,11 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
         const revenueShare = revenue / totalItemRevenue;
         const itemTaxShare = calculatedTax * revenueShare;
         const itemFeesShare = creditCardFees * revenueShare;
-        
+
         const calculation: ProfitCalculation = {
           name: item.name,
-          salePrice,
           quantity,
+          salePrice: salePrice,
           itemCost: 0,
           itemProfit: 0,
           hasCostData: false
@@ -385,7 +383,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
           // Profit = Revenue - Cost - Item's share of tax and fees
           const profit = revenue - totalCost - itemTaxShare - itemFeesShare;
 
-          console.log(`[Profit Calc] Item ${index + 1} profit calculation:`, {
+          console.log(`[Profit Calc] Item ${quantity} profit calculation:`, {
             revenue,
             costPerUnit,
             totalCost,
@@ -402,7 +400,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
           profitDetails.totalCost += totalCost;
           profitDetails.totalProfit += profit;
         } else {
-          console.log(`[Profit Calc] Item ${index + 1} missing cost data`);
+          console.log(`[Profit Calc] Item ${quantity} missing cost data`);
           profitDetails.itemsWithoutCost++;
         }
 
@@ -415,7 +413,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
       const totalItemRevenue = transaction.lineItems.reduce((sum, item) => 
         sum + ((item.grossSalesMoney?.amount ?? item.price * 100) / 100) * item.quantity, 0);
 
-      transaction.lineItems.forEach((item, index) => {
+      transaction.lineItems.forEach(item => {
         const quantity = item.quantity;
         const price = (item.grossSalesMoney?.amount ?? item.price * 100) / 100;
         const revenue = price * quantity;
@@ -444,10 +442,17 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
       const totalItemRevenue = transaction.products.reduce((sum, product) => 
         sum + product.totalPrice, 0);
 
-      transaction.products.forEach((product, index) => {
-        const quantity = product.quantity;
-        const price = product.unitPrice;
-        const revenue = product.totalPrice;
+      transaction.products.forEach(item => {
+        console.log(`[Profit Calc] Processing manual product:`, {
+          name: item.name,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          mongoProduct: item.mongoProduct
+        });
+
+        const quantity = item.quantity;
+        const price = item.unitPrice;
+        const revenue = item.totalPrice;
         
         // Calculate this item's share of tax and fees based on its proportion of total revenue
         const revenueShare = revenue / totalItemRevenue;
@@ -455,7 +460,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
         const itemFeesShare = creditCardFees * revenueShare;
 
         const calculation: ProfitCalculation = {
-          name: product.name,
+          name: item.name,
           quantity,
           salePrice: price,
           itemCost: 0,
@@ -463,8 +468,8 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
           hasCostData: false
         };
 
-        if (product.mongoProduct?.averageCost) {
-          const costPerUnit = product.mongoProduct.averageCost;
+        if (item.mongoProduct?.averageCost) {
+          const costPerUnit = item.mongoProduct.averageCost;
           const totalCost = costPerUnit * quantity;
           const profit = revenue - totalCost - itemTaxShare - itemFeesShare;
 
@@ -651,8 +656,8 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     if (!transaction) return null;
 
     if (transaction.source === 'shopify' && transaction.lineItems) {
-      return transaction.lineItems.map((item) => (
-        <div key={item.variant_id || item.name} className="flex items-center">
+      return transaction.lineItems.map(item => (
+        <div key={`${item.variant_id || item.name}-${item.quantity}-${item.price}`} className="flex items-center">
           <span>{item.quantity}x</span>
           <span className="ml-2">{item.name}</span>
           {item.sku && <span className="ml-2 text-gray-500">({item.sku})</span>}
@@ -664,8 +669,8 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     }
 
     if (transaction.source === 'square' && transaction.lineItems) {
-      return transaction.lineItems.map((item) => (
-        <div key={item.name} className="flex items-center">
+      return transaction.lineItems.map(item => (
+        <div key={`${item.name}-${item.quantity}-${item.price}`} className="flex items-center">
           <span>{item.quantity}x</span>
           <span className="ml-2">{item.name ?? 'Unnamed Product'}</span>
           {item.variationName && <span className="ml-1">({item.variationName})</span>}
