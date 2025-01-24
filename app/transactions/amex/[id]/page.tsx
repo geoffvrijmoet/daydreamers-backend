@@ -347,7 +347,7 @@ export default function AmexTransactionEdit({ params }: { params: { id: string }
                 map.set(product.name, product)
               }
               return map
-            }, new Map()).values()
+            }, new Map<string, ParsedProduct>()).values()
           )
 
           console.log('\nAfter deduplication:')

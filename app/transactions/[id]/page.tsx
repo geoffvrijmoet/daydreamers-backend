@@ -758,186 +758,32 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
   }
 
   const renderLineItems = () => {
-    if (transaction.source === 'shopify' && transaction.lineItems && transaction.lineItems.length > 0) {
-      return transaction.lineItems.map((item, idx) => {
-        const profitCalc = profitDetails?.lineItemProfits[idx];
-        const isExpanded = expandedItems.has(idx);
-        return (
-          <div key={idx} className="p-2 bg-gray-50 rounded mb-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="flex items-center">
-                  <span className="font-medium">{item.quantity}x</span>
-                  <span className="ml-2">{item.name}</span>
-                  {item.sku && <span className="ml-2 text-gray-500">({item.sku})</span>}
-                </div>
-                <div className="text-gray-500">
-                  <span className="mx-1">@</span>
-                  <span>${Number(item.price).toFixed(2)}</span>
-                  <span className="mx-1">=</span>
-                  <span className="font-medium">${(Number(item.price) * item.quantity).toFixed(2)}</span>
-                  {profitCalc && (
-                    <button 
-                      onClick={() => toggleItemExpansion(idx)}
-                      className="ml-2 hover:bg-gray-100 rounded px-2 py-1 flex items-center gap-1"
-                    >
-                      {profitCalc.hasCostData ? (
-                        <>
-                          <span className={profitCalc.itemProfit >= 0 ? "text-green-600" : "text-red-600"}>
-                            Profit: ${profitCalc.itemProfit.toFixed(2)}
-                          </span>
-                          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                        </>
-                      ) : (
-                        <span className="text-yellow-600">No cost data</span>
-                      )}
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {!item.mongoProduct && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      if (!item.variant_id) {
-                        alert('No Shopify variant ID found for this item');
-                        return;
-                      }
-                      const response = await fetch(`/api/products/shopify/find-by-variant?variantId=${item.variant_id}`);
-                      const data = await response.json();
-                      if (data.product) {
-                        setTransaction(prev => {
-                          if (!prev) return prev;
-                          return {
-                            ...prev,
-                            lineItems: prev.lineItems?.map(lineItem => 
-                              lineItem.variant_id === item.variant_id
-                                ? { ...lineItem, mongoProduct: data.product }
-                                : lineItem
-                            )
-                          };
-                        });
-                        alert(`Found MongoDB product:\nName: ${data.product.name}\nSKU: ${data.product.sku}\nAverage Cost: $${data.product.averageCost?.toFixed(2) ?? 'Not set'}`);
-                      } else {
-                        alert('No MongoDB product found. Please link this product in the Products section.');
-                      }
-                    }}
-                  >
-                    Check Product Link
-                  </Button>
-                )}
-              </div>
-            </div>
-            {isExpanded && profitCalc && profitCalc.hasCostData && (
-              <div className="mt-2 ml-8 text-sm text-gray-500 border-l-2 border-gray-200 pl-2">
-                <div>Cost per unit: ${(profitCalc.itemCost / profitCalc.quantity).toFixed(2)}</div>
-                <div>Total cost: ${profitCalc.itemCost.toFixed(2)}</div>
-                <div>Revenue: ${(profitCalc.salePrice * profitCalc.quantity).toFixed(2)}</div>
-                <div>Margin: {((profitCalc.itemProfit / (profitCalc.salePrice * profitCalc.quantity)) * 100).toFixed(1)}%</div>
-              </div>
-            )}
-          </div>
-        );
-      });
+    if (!transaction) return null;
+
+    if (transaction.source === 'shopify' && transaction.lineItems) {
+      return transaction.lineItems.map((item, idx) => (
+        <div key={`${item.name}-${idx}`} className="flex items-center">
+          <span>{item.quantity}x</span>
+          <span className="ml-2">{item.name}</span>
+          {item.sku && <span className="ml-2 text-gray-500">({item.sku})</span>}
+          <span className="ml-2 text-gray-500">
+            (${(Number(item.price) * item.quantity).toFixed(2)})
+          </span>
+        </div>
+      ));
     }
 
     if (transaction.source === 'square' && transaction.lineItems) {
-      return (
-        <div className="space-y-2">
-          {transaction.lineItems.map((item, idx) => {
-            const profitCalc = profitDetails?.lineItemProfits[idx];
-            const isExpanded = expandedItems.has(idx);
-            return (
-              <div key={idx} className="p-2 bg-gray-50 rounded">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <span className="font-medium">{item.quantity}x</span>
-                    <span className="ml-2">{item.name}</span>
-                    {item.variationName && <span className="ml-1">({item.variationName})</span>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-500">
-                      ${((item.grossSalesMoney?.amount ?? item.price * 100) / 100).toFixed(2)}
-                    </span>
-                    {profitCalc && (
-                      <button 
-                        onClick={() => toggleItemExpansion(idx)}
-                        className="hover:bg-gray-100 rounded px-2 py-1 flex items-center gap-1"
-                      >
-                        <span className={profitCalc.itemProfit >= 0 ? "text-green-600" : "text-red-600"}>
-                          Profit: ${profitCalc.itemProfit.toFixed(2)}
-                        </span>
-                        {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {isExpanded && profitCalc && (
-                  <div className="mt-2 ml-8 text-sm text-gray-500 border-l-2 border-gray-200 pl-2">
-                    <div>Cost per unit: ${(profitCalc.itemCost / profitCalc.quantity).toFixed(2)}</div>
-                    <div>Total cost: ${profitCalc.itemCost.toFixed(2)}</div>
-                    <div>Revenue: ${(profitCalc.salePrice * profitCalc.quantity).toFixed(2)}</div>
-                    <div>Margin: {((profitCalc.itemProfit / (profitCalc.salePrice * profitCalc.quantity)) * 100).toFixed(1)}%</div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+      return transaction.lineItems.map((item, idx) => (
+        <div key={`${item.name}-${idx}`} className="flex items-center">
+          <span>{item.quantity}x</span>
+          <span className="ml-2">{item.name ?? 'Unnamed Product'}</span>
+          {item.variationName && <span className="ml-1">({item.variationName})</span>}
+          <span className="ml-2 text-gray-500">
+            (${((item.grossSalesMoney?.amount ?? item.price * 100) / 100).toFixed(2)})
+          </span>
         </div>
-      )
-    }
-
-    if (transaction.source === 'manual' && transaction.products) {
-      return (
-        <div className="space-y-2">
-          {transaction.products.map((product, idx) => {
-            const profitCalc = profitDetails?.lineItemProfits[idx];
-            const isExpanded = expandedItems.has(idx);
-            return (
-              <div key={idx} className="p-2 bg-gray-50 rounded">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <span className="font-medium">{product.quantity}x</span>
-                    <span className="ml-2">{product.name}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-500">
-                      ${product.totalPrice.toFixed(2)}
-                    </span>
-                    {profitCalc && (
-                      <button 
-                        onClick={() => toggleItemExpansion(idx)}
-                        className="hover:bg-gray-100 rounded px-2 py-1 flex items-center gap-1"
-                      >
-                        {profitCalc.hasCostData ? (
-                          <>
-                            <span className={profitCalc.itemProfit >= 0 ? "text-green-600" : "text-red-600"}>
-                              Profit: ${profitCalc.itemProfit.toFixed(2)}
-                            </span>
-                            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                          </>
-                        ) : (
-                          <span className="text-yellow-600">No cost data</span>
-                        )}
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {isExpanded && profitCalc && profitCalc.hasCostData && (
-                  <div className="mt-2 ml-8 text-sm text-gray-500 border-l-2 border-gray-200 pl-2">
-                    <div>Cost per unit: ${(profitCalc.itemCost / profitCalc.quantity).toFixed(2)}</div>
-                    <div>Total cost: ${profitCalc.itemCost.toFixed(2)}</div>
-                    <div>Revenue: ${(profitCalc.salePrice * profitCalc.quantity).toFixed(2)}</div>
-                    <div>Margin: {((profitCalc.itemProfit / (profitCalc.salePrice * profitCalc.quantity)) * 100).toFixed(1)}%</div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )
+      ));
     }
 
     return (

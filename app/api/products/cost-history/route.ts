@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 import { ObjectId } from 'mongodb'
+import { Db } from 'mongodb'
 
 type CostHistoryEntry = {
   invoiceId: string
@@ -13,7 +14,7 @@ type CostHistoryEntry = {
 }
 
 // Helper function to clean up duplicate entries
-async function cleanupDuplicateEntries(db: any, productId: string) {
+async function cleanupDuplicateEntries(db: Db, productId: string) {
   const product = await db.collection('products').findOne({ 
     _id: new ObjectId(productId) 
   })
@@ -33,7 +34,7 @@ async function cleanupDuplicateEntries(db: any, productId: string) {
   // Find invoiceIds with multiple entries
   type InvoiceEntry = [string, CostHistoryEntry[]]
   const duplicates = (Object.entries(entriesByInvoice)
-    .filter(([_, entries]) => (entries as CostHistoryEntry[]).length > 1)) as InvoiceEntry[]
+    .filter(([, entries]) => (entries as CostHistoryEntry[]).length > 1)) as InvoiceEntry[]
 
   if (duplicates.length === 0) {
     console.log('No duplicate entries found for product:', productId)
@@ -49,7 +50,7 @@ async function cleanupDuplicateEntries(db: any, productId: string) {
   })
 
   // Combine duplicate entries
-  const updatedCostHistory = product.costHistory.reduce((acc: any[], entry: any) => {
+  const updatedCostHistory = product.costHistory.reduce((acc: CostHistoryEntry[], entry: CostHistoryEntry) => {
     if (!entry.invoiceId) {
       acc.push(entry)
       return acc
@@ -70,8 +71,8 @@ async function cleanupDuplicateEntries(db: any, productId: string) {
     // Combine the entries
     const combinedEntry = {
       ...entry,
-      quantity: duplicateEntries.reduce((sum: number, e: any) => sum + e.quantity, 0),
-      totalPrice: duplicateEntries.reduce((sum: number, e: any) => sum + e.totalPrice, 0)
+      quantity: duplicateEntries.reduce((sum: number, e: CostHistoryEntry) => sum + e.quantity, 0),
+      totalPrice: duplicateEntries.reduce((sum: number, e: CostHistoryEntry) => sum + e.totalPrice, 0)
     }
     // Recalculate unit price
     combinedEntry.unitPrice = Number((combinedEntry.totalPrice / combinedEntry.quantity).toFixed(2))
@@ -170,7 +171,6 @@ export async function POST(request: Request) {
       (e: CostHistoryEntry) => e.invoiceId === entry.invoiceId
     )
 
-    let updateOperation
     if (existingEntryIndex !== -1) {
       console.log('Found existing entry for invoice:', entry.invoiceId)
       // Update existing entry

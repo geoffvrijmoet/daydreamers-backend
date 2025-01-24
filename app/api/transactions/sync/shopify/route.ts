@@ -49,17 +49,21 @@ export async function POST(request: Request) {
       try {
         const transactions = await shopifyClient.transaction.list(order.id);
         // Find the successful payment transaction
+        interface ShopifyTransaction {
+          status: string;
+          kind: string;
+          net_payment?: number;
+        }
         const paymentTransaction = transactions.find(t => 
           t.status === 'success' && 
           t.kind === 'sale' && 
-          // Use type assertion since the Shopify types are incomplete
-          (t as any).net_payment !== undefined
-        );
+          (t as ShopifyTransaction).net_payment !== undefined
+        ) as ShopifyTransaction | undefined;
         
         if (paymentTransaction) {
           // Processing fee is the difference between total price and net payment
           const totalAmount = Number(order.total_price);
-          const netPayment = Number((paymentTransaction as any).net_payment);
+          const netPayment = Number(paymentTransaction.net_payment);
           processingFee = totalAmount - netPayment;
           
           console.log(`[Shopify Sync] Found processing fees for order ${order.id}:`, {

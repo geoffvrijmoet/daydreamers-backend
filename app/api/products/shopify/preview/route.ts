@@ -193,7 +193,7 @@ export async function GET() {
         message: error.message,
         stack: error.stack,
         name: error.name,
-        // @ts-ignore
+        // @ts-expect-error Error might have a response field from Shopify client
         response: error.response?.body,
       })
     }

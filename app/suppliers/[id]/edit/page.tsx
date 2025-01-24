@@ -8,15 +8,6 @@ import { Card } from '@/components/ui/card'
 import { ArrowLeft, Mail, Loader2, Copy, Check } from 'lucide-react'
 import Link from 'next/link'
 
-interface Supplier {
-  _id: string
-  name: string
-  aliases: string[]
-  invoiceEmail: string
-  invoiceSubjectPattern: string
-  skuPrefix: string
-}
-
 export default function EditSupplierPage({ params }: { params: { id: string } }) {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)

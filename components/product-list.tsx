@@ -129,7 +129,6 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
   const [showBulkDelete, setShowBulkDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editingProduct, setEditingProduct] = useState<EditingProduct | null>(null)
-  const [editingPrice, setEditingPrice] = useState<number | null>(null)
   const [expandedProducts, setExpandedProducts] = useState<string[]>([])
 
   useEffect(() => {
@@ -278,14 +277,14 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
         {groupedProducts.map(group => (
           <Card key={group[0].id} className="p-4">
             <div 
-              className="flex items-center justify-between cursor-pointer"
+              className="flex items-center justify-between cursor-pointer group"
               onClick={() => toggleProductExpansion(group[0].id)}
             >
               <div className="flex items-center gap-4">
                 {expandedProducts.includes(group[0].id) ? (
-                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                  <ChevronDown className="h-4 w-4 text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                 ) : (
-                  <ChevronRight className="h-4 w-4 text-gray-500" />
+                  <ChevronRight className="h-4 w-4 text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                 )}
                 <div>
                   <h3 className="text-lg font-medium">

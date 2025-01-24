@@ -3,6 +3,17 @@ import { shopifyClient } from '@/lib/shopify'
 import { getDb } from '@/lib/db'
 import { ObjectId } from 'mongodb'
 
+interface ShopifyTransaction {
+  status: string;
+  kind: string;
+  amount: string;
+  fee?: number;
+  gateway: string;
+  processed_at: string;
+  receipt?: unknown;
+  payment_details?: unknown;
+}
+
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
@@ -57,7 +68,7 @@ export async function POST(
     // Get transaction fees from Shopify
     console.log('[API] Fetching transactions from Shopify...');
     let processingFee = 0;
-    const transactions = await shopifyClient.transaction.list(shopifyOrderId);
+    const transactions = await shopifyClient.transaction.list(shopifyOrderId) as ShopifyTransaction[];
     
     // Log the complete first transaction to see all available fields
     console.log('[API] First transaction full data:', transactions[0]);
@@ -69,11 +80,10 @@ export async function POST(
         kind: t.kind,
         status: t.status,
         amount: t.amount,
-        fee: (t as any).fee,
+        fee: t.fee,
         gateway: t.gateway,
-        // Log all potentially useful fields
-        receipt: (t as any).receipt,
-        payment_details: (t as any).payment_details,
+        receipt: t.receipt,
+        payment_details: t.payment_details,
         processed_at: t.processed_at
       }))
     });
@@ -86,8 +96,8 @@ export async function POST(
     
     if (paymentTransaction) {
       // Try to get the fee from the transaction
-      if ((paymentTransaction as any).fee) {
-        processingFee = Number((paymentTransaction as any).fee);
+      if (paymentTransaction.fee) {
+        processingFee = Number(paymentTransaction.fee);
       } else {
         // If no fee field, use a default calculation (2.9% + $0.30)
         const amount = Number(paymentTransaction.amount);
@@ -96,7 +106,7 @@ export async function POST(
       
       console.log(`[API] Processing fees calculation:`, {
         amount: paymentTransaction.amount,
-        fee: (paymentTransaction as any).fee,
+        fee: paymentTransaction.fee,
         calculatedFee: processingFee,
         transactionType: paymentTransaction.kind,
         gateway: paymentTransaction.gateway
@@ -129,13 +139,14 @@ export async function POST(
         processingFee,
         transaction: result
       })
-    } else {
-      console.log('[API] No payment transaction found');
-      return NextResponse.json(
-        { error: 'No payment transaction found' },
-        { status: 404 }
-      )
     }
+
+    console.log('[API] No payment transaction found');
+    return NextResponse.json(
+      { error: 'No payment transaction found' },
+      { status: 404 }
+    )
+
   } catch (error) {
     console.error('[API] Error:', error)
     return NextResponse.json(

@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { shopifyClient } from '@/lib/shopify'
 import { getDb } from '@/lib/db'
 import { ObjectId } from 'mongodb'
 
