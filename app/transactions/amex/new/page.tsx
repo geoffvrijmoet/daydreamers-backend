@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -41,6 +41,184 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
     return selectedProducts.reduce((sum, product) => sum + product.totalPrice, 0)
   }, [selectedProducts])
 
+  const handleFetchEmailDetails = useCallback(async (skipCount?: number) => {
+    try {
+      setIsFetchingEmail(true)
+      setError(null)
+      const skip = skipCount ?? emailSkip
+      const response = await fetch(`/api/gmail/amex/email?emailId=${searchParams.emailId}&skip=${skip}`)
+      const data = await response.json()
+      
+      if (data.error) {
+        setError(data.error)
+        return
+      }
+
+      if (data.extractedSupplier) {
+        setSupplier(data.extractedSupplier)
+      } else {
+        setError('Could not find supplier name in email')
+      }
+
+      // Set email preview
+      setEmailPreview(data.emailBody)
+      setIsLastEmail(data.isLastEmail)
+
+      // Handle parsed data if available
+      if (data.parsedData) {
+        // Set order number if found
+        if (data.parsedData.orderNumber) {
+          setSupplierOrderNumber(data.parsedData.orderNumber)
+        }
+
+        // Set products if found
+        if (data.parsedData.products && data.parsedData.products.length > 0) {
+          // Define the product type
+          type ParsedProduct = {
+            name: string
+            quantity: number
+            unitPrice: number
+            totalPrice: number
+          }
+
+          // First, deduplicate products by name (keeping only first occurrence)
+          const uniqueProducts: ParsedProduct[] = Array.from(
+            data.parsedData.products.reduce((map: Map<string, ParsedProduct>, product: ParsedProduct) => {
+              // Only add the product if we haven't seen its name before
+              if (!map.has(product.name)) {
+                map.set(product.name, product)
+              }
+              return map
+            }, new Map()).values()
+          )
+
+          // Try to match each product with our database
+          const productMatches = await Promise.all(
+            uniqueProducts.map(async (parsedProduct: ParsedProduct) => {
+              // Map short names to full product names
+              let searchName = parsedProduct.name
+              console.log('\nMatching product:', {
+                originalName: parsedProduct.name,
+                type: parsedProduct.name.includes('Pure') ? 'Pure product' : 
+                      parsedProduct.name.includes('for') ? 'For Cats/Dogs product' : 'Other'
+              })
+
+              if (searchName.includes('Pure')) {
+                // Handle Pure products (e.g. "Pure Turkey" -> "Viva Raw Pure Turkey 1 lb - Regular")
+                const protein = searchName.split(' ')[1]
+                searchName = `Viva Raw Pure ${protein} 1 lb - Regular`
+                console.log('Mapped Pure product:', { from: parsedProduct.name, to: searchName })
+              } else if (searchName.includes('for')) {
+                // Handle "for Cats/Dogs" products (e.g. "Duck for Cats" -> "Viva Raw Duck for Cats 1 lb - Regular")
+                const [protein, , animal] = searchName.split(' ')
+                // Try both with and without "1 lb - Regular" suffix
+                const baseSearchName = `Viva Raw ${protein} for ${animal}`
+                searchName = `${baseSearchName} 1 lb - Regular`
+                console.log('Mapped For product:', { 
+                  from: parsedProduct.name, 
+                  to: searchName,
+                  alternateSearch: baseSearchName
+                })
+              }
+
+              // Search for the product in our database
+              console.log('Searching for:', searchName)
+              const searchResponse = await fetch(`/api/products/search?query=${encodeURIComponent(searchName)}`)
+              const searchData = await searchResponse.json()
+              
+              // If no results and we're searching for a "for" product, try without the suffix
+              if (searchName.includes('for') && (!searchData.products || searchData.products.length === 0)) {
+                const baseSearchName = searchName.replace(' 1 lb - Regular', '')
+                console.log('No results, trying without suffix:', baseSearchName)
+                const alternateResponse = await fetch(`/api/products/search?query=${encodeURIComponent(baseSearchName)}`)
+                const alternateData = await alternateResponse.json()
+                if (alternateData.products && alternateData.products.length > 0) {
+                  console.log('Found match with alternate search')
+                  searchData.products = alternateData.products
+                }
+              }
+              
+              console.log('Search results:', {
+                query: searchName,
+                resultsCount: searchData.products?.length || 0,
+                firstMatch: searchData.products?.[0]?.name || 'No match'
+              })
+
+              // Find the best matching product
+              const bestMatch = searchData.products?.[0]
+              
+              if (bestMatch) {
+                console.log('Found match:', {
+                  name: bestMatch.name,
+                  id: bestMatch.id,
+                  productId: bestMatch.id,
+                  lastPurchasePrice: bestMatch.lastPurchasePrice
+                })
+                
+                // Double the quantity since email shows half quantities
+                const actualQuantity = parsedProduct.quantity * 2
+                
+                // Round lastPurchasePrice to 2 decimal places and calculate total
+                const unitPrice = Number(bestMatch.lastPurchasePrice.toFixed(2))
+                const totalPrice = Number((unitPrice * actualQuantity).toFixed(2))
+                
+                const matchedProduct = {
+                  productId: bestMatch.id,
+                  name: bestMatch.name,
+                  quantity: actualQuantity,
+                  unitPrice,
+                  totalPrice
+                }
+
+                console.log('Matched product details:', {
+                  original: parsedProduct,
+                  matched: matchedProduct,
+                  bestMatch: {
+                    id: bestMatch.id,
+                    productId: bestMatch.id,
+                    name: bestMatch.name
+                  }
+                })
+                return matchedProduct
+              }
+
+              console.log(`Could not find match for product: ${searchName}`)
+              return null
+            })
+          )
+
+          // Filter out any products we couldn't match and set them
+          const validProducts = productMatches.filter(p => p !== null)
+          console.log('Setting selected products:', validProducts.map(p => ({
+            name: p.name,
+            productId: p.productId,
+            quantity: p.quantity,
+            unitPrice: p.unitPrice,
+            totalPrice: p.totalPrice
+          })))
+          
+          if (validProducts.length > 0) {
+            setSelectedProducts(validProducts)
+          }
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch email details')
+    } finally {
+      setIsFetchingEmail(false)
+    }
+  }, [
+    emailSkip,
+    searchParams.emailId,
+    setIsFetchingEmail,
+    setError,
+    setSupplier,
+    setEmailPreview,
+    setIsLastEmail,
+    setSupplierOrderNumber,
+    setSelectedProducts
+  ])
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -71,7 +249,7 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
     }
 
     fetchData()
-  }, [searchParams.emailId])
+  }, [searchParams.emailId, handleFetchEmailDetails])
 
   // Filter and group products based on search query
   const filteredAndGroupedProducts = useMemo(() => {
@@ -258,174 +436,6 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
       setError(err instanceof Error ? err.message : 'Failed to create transaction')
     } finally {
       setSaving(false)
-    }
-  }
-
-  const handleFetchEmailDetails = async (skipCount?: number) => {
-    try {
-      setIsFetchingEmail(true)
-      setError(null)
-      const skip = skipCount ?? emailSkip
-      const response = await fetch(`/api/gmail/amex/email?emailId=${searchParams.emailId}&skip=${skip}`)
-      const data = await response.json()
-      
-      if (data.error) {
-        setError(data.error)
-        return
-      }
-
-      if (data.extractedSupplier) {
-        setSupplier(data.extractedSupplier)
-      } else {
-        setError('Could not find supplier name in email')
-      }
-
-      // Set email preview
-      setEmailPreview(data.emailBody)
-      setIsLastEmail(data.isLastEmail)
-
-      // Handle parsed data if available
-      if (data.parsedData) {
-        // Set order number if found
-        if (data.parsedData.orderNumber) {
-          setSupplierOrderNumber(data.parsedData.orderNumber)
-        }
-
-        // Set products if found
-        if (data.parsedData.products && data.parsedData.products.length > 0) {
-          // Define the product type
-          type ParsedProduct = {
-            name: string
-            quantity: number
-            unitPrice: number
-            totalPrice: number
-          }
-
-          // First, deduplicate products by name (keeping only first occurrence)
-          const uniqueProducts: ParsedProduct[] = Array.from(
-            data.parsedData.products.reduce((map: Map<string, ParsedProduct>, product: ParsedProduct) => {
-              // Only add the product if we haven't seen its name before
-              if (!map.has(product.name)) {
-                map.set(product.name, product)
-              }
-              return map
-            }, new Map()).values()
-          )
-
-          // Try to match each product with our database
-          const productMatches = await Promise.all(
-            uniqueProducts.map(async (parsedProduct: ParsedProduct) => {
-              // Map short names to full product names
-              let searchName = parsedProduct.name
-              console.log('\nMatching product:', {
-                originalName: parsedProduct.name,
-                type: parsedProduct.name.includes('Pure') ? 'Pure product' : 
-                      parsedProduct.name.includes('for') ? 'For Cats/Dogs product' : 'Other'
-              })
-
-              if (searchName.includes('Pure')) {
-                // Handle Pure products (e.g. "Pure Turkey" -> "Viva Raw Pure Turkey 1 lb - Regular")
-                const protein = searchName.split(' ')[1]
-                searchName = `Viva Raw Pure ${protein} 1 lb - Regular`
-                console.log('Mapped Pure product:', { from: parsedProduct.name, to: searchName })
-              } else if (searchName.includes('for')) {
-                // Handle "for Cats/Dogs" products (e.g. "Duck for Cats" -> "Viva Raw Duck for Cats 1 lb - Regular")
-                const [protein, , animal] = searchName.split(' ')
-                // Try both with and without "1 lb - Regular" suffix
-                const baseSearchName = `Viva Raw ${protein} for ${animal}`
-                searchName = `${baseSearchName} 1 lb - Regular`
-                console.log('Mapped For product:', { 
-                  from: parsedProduct.name, 
-                  to: searchName,
-                  alternateSearch: baseSearchName
-                })
-              }
-
-              // Search for the product in our database
-              console.log('Searching for:', searchName)
-              const searchResponse = await fetch(`/api/products/search?query=${encodeURIComponent(searchName)}`)
-              const searchData = await searchResponse.json()
-              
-              // If no results and we're searching for a "for" product, try without the suffix
-              if (searchName.includes('for') && (!searchData.products || searchData.products.length === 0)) {
-                const baseSearchName = searchName.replace(' 1 lb - Regular', '')
-                console.log('No results, trying without suffix:', baseSearchName)
-                const alternateResponse = await fetch(`/api/products/search?query=${encodeURIComponent(baseSearchName)}`)
-                const alternateData = await alternateResponse.json()
-                if (alternateData.products && alternateData.products.length > 0) {
-                  console.log('Found match with alternate search')
-                  searchData.products = alternateData.products
-                }
-              }
-              
-              console.log('Search results:', {
-                query: searchName,
-                resultsCount: searchData.products?.length || 0,
-                firstMatch: searchData.products?.[0]?.name || 'No match'
-              })
-
-              // Find the best matching product
-              const bestMatch = searchData.products?.[0]
-              
-              if (bestMatch) {
-                console.log('Found match:', {
-                  name: bestMatch.name,
-                  id: bestMatch.id,
-                  productId: bestMatch.id,
-                  lastPurchasePrice: bestMatch.lastPurchasePrice
-                })
-                
-                // Double the quantity since email shows half quantities
-                const actualQuantity = parsedProduct.quantity * 2
-                
-                // Round lastPurchasePrice to 2 decimal places and calculate total
-                const unitPrice = Number(bestMatch.lastPurchasePrice.toFixed(2))
-                const totalPrice = Number((unitPrice * actualQuantity).toFixed(2))
-                
-                const matchedProduct = {
-                  productId: bestMatch.id,
-                  name: bestMatch.name,
-                  quantity: actualQuantity,
-                  unitPrice,
-                  totalPrice
-                }
-
-                console.log('Matched product details:', {
-                  original: parsedProduct,
-                  matched: matchedProduct,
-                  bestMatch: {
-                    id: bestMatch.id,
-                    productId: bestMatch.id,
-                    name: bestMatch.name
-                  }
-                })
-                return matchedProduct
-              }
-
-              console.log(`Could not find match for product: ${searchName}`)
-              return null
-            })
-          )
-
-          // Filter out any products we couldn't match and set them
-          const validProducts = productMatches.filter(p => p !== null)
-          console.log('Setting selected products:', validProducts.map(p => ({
-            name: p.name,
-            productId: p.productId,
-            quantity: p.quantity,
-            unitPrice: p.unitPrice,
-            totalPrice: p.totalPrice
-          })))
-          
-          if (validProducts.length > 0) {
-            setSelectedProducts(validProducts)
-          }
-        }
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch email details')
-    } finally {
-      setIsFetchingEmail(false)
     }
   }
 

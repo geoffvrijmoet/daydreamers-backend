@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Calculator, Save, ChevronDown, ChevronRight } from "lucide-react"
+import { ArrowLeft, Calculator, Save } from "lucide-react"
 import { useRouter } from 'next/navigation'
 import { cn } from "@/lib/utils"
 
@@ -105,7 +105,8 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
   const [error, setError] = useState<string | null>(null)
   const [profitDetails, setProfitDetails] = useState<TransactionProfitDetails | null>(null)
   const [saving, setSaving] = useState(false)
-  const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set())
+  const [savingProfit, setSavingProfit] = useState(false)
+  const [profitError, setProfitError] = useState<string | null>(null)
   const [fetchingFees, setFetchingFees] = useState(false)
 
   // Move these calculations into the component scope
@@ -576,117 +577,6 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     } finally {
       setSaving(false);
     }
-  };
-
-  const toggleItemExpansion = (idx: number) => {
-    setExpandedItems(prev => {
-      const next = new Set(prev);
-      if (next.has(idx)) {
-        next.delete(idx);
-      } else {
-        next.add(idx);
-      }
-      return next;
-    });
-  };
-
-  const renderProfitDetails = () => {
-    if (!profitDetails) return null;
-
-    return (
-      <div className="space-y-4 border-t pt-4">
-        <div className="flex justify-between items-center">
-          <h2 className="text-lg font-medium">Profit Analysis</h2>
-          <Button
-            onClick={saveProfitCalculation}
-            disabled={saving}
-            variant="outline"
-            className="gap-2"
-          >
-            <Save className="w-4 h-4" />
-            {saving ? 'Saving...' : 'Save Calculation'}
-          </Button>
-        </div>
-
-        {/* Debug Information */}
-        <div className="p-4 bg-gray-100 rounded text-sm font-mono mb-4">
-          <h3 className="font-bold mb-2">Debug Info:</h3>
-          <div>Transaction ID: {transaction?._id}</div>
-          <div>Source: {transaction?.source}</div>
-          <div>Line Items: {transaction?.lineItems?.length ?? 0}</div>
-          <div>Items with MongoDB Products: {
-            transaction?.lineItems?.filter(item => item.mongoProduct)?.length ?? 0
-          }</div>
-          <div>Items with Cost Data: {
-            transaction?.lineItems?.filter(item => item.mongoProduct?.averageCost)?.length ?? 0
-          }</div>
-        </div>
-        
-        {/* Individual Item Profits */}
-        <div className="space-y-2">
-          {profitDetails.lineItemProfits.map((item, idx) => (
-            <div key={idx} className="p-2 bg-gray-50 rounded">
-              <div className="flex justify-between items-center">
-                <span className="font-medium">{item.name}</span>
-                {item.hasCostData ? (
-                  <span className={item.itemProfit >= 0 ? "text-green-600" : "text-red-600"}>
-                    ${item.itemProfit.toFixed(2)}
-                  </span>
-                ) : (
-                  <span className="text-yellow-600">No cost data</span>
-                )}
-              </div>
-              {item.hasCostData && (
-                <div className="text-sm text-gray-500 mt-1">
-                  <div className="flex justify-between">
-                    <span>Sale: ${(item.salePrice * item.quantity).toFixed(2)}</span>
-                    <span>Cost: ${item.itemCost.toFixed(2)}</span>
-                  </div>
-                  <div>
-                    Margin: {((item.itemProfit / (item.salePrice * item.quantity)) * 100).toFixed(1)}%
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Summary */}
-        <div className="border-t pt-4 space-y-2">
-          <div className="flex justify-between">
-            <span>Total Revenue:</span>
-            <span>${profitDetails.totalRevenue.toFixed(2)}</span>
-          </div>
-          {transaction?.tip && transaction.tip > 0 && (
-            <div className="flex justify-between text-gray-500 pl-4">
-              <span>Including Tip:</span>
-              <span>+${transaction.tip.toFixed(2)}</span>
-            </div>
-          )}
-          <div className="flex justify-between">
-            <span>Total Cost:</span>
-            <span>${profitDetails.totalCost.toFixed(2)}</span>
-          </div>
-          <div className="flex justify-between font-bold">
-            <span>Total Profit:</span>
-            <span className={profitDetails.totalProfit >= 0 ? "text-green-600" : "text-red-600"}>
-              ${profitDetails.totalProfit.toFixed(2)}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span>Profit Margin:</span>
-            <span>
-              {((profitDetails.totalProfit / profitDetails.totalRevenue) * 100).toFixed(1)}%
-            </span>
-          </div>
-          {profitDetails.itemsWithoutCost > 0 && (
-            <div className="text-yellow-600 text-sm">
-              Note: {profitDetails.itemsWithoutCost} item(s) missing cost data
-            </div>
-          )}
-        </div>
-      </div>
-    );
   };
 
   const recalculateSalesTax = () => {
