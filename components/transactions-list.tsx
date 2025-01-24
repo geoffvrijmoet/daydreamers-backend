@@ -426,44 +426,19 @@ export function TransactionsList() {
     );
   };
 
-  const renderTransactionDetails = (transaction: TransactionData) => {
-    const { taxAmount, taxRate } = calculateTaxDetails(transaction);
-
+  const renderTransactionStatus = (transaction: TransactionData) => {
     return (
-      <div className="flex-shrink-0 ml-4 px-3 py-2 border border-purple-light bg-purple-pastel/50 rounded">
-        <div className="flex flex-col gap-1 text-xs">
-          {/* Show pre-tax amount for all transactions */}
-          <div className="text-green-dark">
-            Pre-tax: ${(transaction.amount - taxAmount).toFixed(2)}
-          </div>
-
-          {/* Show tax for all transactions */}
-          <div className="text-green-dark">
-            Tax ({taxRate}%): ${taxAmount.toFixed(2)}
-          </div>
-
-          {/* Show discount if present */}
-          {transaction.discount && (
-            <div className="text-red-dark">
-              Discount: -${transaction.discount.toFixed(2)}
-            </div>
-          )}
-
-          {/* Show tip if present */}
-          {transaction.tip && (
-            <div className="text-purple-dark">
-              Tip: +${transaction.tip.toFixed(2)}
-            </div>
-          )}
-
-          {/* Show total for all transactions */}
-          <div className="font-bold text-purple-dark">
-            Total: ${transaction.amount.toFixed(2)}
-          </div>
-        </div>
-      </div>
-    );
-  };
+      <span className={cn(
+        "px-2 py-1 text-xs rounded",
+        transaction.status === 'completed' ? "bg-green-100 text-green-700" :
+        transaction.status === 'cancelled' ? "bg-red-100 text-red-700" :
+        transaction.status === 'refunded' ? "bg-yellow-100 text-yellow-700" :
+        "bg-gray-100 text-gray-700"
+      )}>
+        {transaction.status.toUpperCase()}
+      </span>
+    )
+  }
 
   const handleQuickSelect = (range: string) => {
     const today = toEasternTime(new Date())
@@ -612,15 +587,7 @@ export function TransactionsList() {
             </span>
 
             {/* Status Badge (if not completed) */}
-            {typedTransaction.status !== 'completed' && (
-              <span className={cn(
-                "text-xs px-1.5 py-0.5 rounded",
-                typedTransaction.status === 'cancelled' && "bg-red-100 text-red-600",
-                typedTransaction.status === 'refunded' && "bg-yellow-100 text-yellow-600"
-              )}>
-                {typedTransaction.status?.toUpperCase() ?? 'UNKNOWN'}
-              </span>
-            )}
+            {renderTransactionStatus(typedTransaction)}
           </div>
 
           {/* Right side info */}

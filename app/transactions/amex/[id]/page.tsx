@@ -9,6 +9,12 @@ import { type EmailTransaction, type Product } from '@/types'
 import { Loader2, Mail, ArrowLeft, Check, Copy } from 'lucide-react'
 import Link from 'next/link'
 
+interface TransactionProduct {
+  name: string;
+  productId?: string;
+  quantity: number;
+}
+
 export default function AmexTransactionEdit({ params }: { params: { id: string } }) {
   const router = useRouter()
   const [transaction, setTransaction] = useState<EmailTransaction | null>(null)
@@ -80,7 +86,7 @@ export default function AmexTransactionEdit({ params }: { params: { id: string }
         
         // Match transaction products with database products to ensure correct IDs
         if (transactionData.transaction.products) {
-          const matchedProducts = transactionData.transaction.products.map((transactionProduct: any) => {
+          const matchedProducts = transactionData.transaction.products.map((transactionProduct: TransactionProduct) => {
             // Find matching product in database
             const databaseProduct = productsData.products.find(
               (p: Product) => p.name === transactionProduct.name

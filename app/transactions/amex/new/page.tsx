@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { type EmailTransaction, type Product } from '@/types'
+import { type Product } from '@/types'
 import { Loader2, Mail, ArrowLeft, Check, Copy } from 'lucide-react'
 import Link from 'next/link'
 

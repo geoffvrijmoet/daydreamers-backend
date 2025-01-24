@@ -761,8 +761,8 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     if (!transaction) return null;
 
     if (transaction.source === 'shopify' && transaction.lineItems) {
-      return transaction.lineItems.map((item, idx) => (
-        <div key={`${item.name}-${idx}`} className="flex items-center">
+      return transaction.lineItems.map((item) => (
+        <div key={item.variant_id || item.name} className="flex items-center">
           <span>{item.quantity}x</span>
           <span className="ml-2">{item.name}</span>
           {item.sku && <span className="ml-2 text-gray-500">({item.sku})</span>}
@@ -774,8 +774,8 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     }
 
     if (transaction.source === 'square' && transaction.lineItems) {
-      return transaction.lineItems.map((item, idx) => (
-        <div key={`${item.name}-${idx}`} className="flex items-center">
+      return transaction.lineItems.map((item) => (
+        <div key={item.name} className="flex items-center">
           <span>{item.quantity}x</span>
           <span className="ml-2">{item.name ?? 'Unnamed Product'}</span>
           {item.variationName && <span className="ml-1">({item.variationName})</span>}
