@@ -8,30 +8,52 @@ export interface BaseTransaction {
   source: 'square' | 'shopify' | 'amex'
 }
 
-export interface Transaction extends BaseTransaction {
-  _id: ObjectId
+export interface Transaction {
+  _id: string
   id: string
   date: string
-  type: 'sale' | 'refund'
+  type: 'sale' | 'purchase'
   amount: number
-  preTaxAmount?: number
-  taxAmount?: number
   description: string
-  source: 'square' | 'shopify' | 'amex'
-  lineItems?: {
+  source?: 'square' | 'shopify' | 'gmail' | 'manual' | 'venmo'
+  customer?: string
+  paymentMethod?: string
+  lineItems?: Array<{
     name: string
     quantity: number
     price: number
     sku?: string
     variant_id?: string
-  }[]
-  customer?: string
-  paymentMethod?: string
+  }>
+  products?: Array<{
+    name: string
+    quantity: number
+    unitPrice: number
+    totalPrice: number
+    productId?: string
+  }>
+  productsTotal?: number
+  taxAmount?: number
+  preTaxAmount?: number
+  tip?: number
+  discount?: number
   status: 'completed' | 'cancelled' | 'refunded'
   refundAmount?: number
   refundDate?: string
+  voidReason?: string
+  voidedAt?: string
+  supplier?: string
+  supplierOrderNumber?: string
+  notes?: string
   createdAt: string
   updatedAt: string
+  // Shopify specific fields
+  shopifyOrderId?: string
+  shopifyTotalTax?: number
+  shopifySubtotalPrice?: number
+  shopifyTotalPrice?: number
+  shopifyProcessingFee?: number
+  shopifyPaymentGateway?: string
 }
 
 export type TransactionItem = {

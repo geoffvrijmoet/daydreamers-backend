@@ -159,7 +159,9 @@ export async function GET(
 ) {
   try {
     const db = await getDb()
-    const product = await db.collection<Product>('products').findOne({ id: params.id })
+    const product = await db.collection<Product>('products').findOne({ 
+      _id: new ObjectId(params.id)
+    })
 
     if (!product) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 })

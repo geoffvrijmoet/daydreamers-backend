@@ -11,6 +11,8 @@ import { cn } from "@/lib/utils"
 import { CalendarIcon } from "lucide-react"
 import { subDays, startOfYear, startOfDay } from 'date-fns'
 import { toEasternTime, formatInEasternTime } from '@/lib/utils/dates'
+import { useRouter } from 'next/navigation'
+import { ChevronDown, ChevronRight } from "lucide-react"
 
 interface TransactionData {
   _id: string
@@ -18,7 +20,7 @@ interface TransactionData {
   description: string
   amount: number
   type: 'sale' | 'purchase'
-  source?: 'square' | 'shopify' | 'gmail' | 'manual'
+  source?: 'square' | 'shopify' | 'gmail' | 'manual' | 'venmo'
   customer?: string
   paymentMethod?: string
   date: string
@@ -36,14 +38,20 @@ interface TransactionData {
       amount: number
     }
     variationName?: string
-  }>
-  line_items?: Array<{
-    title: string
-    quantity: number
-    price: string
+    sku?: string
+    variant_id?: string
+    mongoProduct?: {
+      _id: string
+      name: string
+      sku: string
+      retailPrice: number
+      currentStock: number
+      lastPurchasePrice: number
+    }
   }>
   productsTotal?: number
   taxAmount: number
+  preTaxAmount?: number
   totalAmount: number
   tip?: number
   discount?: number
@@ -53,6 +61,21 @@ interface TransactionData {
   supplier?: string
   supplierOrderNumber?: string
   notes?: string
+  profitCalculation?: {
+    lineItemProfits: Array<{
+      itemProfit: number
+      itemCost: number
+      quantity: number
+      salePrice: number
+      name: string
+      hasCostData: boolean
+    }>
+    totalProfit: number
+    totalCost: number
+    totalRevenue: number
+    itemsWithoutCost: number
+    creditCardFees: number
+  }
 }
 
 type GroupedTransactions = {
@@ -65,15 +88,18 @@ type GroupedTransactions = {
 }
 
 export function TransactionsList() {
+  const router = useRouter()
   const [startDate, setStartDate] = useState<Date>()
   const [endDate, setEndDate] = useState<Date>()
-  const { transactions, loading, error, refreshTransactions } = useTransactions({
+  const { transactions, loading, error, refreshTransactions, setTransactions } = useTransactions({
     startDate: startDate?.toISOString(),
     endDate: endDate?.toISOString()
   })
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTransaction, setEditingTransaction] = useState<TransactionData | null>(null)
   const [saving, setSaving] = useState(false)
+  const [findingProduct, setFindingProduct] = useState<Set<string>>(new Set())
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     transactions.forEach(transaction => {
@@ -95,6 +121,19 @@ export function TransactionsList() {
 
   const calculateTaxDetails = (transaction: Partial<TransactionData>) => {
     const taxRate = 0.08875;
+    
+    // For Shopify transactions, use the actual tax data from MongoDB
+    if (transaction.source === 'shopify') {
+      const preTaxAmount = transaction.preTaxAmount ?? 
+        (transaction.amount ? transaction.amount - (transaction.taxAmount ?? 0) - (transaction.tip ?? 0) : 0);
+      
+      return {
+        taxAmount: transaction.taxAmount ?? 0,
+        taxRate: transaction.taxAmount && preTaxAmount 
+          ? ((transaction.taxAmount / preTaxAmount) * 100)
+          : 0
+      };
+    }
     
     // If this is a manual transaction with products
     if (transaction.source === 'manual' && transaction.productsTotal !== undefined) {
@@ -219,6 +258,85 @@ export function TransactionsList() {
     return source.charAt(0).toUpperCase() + source.slice(1);
   }
 
+  const handleFindMongoProduct = async (transaction: TransactionData, lineItem: NonNullable<TransactionData['lineItems']>[number], index: number) => {
+    console.log('[UI] Starting product search for:', {
+      transactionId: transaction._id,
+      lineItemTitle: lineItem.name,
+      variantId: lineItem.variant_id,
+      index
+    })
+
+    if (!lineItem.variant_id) {
+      console.log('[UI] Error: No variant_id found for line item')
+      return
+    }
+
+    setFindingProduct(prev => new Set(prev).add(`${transaction._id}-${index}`))
+    console.log('[UI] Set loading state for:', `${transaction._id}-${index}`)
+
+    try {
+      console.log('[UI] Fetching product for variant ID:', lineItem.variant_id)
+      const response = await fetch(`/api/products/shopify/find-by-variant?variantId=${lineItem.variant_id}`)
+      
+      if (!response.ok) {
+        console.error('[UI] API request failed:', {
+          status: response.status,
+          statusText: response.statusText
+        })
+        throw new Error('Failed to find product')
+      }
+
+      const data = await response.json()
+      console.log('[UI] API response:', data)
+
+      if (!data.product) {
+        console.log('[UI] No product found in MongoDB')
+        return
+      }
+
+      console.log('[UI] Found MongoDB product:', {
+        productId: data.product._id,
+        name: data.product.name,
+        sku: data.product.sku
+      })
+
+      // Update the transactions state directly
+      const updatedTransactions = transactions.map(t => {
+        if (t._id.toString() === transaction._id.toString() && t.lineItems) {
+          const updatedLineItems = t.lineItems.map((item, idx) => {
+            if (idx === index) {
+              return {
+                ...item,
+                name: data.product.name, // Update the name to show immediately
+                mongoProduct: data.product
+              }
+            }
+            return item
+          })
+          
+          return {
+            ...t,
+            lineItems: updatedLineItems
+          }
+        }
+        return t
+      })
+
+      // Update the transactions state directly
+      setTransactions(updatedTransactions)
+
+    } catch (err) {
+      console.error('[UI] Error finding product:', err)
+    } finally {
+      console.log('[UI] Clearing loading state for:', `${transaction._id}-${index}`)
+      setFindingProduct(prev => {
+        const next = new Set(prev)
+        next.delete(`${transaction._id}-${index}`)
+        return next
+      })
+    }
+  }
+
   const renderProducts = (transaction: TransactionData) => {
     if (!transaction) return null;
 
@@ -266,14 +384,37 @@ export function TransactionsList() {
       ));
     }
 
-    if (transaction.source === 'shopify' && transaction.line_items && transaction.line_items.length > 0) {
-      return transaction.line_items.map((item, idx) => (
-        <div key={idx} className="flex items-center">
-          <span>{item.quantity}x</span>
-          <span className="ml-2">{item.title ?? 'Unnamed Product'}</span>
-          <span className="ml-2 text-gray-500">
-            (${((parseFloat(item.price ?? '0') * item.quantity)).toFixed(2)})
-          </span>
+    if (transaction.source === 'shopify' && transaction.lineItems && transaction.lineItems.length > 0) {
+      return transaction.lineItems.map((item, idx) => (
+        <div key={idx} className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center">
+              <span className="font-medium">{item.quantity}x</span>
+              <span className="ml-2">{item.name}</span>
+              {item.sku && <span className="ml-2 text-gray-500">({item.sku})</span>}
+            </div>
+            <div className="text-gray-500">
+              <span className="mx-1">@</span>
+              <span>${Number(item.price).toFixed(2)}</span>
+              <span className="mx-1">=</span>
+              <span className="font-medium">${(Number(item.price) * item.quantity).toFixed(2)}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {item.mongoProduct ? (
+              <div className="text-sm text-green-600">
+                → {item.mongoProduct.name} (Stock: {item.mongoProduct.currentStock})
+              </div>
+            ) : (
+              <button
+                onClick={() => handleFindMongoProduct(transaction, item, idx)}
+                disabled={findingProduct.has(`${transaction._id}-${idx}`)}
+                className="text-xs text-blue-600 hover:text-blue-700"
+              >
+                {findingProduct.has(`${transaction._id}-${idx}`) ? 'Finding...' : 'Find Product'}
+              </button>
+            )}
+          </div>
         </div>
       ));
     }
@@ -406,6 +547,207 @@ export function TransactionsList() {
     }
   }
 
+  const handleTransactionClick = (transaction: TransactionData) => {
+    router.push(`/transactions/${transaction._id}`)
+  }
+
+  const renderTransactionRow = (transaction: TransactionData) => {
+    const typedTransaction = transaction as unknown as TransactionData;
+    const isInactive = typedTransaction.status === 'cancelled' || typedTransaction.status === 'refunded';
+    const isExpanded = expandedItems.has(typedTransaction._id);
+    const hasProfitData = typedTransaction.profitCalculation?.totalProfit !== undefined;
+
+    return (
+      <div 
+        key={typedTransaction._id}
+        className={cn(
+          "border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer",
+          isInactive && "opacity-60"
+        )}
+      >
+        {/* Main Row */}
+        <div 
+          className="flex items-center justify-between py-2 px-4"
+          onClick={() => {
+            const next = new Set(expandedItems);
+            if (isExpanded) {
+              next.delete(typedTransaction._id);
+            } else {
+              next.add(typedTransaction._id);
+            }
+            setExpandedItems(next);
+          }}
+        >
+          <div className="flex items-center gap-3">
+            {/* Expand/Collapse Icon */}
+            <div className="text-gray-400">
+              {isExpanded ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+            </div>
+            
+            {/* Amount */}
+            <span className={cn(
+              "font-medium",
+              isInactive && "line-through"
+            )}>
+              ${typedTransaction.amount.toFixed(2)}
+            </span>
+
+            {/* Profit (if available) */}
+            {hasProfitData && (
+              <span className={cn(
+                "text-sm",
+                typedTransaction.profitCalculation!.totalProfit >= 0 ? "text-green-600" : "text-red-600"
+              )}>
+                (${typedTransaction.profitCalculation!.totalProfit.toFixed(2)})
+              </span>
+            )}
+
+            {/* Source Badge */}
+            <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">
+              {formatSource(typedTransaction.source)}
+            </span>
+
+            {/* Status Badge (if not completed) */}
+            {typedTransaction.status !== 'completed' && (
+              <span className={cn(
+                "text-xs px-1.5 py-0.5 rounded",
+                typedTransaction.status === 'cancelled' && "bg-red-100 text-red-600",
+                typedTransaction.status === 'refunded' && "bg-yellow-100 text-yellow-600"
+              )}>
+                {typedTransaction.status?.toUpperCase() ?? 'UNKNOWN'}
+              </span>
+            )}
+          </div>
+
+          {/* Right side info */}
+          <div className="flex items-center gap-4">
+            {/* Time */}
+            <span className="text-sm text-gray-500">
+              {new Date(typedTransaction.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+
+            {/* Actions */}
+            <div className="flex gap-2">
+              {typedTransaction.source === 'manual' && (
+                <>
+                  {editingId === typedTransaction._id ? (
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSave();
+                        }}
+                        disabled={saving}
+                        className="text-xs text-green-600 hover:text-green-700"
+                      >
+                        {saving ? 'Saving...' : 'Save'}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCancel();
+                        }}
+                        className="text-xs text-gray-600 hover:text-gray-700"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEdit(typedTransaction);
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-700"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </>
+              )}
+              {typedTransaction.status === 'completed' && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleVoidTransaction(typedTransaction);
+                  }}
+                  className="text-xs text-red-600 hover:text-red-700"
+                >
+                  Void
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Expanded Content */}
+        {isExpanded && (
+          <div className="px-11 pb-3" onClick={(e) => e.stopPropagation()}>
+            {/* Products/Line Items */}
+            <div className="text-sm space-y-1 mb-2">
+              {renderProducts(typedTransaction)}
+            </div>
+
+            {/* Profit Details (if available) */}
+            {hasProfitData && (
+              <div className="mt-2 text-sm space-y-1">
+                <div className="flex justify-between text-gray-600">
+                  <span>Revenue:</span>
+                  <span>${typedTransaction.profitCalculation!.totalRevenue.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>Cost:</span>
+                  <span>${typedTransaction.profitCalculation!.totalCost.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-medium">
+                  <span>Profit:</span>
+                  <span className={typedTransaction.profitCalculation!.totalProfit >= 0 ? "text-green-600" : "text-red-600"}>
+                    ${typedTransaction.profitCalculation!.totalProfit.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>Margin:</span>
+                  <span>
+                    {((typedTransaction.profitCalculation!.totalProfit / typedTransaction.profitCalculation!.totalRevenue) * 100).toFixed(1)}%
+                  </span>
+                </div>
+                {typedTransaction.profitCalculation!.itemsWithoutCost > 0 && (
+                  <div className="text-yellow-600 text-xs">
+                    Note: {typedTransaction.profitCalculation!.itemsWithoutCost} item(s) missing cost data
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Additional Details */}
+            <div className="flex flex-wrap gap-x-4 text-xs text-gray-600 mt-2">
+              {typedTransaction.customer && (
+                <span>Customer: {typedTransaction.customer}</span>
+              )}
+              {typedTransaction.paymentMethod && (
+                <span>Via: {typedTransaction.paymentMethod}</span>
+              )}
+            </div>
+
+            {/* View Details Button */}
+            <div className="mt-2">
+              <button
+                onClick={() => handleTransactionClick(typedTransaction)}
+                className="text-xs bg-white border border-gray-200 rounded px-3 py-1 hover:bg-gray-50"
+              >
+                View Full Details
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <Card>
       <div className="flex flex-col gap-4 mb-4">
@@ -458,60 +800,53 @@ export function TransactionsList() {
             </Button>
           </div>
 
-          {/* Date selectors */}
-          <div className="flex gap-2 ml-auto">
+          {/* Date Range Picker */}
+          <div className="flex items-center gap-2">
             <Popover>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
                   className={cn(
-                    "justify-start text-left font-normal w-[120px] px-2",
+                    "justify-start text-left font-normal",
                     !startDate && "text-muted-foreground"
                   )}
                 >
-                  <CalendarIcon className="mr-1 h-4 w-4" />
-                  {startDate ? format(startDate, "MMM d, yyyy") : <span>Start</span>}
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {startDate ? format(startDate, "PPP") : <span>Pick a date</span>}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
+              <PopoverContent className="w-auto p-0">
                 <Calendar
                   mode="single"
                   selected={startDate}
-                  onSelect={(date) => {
-                    setStartDate(date)
-                    refreshTransactions()
-                  }}
+                  onSelect={setStartDate}
                   initialFocus
                 />
               </PopoverContent>
             </Popover>
-
+            <span>to</span>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
                   className={cn(
-                    "justify-start text-left font-normal w-[120px] px-2",
+                    "justify-start text-left font-normal",
                     !endDate && "text-muted-foreground"
                   )}
                 >
-                  <CalendarIcon className="mr-1 h-4 w-4" />
-                  {endDate ? format(endDate, "MMM d, yyyy") : <span>End</span>}
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {endDate ? format(endDate, "PPP") : <span>Pick a date</span>}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
+              <PopoverContent className="w-auto p-0">
                 <Calendar
                   mode="single"
                   selected={endDate}
-                  onSelect={(date) => {
-                    setEndDate(date)
-                    refreshTransactions()
-                  }}
+                  onSelect={setEndDate}
                   initialFocus
                 />
               </PopoverContent>
             </Popover>
-
             <Button 
               variant="outline"
               onClick={() => {
@@ -543,153 +878,35 @@ export function TransactionsList() {
           ))}
         </div>
       ) : (
-        <div className="space-y-6">
+        <div>
           {Object.entries(groupedTransactions)
             .sort(([dateA], [dateB]) => 
               new Date(dateB).getTime() - new Date(dateA).getTime()
             )
             .map(([date, { transactions: dayTransactions }]) => {
-              // Calculate totals only for completed transactions
               const completedTransactions = dayTransactions.filter(t => t.status === 'completed')
               const totalAmount = completedTransactions.reduce((sum, t) => sum + t.amount, 0)
               const totalTax = completedTransactions.reduce((sum, t) => sum + calculateTaxDetails(t).taxAmount, 0)
 
               return (
-                <div key={date} className="space-y-2">
-                  <div className="border-b border-gray-200 pb-2">
+                <div key={date}>
+                  {/* Date Header */}
+                  <div className="sticky top-0 bg-white border-b border-gray-200 py-2 px-4">
                     <div className="flex justify-between">
-                      <h3 className="text-sm">{date}</h3>
-                      <span className="text-sm text-gray-600">
-                        {completedTransactions.length} transaction{completedTransactions.length !== 1 ? 's' : ''}
-                      </span>
-                    </div>
-                    <div className="text-sm text-gray-600 mt-1">
-                      <span className="mr-4">Total: ${totalAmount.toFixed(2)}</span>
-                      <span>Tax: ${totalTax.toFixed(2)}</span>
+                      <h3 className="text-sm font-medium">{date}</h3>
+                      <div className="text-sm text-gray-600">
+                        <span className="mr-4">Total: ${totalAmount.toFixed(2)}</span>
+                        <span>Tax: ${totalTax.toFixed(2)}</span>
+                        <span className="ml-4">
+                          {completedTransactions.length} transaction{completedTransactions.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    {dayTransactions.map((transaction) => {
-                      const typedTransaction = transaction as unknown as TransactionData;
-                      const isInactive = typedTransaction.status === 'cancelled' || typedTransaction.status === 'refunded'
-
-                      return (
-                        <div 
-                          key={typedTransaction._id} 
-                          className={cn(
-                            "p-4 border border-gray-200 rounded",
-                            isInactive && "opacity-60"
-                          )}
-                        >
-                          <div className="flex gap-4">
-                            <div className="flex-grow">
-                              <div className="flex items-center gap-2 mb-2">
-                                <span className={cn(
-                                  "text-base font-bold text-purple-dark",
-                                  isInactive && "line-through"
-                                )}>
-                                  ${typedTransaction.amount.toFixed(2)}
-                                </span>
-                                <span className="text-xs px-1.5 py-0.5 rounded bg-purple-pastel text-purple-dark uppercase">
-                                  {formatSource(typedTransaction.source)}
-                                </span>
-                                {typedTransaction.status !== 'completed' && (
-                                  <span className={cn(
-                                    "text-xs px-1.5 py-0.5 rounded",
-                                    typedTransaction.status === 'cancelled' && "bg-red-100 text-red-600",
-                                    typedTransaction.status === 'refunded' && "bg-yellow-100 text-yellow-600"
-                                  )}>
-                                    {typedTransaction.status?.toUpperCase() ?? 'UNKNOWN'}
-                                  </span>
-                                )}
-                                <div className="flex gap-2 ml-auto">
-                                  {typedTransaction.source === 'manual' && (
-                                    <>
-                                      {editingId === typedTransaction._id ? (
-                                        <>
-                                          <button
-                                            onClick={handleSave}
-                                            disabled={saving}
-                                            className="text-xs text-green-600 hover:text-green-700"
-                                          >
-                                            {saving ? 'Saving...' : 'Save'}
-                                          </button>
-                                          <button
-                                            onClick={handleCancel}
-                                            className="text-xs text-gray-600 hover:text-gray-700"
-                                          >
-                                            Cancel
-                                          </button>
-                                        </>
-                                      ) : (
-                                        <button
-                                          onClick={() => handleEdit(typedTransaction)}
-                                          className="text-xs text-blue-600 hover:text-blue-700"
-                                        >
-                                          Edit
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-                                  {typedTransaction.status === 'completed' && (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => handleVoidTransaction(typedTransaction)}
-                                      className="text-xs text-red-600 hover:text-red-700"
-                                    >
-                                      Void
-                                    </Button>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="text-xs space-y-0.5">
-                                {renderProducts(typedTransaction)}
-                              </div>
-
-                              <div className="flex flex-wrap gap-x-3 text-xs text-gray-600 dark:text-gray-400 mt-2">
-                                {typedTransaction.customer && (
-                                  <span>
-                                    Customer: {typedTransaction.customer}
-                                  </span>
-                                )}
-                                {typedTransaction.paymentMethod && (
-                                  <span>
-                                    Via: {typedTransaction.paymentMethod}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            {renderTransactionDetails(typedTransaction)}
-                          </div>
-                          <div className="text-sm">
-                            <div className="flex justify-between">
-                              <span>Products Total:</span>
-                              <span>${typedTransaction.productsTotal?.toFixed(2)}</span>
-                            </div>
-                            {typedTransaction.tip && (
-                              <div className="flex justify-between text-green-600">
-                                <span>Tip:</span>
-                                <span>+${typedTransaction.tip.toFixed(2)}</span>
-                              </div>
-                            )}
-                            {typedTransaction.discount && (
-                              <div className="flex justify-between text-red-600">
-                                <span>Discount:</span>
-                                <span>-${typedTransaction.discount.toFixed(2)}</span>
-                              </div>
-                            )}
-                            <div className="flex justify-between font-medium">
-                              <span>Final Amount:</span>
-                              <span>${typedTransaction.amount.toFixed(2)}</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                  {/* Transactions */}
+                  <div>
+                    {dayTransactions.map(transaction => renderTransactionRow(transaction))}
                   </div>
                 </div>
               );

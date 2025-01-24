@@ -82,7 +82,11 @@ export function AmexTransactions() {
   }, []);
 
   const handleTransactionClick = (transaction: EmailTransaction) => {
-    router.push(`/transactions/amex/${transaction.id}`);
+    if (savedTransactions.has(transaction.emailId)) {
+      router.push(`/transactions/amex/${transaction.id}`);
+    } else {
+      router.push(`/transactions/amex/new?emailId=${transaction.emailId}`);
+    }
   };
 
   if (error) {

@@ -14,6 +14,7 @@ interface UseTransactionsResult {
   loading: boolean;
   error: string | null;
   refreshTransactions: () => Promise<void>;
+  setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
 }
 
 export function useTransactions(options?: UseTransactionsOptions): UseTransactionsResult {
@@ -63,6 +64,7 @@ export function useTransactions(options?: UseTransactionsOptions): UseTransactio
     transactions,
     loading,
     error,
-    refreshTransactions: fetchTransactions
+    refreshTransactions: fetchTransactions,
+    setTransactions
   };
 } 

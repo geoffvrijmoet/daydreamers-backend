@@ -44,6 +44,36 @@ export async function POST(request: Request) {
         status = 'refunded'
       }
 
+      // Get transaction fees
+      let processingFee = 0;
+      try {
+        const transactions = await shopifyClient.transaction.list(order.id);
+        // Find the successful payment transaction
+        const paymentTransaction = transactions.find(t => 
+          t.status === 'success' && 
+          t.kind === 'sale' && 
+          // Use type assertion since the Shopify types are incomplete
+          (t as any).net_payment !== undefined
+        );
+        
+        if (paymentTransaction) {
+          // Processing fee is the difference between total price and net payment
+          const totalAmount = Number(order.total_price);
+          const netPayment = Number((paymentTransaction as any).net_payment);
+          processingFee = totalAmount - netPayment;
+          
+          console.log(`[Shopify Sync] Found processing fees for order ${order.id}:`, {
+            orderTotal: totalAmount,
+            netPayment: netPayment,
+            processingFee: processingFee.toFixed(2)
+          });
+        } else {
+          console.log(`[Shopify Sync] No payment transaction found for order ${order.id}`);
+        }
+      } catch (err) {
+        console.error(`[Shopify Sync] Error fetching transaction fees for order ${order.id}:`, err);
+      }
+
       const transaction: Omit<Transaction, '_id'> = {
         id: shopifyId,
         date: order.created_at ?? new Date().toISOString(),
@@ -68,6 +98,12 @@ export async function POST(request: Request) {
         refundAmount: order.refunds?.reduce((sum, refund) => 
           sum + Number(refund.transactions?.[0]?.amount || 0), 0) || undefined,
         refundDate: order.refunds?.[0]?.created_at,
+        shopifyOrderId: order.id.toString(),
+        shopifyTotalTax: Number(order.total_tax),
+        shopifySubtotalPrice: Number(order.subtotal_price),
+        shopifyTotalPrice: Number(order.total_price),
+        shopifyProcessingFee: processingFee,
+        shopifyPaymentGateway: order.gateway,
         createdAt: order.created_at ?? new Date().toISOString(),
         updatedAt: new Date().toISOString()
       }

@@ -153,54 +153,69 @@ export async function POST(request: Request) {
       )
     }
 
-    // Check if an entry with this invoiceId already exists
-    const existingProduct = await db.collection('products').findOne({
-      _id: new ObjectId(productId),
-      'costHistory.invoiceId': entry.invoiceId
+    // Get the current product to access its cost history
+    const product = await db.collection('products').findOne({
+      _id: new ObjectId(productId)
     })
 
+    if (!product) {
+      return NextResponse.json(
+        { error: 'Product not found' },
+        { status: 404 }
+      )
+    }
+
+    // Check if an entry with this invoiceId already exists
+    const existingEntryIndex = product.costHistory?.findIndex(
+      (e: CostHistoryEntry) => e.invoiceId === entry.invoiceId
+    )
+
     let updateOperation
-    if (existingProduct) {
+    if (existingEntryIndex !== -1) {
       console.log('Found existing entry for invoice:', entry.invoiceId)
       // Update existing entry
-      updateOperation = {
-        $set: {
-          'costHistory.$[elem]': entry
-        }
-      }
-      const arrayFilters = [{ 'elem.invoiceId': entry.invoiceId }]
-
-      const result = await db.collection('products').updateOne(
-        { _id: new ObjectId(productId) },
-        updateOperation,
-        { arrayFilters }
-      )
-
-      console.log('Updated existing cost history entry:', {
-        productId,
-        invoiceId: entry.invoiceId,
-        matched: result.matchedCount,
-        modified: result.modifiedCount
-      })
+      product.costHistory[existingEntryIndex] = entry
     } else {
       console.log('No existing entry found, adding new entry')
       // Add new entry
-      updateOperation = {
-        $push: { costHistory: entry }
-      }
-
-      const result = await db.collection('products').updateOne(
-        { _id: new ObjectId(productId) },
-        updateOperation
-      )
-
-      console.log('Added new cost history entry:', {
-        productId,
-        invoiceId: entry.invoiceId,
-        matched: result.matchedCount,
-        modified: result.modifiedCount
-      })
+      product.costHistory = [...(product.costHistory || []), entry]
     }
+
+    // Calculate new totals
+    const totalSpent = product.costHistory.reduce(
+      (sum: number, entry: CostHistoryEntry) => sum + entry.totalPrice,
+      0
+    )
+    const totalPurchased = product.costHistory.reduce(
+      (sum: number, entry: CostHistoryEntry) => sum + entry.quantity,
+      0
+    )
+    const averageCost = totalPurchased > 0 ? totalSpent / totalPurchased : 0
+
+    // Update the product with new cost history and calculated fields
+    const result = await db.collection('products').updateOne(
+      { _id: new ObjectId(productId) },
+      {
+        $set: {
+          costHistory: product.costHistory,
+          totalSpent,
+          totalPurchased,
+          averageCost,
+          lastPurchasePrice: entry.unitPrice,
+          updatedAt: new Date().toISOString()
+        }
+      }
+    )
+
+    console.log('Updated product with new totals:', {
+      productId,
+      totalSpent,
+      totalPurchased,
+      averageCost,
+      lastPurchasePrice: entry.unitPrice,
+      matched: result.matchedCount,
+      modified: result.modifiedCount
+    })
 
     // Clean up any duplicate entries that might exist
     await cleanupDuplicateEntries(db, productId)

@@ -5,6 +5,7 @@ import { Product, CostHistoryEntry } from '@/types'
 import { Card } from "@/components/ui/card"
 import { calculateProfitPerUnit, getPreTaxPrice } from '@/lib/utils/pricing'
 import { Input } from "@/components/ui/input"
+import { ChevronDown, ChevronRight } from 'lucide-react'
 
 type ProductListProps = {
   products: Product[]
@@ -129,6 +130,7 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
   const [error, setError] = useState<string | null>(null)
   const [editingProduct, setEditingProduct] = useState<EditingProduct | null>(null)
   const [editingPrice, setEditingPrice] = useState<number | null>(null)
+  const [expandedProducts, setExpandedProducts] = useState<string[]>([])
 
   useEffect(() => {
     console.log('ProductList received products:', products)
@@ -160,29 +162,6 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
     }
   }
 
-  const handleUpdatePrice = async (productId: string) => {
-    try {
-      const response = await fetch(`/api/products/${productId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          lastPurchasePrice: editingPrice,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to update price')
-      }
-
-      setEditingPrice(null)
-      onUpdate() // Refresh the product list
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update price')
-    }
-  }
-
   const handleUpdateField = async (productId: string, field: keyof EditableFields, value: EditableFields[keyof EditableFields]) => {
     try {
       const response = await fetch(`/api/products/${productId}`, {
@@ -206,12 +185,12 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
     }
   }
 
-  const startEditing = (product: Product, field: keyof EditableFields) => {
-    setEditingProduct({
-      id: product.id,
-      field,
-      value: product[field] as EditableFields[keyof EditableFields]
-    })
+  const toggleProductExpansion = (productId: string) => {
+    setExpandedProducts(prev => 
+      prev.includes(productId) 
+        ? prev.filter(id => id !== productId)
+        : [...prev, productId]
+    )
   }
 
   // Sort and filter products
@@ -232,10 +211,10 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
     .filter(p => showInactive || p.active !== false)
     .filter(p => !filterLowStock || p.currentStock <= p.minimumStock)
 
-  // Group products by Square parent ID
+  // Group products by parent ID
   const groupedProducts = filteredProducts.reduce((groups, product) => {
     if (!product.squareParentId) {
-      // Products without a parent ID get their own card
+      // Products without a parent ID get their own group
       return [...groups, [product]]
     }
 
@@ -251,16 +230,6 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
     return [...groups, [product]]
   }, [] as Product[][])
 
-  const handleSelectAll = (checked: boolean) => {
-    if (checked) {
-      // Select all visible (filtered) products
-      setSelectedProducts(filteredProducts.map(p => p.id))
-    } else {
-      // Deselect all
-      setSelectedProducts([])
-    }
-  }
-
   return (
     <div className="space-y-4">
       {error && (
@@ -268,6 +237,7 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
           <p className="text-red-600">{error}</p>
         </div>
       )}
+      
       {/* Controls */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex gap-4">
@@ -303,292 +273,180 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
         </div>
       </div>
 
-      {/* Select All and Bulk Delete */}
-      <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={selectedProducts.length === filteredProducts.length && filteredProducts.length > 0}
-            onChange={(e) => handleSelectAll(e.target.checked)}
-            className="rounded border-gray-300 text-primary-400 focus:ring-primary-500"
-          />
-          <span className="text-sm text-gray-700 dark:text-gray-300">
-            Select All ({filteredProducts.length} products)
-          </span>
-        </label>
-        {selectedProducts.length > 0 && (
-          <button
-            onClick={() => setShowBulkDelete(true)}
-            className="px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-700 rounded-md"
-          >
-            Delete Selected ({selectedProducts.length})
-          </button>
-        )}
-      </div>
-
-      {/* Product Cards */}
-      <div className="space-y-4">
+      {/* Product List */}
+      <div className="space-y-2">
         {groupedProducts.map(group => (
           <Card key={group[0].id} className="p-4">
-            <div className="space-y-4">
-              {group.map(product => (
-                <div key={product.id} className="space-y-4">
-                  {/* Product Name */}
-                  <div className="flex items-center justify-between">
-                    {editingProduct?.id === product.id && editingProduct.field === 'name' ? (
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={editingProduct.value as string}
-                          onChange={(e) => setEditingProduct({ ...editingProduct, value: e.target.value })}
-                          className="w-64"
-                        />
-                        <button
-                          onClick={() => handleUpdateField(product.id, 'name', editingProduct.value)}
-                          className="text-xs text-green-600 hover:text-green-700"
-                        >
-                          Save
-                        </button>
-                        <button
-                          onClick={() => setEditingProduct(null)}
-                          className="text-xs text-gray-500 hover:text-gray-600"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-lg font-medium">{product.name}</h3>
-                        <button
-                          onClick={() => startEditing(product, 'name')}
-                          className="text-xs text-gray-500 hover:text-gray-600"
-                        >
-                          Edit
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* SKU */}
-                  <div>
-                    {editingProduct?.id === product.id && editingProduct.field === 'sku' ? (
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={editingProduct.value as string}
-                          onChange={(e) => setEditingProduct({ ...editingProduct, value: e.target.value })}
-                          className="w-48"
-                        />
-                        <button
-                          onClick={() => handleUpdateField(product.id, 'sku', editingProduct.value)}
-                          className="text-xs text-green-600 hover:text-green-700"
-                        >
-                          Save
-                        </button>
-                        <button
-                          onClick={() => setEditingProduct(null)}
-                          className="text-xs text-gray-500 hover:text-gray-600"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm text-gray-500">SKU: {product.sku}</p>
-                        <button
-                          onClick={() => startEditing(product, 'sku')}
-                          className="text-xs text-gray-500 hover:text-gray-600"
-                        >
-                          Edit
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Stock Information */}
-                  <div className="grid grid-cols-3 gap-4">
-                    {/* Current Stock */}
-                    <div>
-                      <p className="text-gray-500 dark:text-gray-400">Current Stock</p>
-                      {editingProduct?.id === product.id && editingProduct.field === 'currentStock' ? (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="number"
-                            value={editingProduct.value as number}
-                            onChange={(e) => setEditingProduct({ ...editingProduct, value: Number(e.target.value) })}
-                            className="w-24"
-                          />
-                          <button
-                            onClick={() => handleUpdateField(product.id, 'currentStock', editingProduct.value)}
-                            className="text-xs text-green-600 hover:text-green-700"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={() => setEditingProduct(null)}
-                            className="text-xs text-gray-500 hover:text-gray-600"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-gray-900 dark:text-white">{product.currentStock}</p>
-                          <button
-                            onClick={() => startEditing(product, 'currentStock')}
-                            className="text-xs text-gray-500 hover:text-gray-600"
-                          >
-                            Edit
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Retail Price */}
-                    <div>
-                      <p className="text-gray-500 dark:text-gray-400">Retail Price (with tax)</p>
-                      {editingProduct?.id === product.id && editingProduct.field === 'retailPrice' ? (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={editingProduct.value as number}
-                            onChange={(e) => setEditingProduct({ ...editingProduct, value: Number(e.target.value) })}
-                            className="w-24"
-                          />
-                          <button
-                            onClick={() => handleUpdateField(product.id, 'retailPrice', editingProduct.value)}
-                            className="text-xs text-green-600 hover:text-green-700"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={() => setEditingProduct(null)}
-                            className="text-xs text-gray-500 hover:text-gray-600"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-gray-900 dark:text-white">${product.retailPrice.toFixed(2)}</p>
-                          <button
-                            onClick={() => startEditing(product, 'retailPrice')}
-                            className="text-xs text-gray-500 hover:text-gray-600"
-                          >
-                            Edit
-                          </button>
-                        </div>
-                      )}
-                      <p className="text-xs text-gray-500">Pre-tax: ${getPreTaxPrice(product.retailPrice).toFixed(2)}</p>
-                    </div>
-
-                    {/* Last Purchase Price */}
-                    <div>
-                      <p className="text-gray-500 dark:text-gray-400">Last Purchase Price</p>
-                      {editingProduct?.id === product.id && editingProduct.field === 'lastPurchasePrice' ? (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={editingProduct.value as number}
-                            onChange={(e) => setEditingProduct({ ...editingProduct, value: Number(e.target.value) })}
-                            className="w-24"
-                          />
-                          <button
-                            onClick={() => handleUpdateField(product.id, 'lastPurchasePrice', editingProduct.value)}
-                            className="text-xs text-green-600 hover:text-green-700"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={() => setEditingProduct(null)}
-                            className="text-xs text-gray-500 hover:text-gray-600"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-gray-900 dark:text-white">${product.lastPurchasePrice.toFixed(2)}</p>
-                          <button
-                            onClick={() => startEditing(product, 'lastPurchasePrice')}
-                            className="text-xs text-gray-500 hover:text-gray-600"
-                          >
-                            Edit
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Supplier */}
-                  <div>
-                    {editingProduct?.id === product.id && editingProduct.field === 'supplier' ? (
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={editingProduct.value as string}
-                          onChange={(e) => setEditingProduct({ ...editingProduct, value: e.target.value })}
-                          className="w-48"
-                        />
-                        <button
-                          onClick={() => handleUpdateField(product.id, 'supplier', editingProduct.value)}
-                          className="text-xs text-green-600 hover:text-green-700"
-                        >
-                          Save
-                        </button>
-                        <button
-                          onClick={() => setEditingProduct(null)}
-                          className="text-xs text-gray-500 hover:text-gray-600"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm text-gray-500">Supplier: {product.supplier || 'None'}</p>
-                        <button
-                          onClick={() => startEditing(product, 'supplier')}
-                          className="text-xs text-gray-500 hover:text-gray-600"
-                        >
-                          Edit
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Cost History & Analysis */}
-                  <CostHistory entries={product.costHistory} />
-                  <CostAnalysis product={product} />
-
-                  {/* Additional Info */}
-                  <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
-                    <p>
-                      Profit per Unit: ${calculateProfitPerUnit(product.retailPrice, product.averageCost).toFixed(2)} • 
-                      Total Investment: ${(product.averageCost * product.currentStock).toFixed(2)}
-                    </p>
-                  </div>
-
-                  {/* Add inactive indicator */}
-                  {!product.active && (
-                    <div className="mt-2 text-sm text-gray-500">
-                      This product is hidden
-                    </div>
+            <div 
+              className="flex items-center justify-between cursor-pointer"
+              onClick={() => toggleProductExpansion(group[0].id)}
+            >
+              <div className="flex items-center gap-4">
+                {expandedProducts.includes(group[0].id) ? (
+                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-gray-500" />
+                )}
+                <div>
+                  <h3 className="text-lg font-medium">
+                    {group[0].name.split('-')[0].trim()}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    {group.length > 1 ? `${group.length} variants` : `SKU: ${group[0].sku}`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-8">
+                <div className="text-right">
+                  {group.length === 1 ? (
+                    <>
+                      <p className="font-medium">${group[0].retailPrice.toFixed(2)}</p>
+                      <p className="text-sm text-gray-500">Stock: {group[0].currentStock}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-medium">
+                        ${Math.min(...group.map(p => p.retailPrice)).toFixed(2)} - 
+                        ${Math.max(...group.map(p => p.retailPrice)).toFixed(2)}
+                      </p>
+                      <p className="text-sm text-gray-500">
+                        Total Stock: {group.reduce((sum, p) => sum + p.currentStock, 0)}
+                      </p>
+                    </>
                   )}
                 </div>
-              ))}
-
-              {/* Delete Button */}
-              <div className="mt-4 flex justify-end">
-                <button
-                  onClick={() => {
-                    setSelectedProducts(group.map(p => p.id))
-                    setShowBulkDelete(true)
-                  }}
-                  className="text-sm text-red-600 hover:text-red-700"
-                >
-                  Delete
-                </button>
+                {!group.some(p => p.active) && (
+                  <span className="text-sm text-gray-500">(Hidden)</span>
+                )}
               </div>
             </div>
+
+            {/* Expanded Content */}
+            {expandedProducts.includes(group[0].id) && (
+              <div className="mt-4 border-t border-gray-200 dark:border-gray-700 pt-4">
+                {group.map((product, index) => (
+                  <div key={product.id} className={index > 0 ? "mt-8 pt-4 border-t border-gray-200" : ""}>
+                    <h4 className="text-md font-medium mb-4">{product.name}</h4>
+                    
+                    {/* Editable Fields */}
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <p className="text-sm text-gray-500">Current Stock</p>
+                        <div className="flex items-center gap-2">
+                          {editingProduct?.id === product.id && editingProduct.field === 'currentStock' ? (
+                            <>
+                              <Input
+                                type="number"
+                                value={editingProduct.value as number}
+                                onChange={(e) => setEditingProduct({ ...editingProduct, value: Number(e.target.value) })}
+                                className="w-24"
+                              />
+                              <button
+                                onClick={() => handleUpdateField(product.id, 'currentStock', editingProduct.value)}
+                                className="text-xs text-green-600 hover:text-green-700"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={() => setEditingProduct(null)}
+                                className="text-xs text-gray-500 hover:text-gray-600"
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="font-medium">{product.currentStock}</span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingProduct({ id: product.id, field: 'currentStock', value: product.currentStock });
+                                }}
+                                className="text-xs text-gray-500 hover:text-gray-600"
+                              >
+                                Edit
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="text-sm text-gray-500">Retail Price</p>
+                        <div className="flex items-center gap-2">
+                          {editingProduct?.id === product.id && editingProduct.field === 'retailPrice' ? (
+                            <>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={editingProduct.value as number}
+                                onChange={(e) => setEditingProduct({ ...editingProduct, value: Number(e.target.value) })}
+                                className="w-24"
+                              />
+                              <button
+                                onClick={() => handleUpdateField(product.id, 'retailPrice', editingProduct.value)}
+                                className="text-xs text-green-600 hover:text-green-700"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={() => setEditingProduct(null)}
+                                className="text-xs text-gray-500 hover:text-gray-600"
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="font-medium">${product.retailPrice.toFixed(2)}</span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingProduct({ id: product.id, field: 'retailPrice', value: product.retailPrice });
+                                }}
+                                className="text-xs text-gray-500 hover:text-gray-600"
+                              >
+                                Edit
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500">Pre-tax: ${getPreTaxPrice(product.retailPrice).toFixed(2)}</p>
+                      </div>
+                    </div>
+
+                    {/* Cost History & Analysis */}
+                    <CostHistory entries={product.costHistory} />
+                    <CostAnalysis product={product} />
+
+                    {/* Additional Info */}
+                    <div className="mt-4 text-sm text-gray-500">
+                      <p>
+                        Profit per Unit: ${calculateProfitPerUnit(product.retailPrice, product.averageCost).toFixed(2)} • 
+                        Total Investment: ${(product.averageCost * product.currentStock).toFixed(2)}
+                      </p>
+                      {product.supplier && (
+                        <p className="mt-2">Supplier: {product.supplier}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Delete Button */}
+                <div className="mt-4 flex justify-end">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedProducts(group.map(p => p.id));
+                      setShowBulkDelete(true);
+                    }}
+                    className="text-sm text-red-600 hover:text-red-700"
+                  >
+                    Delete {group.length > 1 ? 'All Variants' : 'Product'}
+                  </button>
+                </div>
+              </div>
+            )}
           </Card>
         ))}
       </div>
