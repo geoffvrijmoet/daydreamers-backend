@@ -25,7 +25,10 @@ export function ManualTransactionForm() {
   const [searchQuery, setSearchQuery] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [shippingAmount, setShippingAmount] = useState<number>(0)
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(() => {
+    const now = new Date();
+    return `${now.toISOString().split('.')[0]}`; // Format: "YYYY-MM-DDTHH:mm:ss"
+  })
 
   // Fetch available products
   useEffect(() => {
@@ -172,11 +175,11 @@ export function ManualTransactionForm() {
         </button>
       </div>
 
-      {/* Add date selector before product selection */}
+      {/* Add date and time selector before product selection */}
       <div className="mb-4">
-        <label className="text-sm mb-1 block">Date</label>
+        <label className="text-sm mb-1 block">Date and Time</label>
         <Input
-          type="date"
+          type="datetime-local"
           value={date}
           onChange={(e) => setDate(e.target.value)}
           className="w-full"

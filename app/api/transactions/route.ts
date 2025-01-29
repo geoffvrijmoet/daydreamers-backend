@@ -1,36 +1,33 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
-import { type Transaction } from '@/types'
 
-type TransactionQuery = {
-  source?: 'square' | 'shopify' | 'gmail' | 'manual';
-  type?: 'sale' | 'purchase';
+interface DateQuery {
+  date?: {
+    $gte?: string;
+    $lte?: string;
+  };
 }
 
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url)
-    const source = searchParams.get('source') as TransactionQuery['source']
-    const type = searchParams.get('type') as TransactionQuery['type']
-    
     const db = await getDb()
-    
-    // Build query based on parameters
-    const query: TransactionQuery = {}
-    if (source) query.source = source
-    if (type) query.type = type
+    const { searchParams } = new URL(request.url)
+    const startDate = searchParams.get('startDate')
+    const endDate = searchParams.get('endDate')
+
+    const query: DateQuery = {}
+    if (startDate) query.date = { $gte: startDate }
+    if (endDate) query.date = { ...query.date, $lte: endDate }
 
     const transactions = await db.collection('transactions')
       .find(query)
       .sort({ date: -1 })
-      .toArray() as unknown as Transaction[]
+      .toArray()
 
     return NextResponse.json({ transactions })
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Failed to fetch transactions'
-    console.error('Error fetching transactions:', error)
     return NextResponse.json(
-      { error: errorMessage },
+      { error: error instanceof Error ? error.message : 'Failed to fetch transactions' },
       { status: 500 }
     )
   }

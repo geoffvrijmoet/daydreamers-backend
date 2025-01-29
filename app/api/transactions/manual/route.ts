@@ -12,14 +12,15 @@ export async function POST(request: Request) {
     const taxableAmount = (data.productsTotal || 0) + (data.shipping || 0)
     const taxAmount = taxableAmount * taxRate
 
-    // Convert the date to UTC while treating it as Eastern Time
+    // The date from the form is already in Eastern time, so we should store it as is
+    const now = fromEasternTime(new Date())
     const transaction = {
       ...data,
-      date: fromEasternTime(data.date || new Date()),
+      date: data.date, // Don't convert the date since it's already in Eastern time
       preTaxAmount: taxableAmount,
       taxAmount,
-      createdAt: fromEasternTime(new Date()),
-      updatedAt: fromEasternTime(new Date())
+      createdAt: now,
+      updatedAt: now
     }
 
     await db.collection('transactions').insertOne(transaction)

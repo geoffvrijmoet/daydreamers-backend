@@ -2,7 +2,7 @@
 
 import { Card } from "@/components/ui/card"
 import { useTransactions } from "@/lib/hooks/useTransactions"
-import { useMemo, useState, useEffect } from "react"
+import { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -55,7 +55,7 @@ interface TransactionData {
   totalAmount: number
   tip?: number
   discount?: number
-  status: 'completed' | 'cancelled' | 'refunded'
+  status?: 'completed' | 'cancelled' | 'refunded' | 'UNKNOWN' | 'void'
   voidReason?: string
   voidedAt?: string
   supplier?: string
@@ -87,6 +87,32 @@ type GroupedTransactions = {
   }
 }
 
+// Helper function to calculate tax details
+const calculateTaxDetails = (transaction: TransactionData) => {
+  // For manual sales, always use stored MongoDB values
+  if (transaction.source === 'manual') {
+    return {
+      taxAmount: transaction.taxAmount ?? 0,
+      preTaxAmount: transaction.preTaxAmount ?? 0
+    };
+  }
+
+  // For Square and Shopify, always use stored values
+  if (transaction.source === 'square' || transaction.source === 'shopify') {
+    return {
+      taxAmount: transaction.taxAmount ?? 0,
+      preTaxAmount: transaction.preTaxAmount ?? 0
+    };
+  }
+
+  // For other sources, calculate if not available
+  const taxAmount = transaction.taxAmount ?? 0;
+  const preTaxAmount = transaction.preTaxAmount ?? 
+    (transaction.amount - (transaction.taxAmount ?? 0) - (transaction.tip ?? 0));
+
+  return { taxAmount, preTaxAmount };
+};
+
 export function TransactionsList() {
   const router = useRouter()
   const [startDate, setStartDate] = useState<Date>()
@@ -101,67 +127,22 @@ export function TransactionsList() {
   const [findingProduct, setFindingProduct] = useState<Set<string>>(new Set())
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
 
-  useEffect(() => {
-    transactions.forEach(transaction => {
-      const typedTransaction = transaction as unknown as TransactionData
-      if (typedTransaction.products?.length) {
-        console.log(`Products for transaction ${typedTransaction.id}:`, {
-          date: typedTransaction.date,
-          description: typedTransaction.description,
-          products: typedTransaction.products.map(p => ({
-            name: p.name,
-            quantity: p.quantity,
-            unitPrice: p.unitPrice,
-            totalPrice: p.totalPrice
-          }))
-        })
-      }
-    })
-  }, [transactions])
-
-  const calculateTaxDetails = (transaction: Partial<TransactionData>) => {
-    const taxRate = 0.08875;
-    
-    // For Shopify transactions, use the actual tax data from MongoDB
-    if (transaction.source === 'shopify') {
-      const preTaxAmount = transaction.preTaxAmount ?? 
-        (transaction.amount ? transaction.amount - (transaction.taxAmount ?? 0) - (transaction.tip ?? 0) : 0);
-      
-      return {
-        taxAmount: transaction.taxAmount ?? 0,
-        taxRate: transaction.taxAmount && preTaxAmount 
-          ? ((transaction.taxAmount / preTaxAmount) * 100)
-          : 0
-      };
-    }
-    
-    // If this is a manual transaction with products
-    if (transaction.source === 'manual' && transaction.productsTotal !== undefined) {
-      // For discounts, use the actual amount paid (minus any tip)
-      const baseAmount = (transaction.amount ?? 0) - (transaction.tip ?? 0);
-      const preTaxAmount = baseAmount / (1 + taxRate);
-      const taxAmount = baseAmount - preTaxAmount;
-      
-      return {
-        taxAmount,
-        taxRate: taxRate * 100
-      };
-    }
-    
-    // For non-manual transactions or those without products, use original calculation
-    const baseAmount = transaction.amount ?? 0;
-    const preTaxAmount = baseAmount / (1 + taxRate);
-    const taxAmount = baseAmount - preTaxAmount;
-    return {
-      taxAmount,
-      taxRate: taxRate * 100
-    };
-  };
-
   const groupedTransactions = useMemo(() => {
-    return transactions.reduce((acc: GroupedTransactions, transaction) => {
+    // Single debug log to show what we're processing
+    console.log('Processing transactions:', transactions.map(t => ({
+      id: t._id,
+      source: t.source,
+      status: t.status,
+      amount: t.amount,
+      taxAmount: t.taxAmount,
+      date: formatInEasternTime(toEasternTime(t.date), 'yyyy-MM-dd HH:mm:ss')
+    })));
+
+    const result = transactions.reduce((acc: GroupedTransactions, transaction) => {
       const transactionDate = toEasternTime(transaction.date)
       const dateKey = formatInEasternTime(transactionDate, 'MMMM d, yyyy')
+      const typedTransaction = transaction as unknown as TransactionData;
+      const { taxAmount } = calculateTaxDetails(typedTransaction);
 
       if (!acc[dateKey]) {
         acc[dateKey] = {
@@ -172,20 +153,71 @@ export function TransactionsList() {
         }
       }
 
-      const typedTransaction = transaction as unknown as TransactionData;
-      const { taxAmount } = calculateTaxDetails(typedTransaction);
-
       acc[dateKey].transactions.push(typedTransaction)
       
-      // Only add to totals if transaction is not cancelled or refunded
-      if (typedTransaction.status === 'completed') {
+      // Include in totals if:
+      // 1. It's a manual transaction (we always include these unless voided)
+      // 2. OR it has undefined status (we always include these too)
+      // 3. OR it's a completed/UNKNOWN transaction (and not cancelled/refunded/voided)
+      const isManual = typedTransaction.source === 'manual';
+      const hasUndefinedStatus = typedTransaction.status === undefined;
+      const isValidNonUndefinedStatus = typedTransaction.status === 'completed' || 
+                                      typedTransaction.status === 'UNKNOWN';
+      const isNotCancelledOrRefunded = typedTransaction.status !== 'cancelled' && 
+                                     typedTransaction.status !== 'refunded';
+      const isNotVoided = typedTransaction.status !== 'void' && !typedTransaction.voidedAt;
+
+      if ((isManual || hasUndefinedStatus || (isValidNonUndefinedStatus && isNotCancelledOrRefunded)) && isNotVoided) {
         acc[dateKey].totalAmount += typedTransaction.amount
         acc[dateKey].totalTax += taxAmount
         acc[dateKey].count += 1
+
+        // Log when we add to totals
+        console.log(`Adding to ${dateKey} totals:`, {
+          id: typedTransaction._id,
+          source: typedTransaction.source,
+          status: typedTransaction.status,
+          amount: typedTransaction.amount,
+          taxAmount,
+          isVoided: typedTransaction.status === 'void' || !!typedTransaction.voidedAt,
+          newTotalAmount: acc[dateKey].totalAmount,
+          newTotalTax: acc[dateKey].totalTax
+        });
       }
 
       return acc
     }, {})
+
+    // Log final daily totals
+    console.log('Final daily totals:', Object.entries(result).map(([date, data]) => {
+      // Use the same filtering logic as the totals calculation
+      const includedTransactions = data.transactions.filter(t => {
+        const isManual = t.source === 'manual';
+        const hasUndefinedStatus = t.status === undefined;
+        const isValidNonUndefinedStatus = t.status === 'completed' || t.status === 'UNKNOWN';
+        const isNotCancelledOrRefunded = t.status !== 'cancelled' && t.status !== 'refunded';
+        const isNotVoided = t.status !== 'void' && !t.voidedAt;
+
+        return (isManual || hasUndefinedStatus || (isValidNonUndefinedStatus && isNotCancelledOrRefunded)) && isNotVoided;
+      });
+
+      return {
+        date,
+        totalAmount: data.totalAmount,
+        totalTax: data.totalTax,
+        count: data.count,
+        includedTransactions: includedTransactions.map(t => ({
+          id: t._id,
+          amount: t.amount,
+          taxAmount: t.taxAmount,
+          source: t.source,
+          status: t.status,
+          isVoided: t.status === 'void' || !!t.voidedAt
+        }))
+      };
+    }));
+
+    return result;
   }, [transactions])
 
   const handleEdit = (transaction: TransactionData) => {
@@ -259,46 +291,24 @@ export function TransactionsList() {
   }
 
   const handleFindMongoProduct = async (transaction: TransactionData, lineItem: NonNullable<TransactionData['lineItems']>[number], index: number) => {
-    console.log('[UI] Starting product search for:', {
-      transactionId: transaction._id,
-      lineItemTitle: lineItem.name,
-      variantId: lineItem.variant_id,
-      index
-    })
-
     if (!lineItem.variant_id) {
-      console.log('[UI] Error: No variant_id found for line item')
       return
     }
 
     setFindingProduct(prev => new Set(prev).add(`${transaction._id}-${index}`))
-    console.log('[UI] Set loading state for:', `${transaction._id}-${index}`)
 
     try {
-      console.log('[UI] Fetching product for variant ID:', lineItem.variant_id)
       const response = await fetch(`/api/products/shopify/find-by-variant?variantId=${lineItem.variant_id}`)
       
       if (!response.ok) {
-        console.error('[UI] API request failed:', {
-          status: response.status,
-          statusText: response.statusText
-        })
         throw new Error('Failed to find product')
       }
 
       const data = await response.json()
-      console.log('[UI] API response:', data)
 
       if (!data.product) {
-        console.log('[UI] No product found in MongoDB')
         return
       }
-
-      console.log('[UI] Found MongoDB product:', {
-        productId: data.product._id,
-        name: data.product.name,
-        sku: data.product.sku
-      })
 
       // Update the transactions state directly
       const updatedTransactions = transactions.map(t => {
@@ -307,7 +317,7 @@ export function TransactionsList() {
             if (idx === index) {
               return {
                 ...item,
-                name: data.product.name, // Update the name to show immediately
+                name: data.product.name,
                 mongoProduct: data.product
               }
             }
@@ -322,13 +332,11 @@ export function TransactionsList() {
         return t
       })
 
-      // Update the transactions state directly
       setTransactions(updatedTransactions)
 
-    } catch (err) {
-      console.error('[UI] Error finding product:', err)
+    } catch {
+      // Silently handle errors
     } finally {
-      console.log('[UI] Clearing loading state for:', `${transaction._id}-${index}`)
       setFindingProduct(prev => {
         const next = new Set(prev)
         next.delete(`${transaction._id}-${index}`)
@@ -340,6 +348,7 @@ export function TransactionsList() {
   const renderProducts = (transaction: TransactionData) => {
     if (!transaction) return null;
 
+    // First check for products array (legacy support)
     if (transaction.source === 'manual' && transaction.products && transaction.products.length > 0) {
       return transaction.products.map((product, idx) => (
         <div key={idx} className="flex items-center">
@@ -371,57 +380,77 @@ export function TransactionsList() {
       ));
     }
 
-    if (transaction.source === 'square' && transaction.lineItems && transaction.lineItems.length > 0) {
-      return transaction.lineItems.map((item, idx) => (
-        <div key={idx} className="flex items-center">
-          <span>{item.quantity}x</span>
-          <span className="ml-2">{item.name ?? 'Unnamed Product'}</span>
-          {item.variationName && <span className="ml-1">({item.variationName})</span>}
-          <span className="ml-2 text-gray-500">
-            (${((item.grossSalesMoney?.amount ?? item.price * 100) / 100).toFixed(2)})
-          </span>
-        </div>
-      ));
-    }
-
-    if (transaction.source === 'shopify' && transaction.lineItems && transaction.lineItems.length > 0) {
-      return transaction.lineItems.map((item, idx) => (
-        <div key={idx} className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center">
-              <span className="font-medium">{item.quantity}x</span>
-              <span className="ml-2">{item.name}</span>
-              {item.sku && <span className="ml-2 text-gray-500">({item.sku})</span>}
-            </div>
-            <div className="text-gray-500">
-              <span className="mx-1">@</span>
-              <span>${Number(item.price).toFixed(2)}</span>
-              <span className="mx-1">=</span>
-              <span className="font-medium">${(Number(item.price) * item.quantity).toFixed(2)}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {item.mongoProduct ? (
-              <div className="text-sm text-green-600">
+    // Then check for lineItems
+    if (transaction.lineItems && transaction.lineItems.length > 0) {
+      if (transaction.source === 'manual') {
+        return transaction.lineItems.map((item, idx) => (
+          <div key={idx} className="flex items-center">
+            <span>{item.quantity}x</span>
+            <span className="ml-2">{item.name ?? 'Unnamed Product'}</span>
+            <span className="ml-2 text-gray-500">
+              (${(item.price * item.quantity).toFixed(2)})
+            </span>
+            {item.mongoProduct && (
+              <span className="ml-2 text-sm text-green-600">
                 → {item.mongoProduct.name} (Stock: {item.mongoProduct.currentStock})
-              </div>
-            ) : (
-              <button
-                onClick={() => handleFindMongoProduct(transaction, item, idx)}
-                disabled={findingProduct.has(`${transaction._id}-${idx}`)}
-                className="text-xs text-blue-600 hover:text-blue-700"
-              >
-                {findingProduct.has(`${transaction._id}-${idx}`) ? 'Finding...' : 'Find Product'}
-              </button>
+              </span>
             )}
           </div>
-        </div>
-      ));
+        ));
+      }
+
+      if (transaction.source === 'square') {
+        return transaction.lineItems.map((item, idx) => (
+          <div key={idx} className="flex items-center">
+            <span>{item.quantity}x</span>
+            <span className="ml-2">{item.name ?? 'Unnamed Product'}</span>
+            {item.variationName && <span className="ml-1">({item.variationName})</span>}
+            <span className="ml-2 text-gray-500">
+              (${((item.grossSalesMoney?.amount ?? item.price * 100) / 100).toFixed(2)})
+            </span>
+          </div>
+        ));
+      }
+
+      if (transaction.source === 'shopify') {
+        return transaction.lineItems.map((item, idx) => (
+          <div key={idx} className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center">
+                <span className="font-medium">{item.quantity}x</span>
+                <span className="ml-2">{item.name}</span>
+                {item.sku && <span className="ml-2 text-gray-500">({item.sku})</span>}
+              </div>
+              <div className="text-gray-500">
+                <span className="mx-1">@</span>
+                <span>${Number(item.price).toFixed(2)}</span>
+                <span className="mx-1">=</span>
+                <span className="font-medium">${(Number(item.price) * item.quantity).toFixed(2)}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {item.mongoProduct ? (
+                <div className="text-sm text-green-600">
+                  → {item.mongoProduct.name} (Stock: {item.mongoProduct.currentStock})
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleFindMongoProduct(transaction, item, idx)}
+                  disabled={findingProduct.has(`${transaction._id}-${idx}`)}
+                  className="text-xs text-blue-600 hover:text-blue-700"
+                >
+                  {findingProduct.has(`${transaction._id}-${idx}`) ? 'Finding...' : 'Find Product'}
+                </button>
+              )}
+            </div>
+          </div>
+        ));
+      }
     }
 
     return (
       <div className="text-gray-600 dark:text-gray-400">
-        {transaction.description}
+        {transaction.description || 'No items'}
       </div>
     );
   };
@@ -851,10 +880,20 @@ export function TransactionsList() {
             .sort(([dateA], [dateB]) => 
               new Date(dateB).getTime() - new Date(dateA).getTime()
             )
-            .map(([date, { transactions: dayTransactions }]) => {
-              const completedTransactions = dayTransactions.filter(t => t.status === 'completed')
-              const totalAmount = completedTransactions.reduce((sum, t) => sum + t.amount, 0)
-              const totalTax = completedTransactions.reduce((sum, t) => sum + calculateTaxDetails(t).taxAmount, 0)
+            .map(([date, { transactions: dayTransactions }]): JSX.Element => {
+              // Use the same filtering logic as the groupedTransactions calculation
+              const includedTransactions = dayTransactions.filter(t => {
+                const isManual = t.source === 'manual';
+                const hasUndefinedStatus = t.status === undefined;
+                const isValidNonUndefinedStatus = t.status === 'completed' || t.status === 'UNKNOWN';
+                const isNotCancelledOrRefunded = t.status !== 'cancelled' && t.status !== 'refunded';
+                const isNotVoided = t.status !== 'void' && !t.voidedAt;
+
+                return (isManual || hasUndefinedStatus || (isValidNonUndefinedStatus && isNotCancelledOrRefunded)) && isNotVoided;
+              });
+
+              const totalAmount = includedTransactions.reduce((sum, t) => sum + t.amount, 0)
+              const totalTax = includedTransactions.reduce((sum, t) => sum + calculateTaxDetails(t).taxAmount, 0)
 
               return (
                 <div key={date}>
@@ -866,7 +905,7 @@ export function TransactionsList() {
                         <span className="mr-4">Total: ${totalAmount.toFixed(2)}</span>
                         <span>Tax: ${totalTax.toFixed(2)}</span>
                         <span className="ml-4">
-                          {completedTransactions.length} transaction{completedTransactions.length !== 1 ? 's' : ''}
+                          {includedTransactions.length} transaction{includedTransactions.length !== 1 ? 's' : ''}
                         </span>
                       </div>
                     </div>

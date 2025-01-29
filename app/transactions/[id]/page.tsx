@@ -3,9 +3,11 @@
 import { useEffect, useState } from 'react'
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Calculator, Save } from "lucide-react"
+import { ArrowLeft, Calculator, Save, Edit2 } from "lucide-react"
 import { useRouter } from 'next/navigation'
 import { cn } from "@/lib/utils"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 
 interface TransactionDetails {
   _id: string
@@ -106,6 +108,8 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
   const [profitDetails, setProfitDetails] = useState<TransactionProfitDetails | null>(null)
   const [saving, setSaving] = useState(false)
   const [fetchingFees, setFetchingFees] = useState(false)
+  const [editingCustomer, setEditingCustomer] = useState(false)
+  const [customerName, setCustomerName] = useState('')
 
   // Move these calculations into the component scope
   const taxAmount = transaction?.taxAmount ?? 0;
@@ -589,18 +593,48 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
 
     const TAX_RATE = 0.08875;
     
-    // Calculate subtotal from line items
+    // For manual sales, calculate tax from total amount (which includes tax)
+    if (transaction.source === 'manual') {
+      // Remove tip from total to get amount including tax
+      const totalWithTax = transaction.amount - (transaction.tip ?? 0);
+      
+      // Calculate pre-tax amount: total / (1 + tax_rate)
+      const preTaxAmount = totalWithTax / (1 + TAX_RATE);
+      
+      // Calculate tax amount
+      const calculatedTax = totalWithTax - preTaxAmount;
+
+      // Update the transaction state with new tax amount
+      setTransaction(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          taxAmount: calculatedTax,
+          preTaxAmount: preTaxAmount
+        };
+      });
+
+      console.log('[Tax Recalc] Recalculated sales tax for manual sale:', {
+        totalAmount: transaction.amount,
+        tipAmount: transaction.tip ?? 0,
+        totalWithTax,
+        preTaxAmount: preTaxAmount.toFixed(2),
+        calculatedTax: calculatedTax.toFixed(2),
+        taxRate: '8.875%'
+      });
+      return;
+    }
+    
+    // For non-manual sales, keep existing logic
     let subtotal = 0;
-    if (transaction.source === 'manual' && transaction.products) {
+    if (transaction.products) {
       subtotal = transaction.products.reduce((sum, product) => sum + product.totalPrice, 0);
     } else if (transaction.lineItems) {
       subtotal = transaction.lineItems.reduce((sum, item) => sum + (Number(item.price) * item.quantity), 0);
     }
     
-    // Calculate tax based on subtotal
     const calculatedTax = subtotal * TAX_RATE;
 
-    // Update the transaction state with new tax amount
     setTransaction(prev => {
       if (!prev) return prev;
       return {
@@ -619,6 +653,43 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
       taxRate: '8.875%'
     });
   };
+
+  const handleCustomerUpdate = async () => {
+    if (!transaction) return;
+    
+    try {
+      setSaving(true);
+      const response = await fetch(`/api/transactions/${transaction.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          customer: customerName
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update customer');
+      }
+
+      await response.json(); // Just consume the response
+      setTransaction(prev => prev ? { ...prev, customer: customerName } : null);
+      setEditingCustomer(false);
+      alert('Customer updated successfully');
+    } catch (err) {
+      console.error('Error updating customer:', err);
+      alert('Failed to update customer');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    if (transaction) {
+      setCustomerName(transaction.customer || '');
+    }
+  }, [transaction]);
 
   if (loading) {
     return (
@@ -748,10 +819,45 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
           {/* Customer Info */}
           {(transaction.customer || transaction.paymentMethod) && (
             <div className="space-y-2">
-              {transaction.customer && (
-                <div>
+              {transaction.customer !== undefined && (
+                <div className="flex items-center gap-2">
                   <span className="font-medium">Customer:</span>
-                  <span className="ml-2">{transaction.customer}</span>
+                  <span className="flex-1">{transaction.customer}</span>
+                  <Dialog open={editingCustomer} onOpenChange={setEditingCustomer}>
+                    <DialogTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Edit2 className="h-4 w-4" />
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Edit Customer</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                          <Input
+                            placeholder="Customer name"
+                            value={customerName}
+                            onChange={(e) => setCustomerName(e.target.value)}
+                          />
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={() => setEditingCustomer(false)}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            onClick={handleCustomerUpdate}
+                            disabled={saving}
+                          >
+                            {saving ? 'Saving...' : 'Save'}
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               )}
               {transaction.paymentMethod && (

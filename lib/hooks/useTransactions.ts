@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Transaction } from '@/types'
 import { startOfDay, endOfDay } from 'date-fns'
 import { logger } from '@/lib/utils/logger'
@@ -17,48 +18,36 @@ interface UseTransactionsResult {
   setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
 }
 
-export function useTransactions(options?: UseTransactionsOptions): UseTransactionsResult {
+export function useTransactions({ startDate, endDate }: UseTransactionsOptions = {}): UseTransactionsResult {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
-  const fetchTransactions = useCallback(async () => {
+  const fetchTransactions = async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      const queryParams = new URLSearchParams();
-      
-      if (options?.startDate) {
-        const start = startOfDay(new Date(options.startDate));
-        queryParams.set('startDate', fromEasternTime(start));
-      }
-      
-      if (options?.endDate) {
-        const end = endOfDay(new Date(options.endDate));
-        queryParams.set('endDate', fromEasternTime(end));
-      }
-      
-      const response = await fetch(`/api/transactions/combined?${queryParams.toString()}`);
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to fetch transactions');
-      }
 
+      const queryParams = new URLSearchParams();
+      if (startDate) queryParams.append('startDate', startDate);
+      if (endDate) queryParams.append('endDate', endDate);
+
+      const response = await fetch(`/api/transactions?${queryParams}`);
+      if (!response.ok) throw new Error('Failed to fetch transactions');
+      
       const data = await response.json();
       setTransactions(data.transactions);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch transactions';
-      logger.error('Error fetching transactions', { error: err });
-      setError(errorMessage);
+      setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
     }
-  }, [options?.startDate, options?.endDate]);
+  };
 
   useEffect(() => {
     fetchTransactions();
-  }, [fetchTransactions]);
+  }, [startDate, endDate]);
 
   return {
     transactions,
