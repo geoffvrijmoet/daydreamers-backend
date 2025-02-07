@@ -110,6 +110,8 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
   const [fetchingFees, setFetchingFees] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState(false)
   const [customerName, setCustomerName] = useState('')
+  const [isEditingTotal, setIsEditingTotal] = useState(false)
+  const [editedTotal, setEditedTotal] = useState<number>(0)
 
   // Move these calculations into the component scope
   const taxAmount = transaction?.taxAmount ?? 0;
@@ -178,7 +180,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
   useEffect(() => {
     const fetchTransaction = async () => {
       try {
-        console.log('[Transaction Load] Fetching transaction:', params.id);
+        console.log('[Transaction Load] Starting fetch for transaction:', params.id);
         const response = await fetch(`/api/transactions/${params.id}`)
         if (!response.ok) {
           throw new Error('Failed to fetch transaction')
@@ -187,38 +189,44 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
 
         // Normalize line items to always use lineItems key
         if (data.line_items && !data.lineItems) {
+          console.log('[Transaction Load] Normalizing line_items to lineItems');
           data.lineItems = data.line_items;
           delete data.line_items;
         }
 
-        console.log('[Transaction Load] Received transaction data:', {
+        console.log('[Transaction Load] Initial transaction data:', {
           id: data._id,
           source: data.source,
           amount: data.amount,
-          lineItems: data.lineItems?.length ?? 0,
-          products: data.products?.length ?? 0,
+          lineItemCount: data.lineItems?.length ?? 0,
+          productCount: data.products?.length ?? 0,
           hasProfitCalculation: !!data.profitCalculation
         });
 
         // If it's a manual transaction, fetch MongoDB products for all products
         if (data.source === 'manual' && data.products?.length > 0) {
-          console.log('[Transaction Load] Fetching MongoDB products for manual transaction products');
+          console.log('[Transaction Load] Starting MongoDB product fetch for manual products:', 
+            data.products.map(p => ({ name: p.name, productId: p.productId }))
+          );
+
           const updatedProducts = await Promise.all(
             data.products.map(async (product: ManualProduct) => {
               if (!product.productId) {
-                console.log(`[Transaction Load] No productId for ${product.name}`);
+                console.log(`[Transaction Load] Skipping MongoDB fetch - no productId for ${product.name}`);
                 return product;
               }
               
               try {
+                console.log(`[Transaction Load] Fetching MongoDB product for ${product.name} (ID: ${product.productId})`);
                 const productResponse = await fetch(`/api/products/${product.productId}`);
                 const productData = await productResponse.json();
                 
                 if (productData) {
-                  console.log(`[Transaction Load] Found MongoDB product for ${product.name}:`, {
+                  console.log(`[Transaction Load] Successfully fetched MongoDB product for ${product.name}:`, {
                     name: productData.name,
                     sku: productData.sku,
-                    averageCost: productData.averageCost
+                    averageCost: productData.averageCost,
+                    currentStock: productData.currentStock
                   });
                   return { ...product, mongoProduct: productData };
                 }
@@ -230,24 +238,43 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
             })
           );
 
+          console.log('[Transaction Load] Completed manual product updates:', 
+            updatedProducts.map((p: ManualProduct) => ({
+              name: p.name,
+              hasMongoProduct: !!p.mongoProduct,
+              mongoProductSku: p.mongoProduct?.sku
+            }))
+          );
+
           data.products = updatedProducts;
         }
         // If it's a Shopify transaction, fetch MongoDB products for all line items
         else if (data.source === 'shopify' && data.lineItems?.length > 0) {
-          console.log('[Transaction Load] Fetching MongoDB products for line items');
+          console.log('[Transaction Load] Starting MongoDB product fetch for Shopify line items:', 
+            data.lineItems.map(item => ({ 
+              name: item.name, 
+              variantId: item.variant_id 
+            }))
+          );
+
           const updatedLineItems = await Promise.all(
             data.lineItems!.map(async (item: LineItem) => {
-              if (!item.variant_id) return item;
+              if (!item.variant_id) {
+                console.log(`[Transaction Load] Skipping MongoDB fetch - no variant_id for ${item.name}`);
+                return item;
+              }
               
               try {
+                console.log(`[Transaction Load] Fetching MongoDB product for ${item.name} (Variant ID: ${item.variant_id})`);
                 const productResponse = await fetch(`/api/products/shopify/find-by-variant?variantId=${item.variant_id}`);
                 const productData = await productResponse.json();
                 
                 if (productData.product) {
-                  console.log(`[Transaction Load] Found MongoDB product for ${item.name}:`, {
+                  console.log(`[Transaction Load] Successfully fetched MongoDB product for ${item.name}:`, {
                     name: productData.product.name,
                     sku: productData.product.sku,
-                    averageCost: productData.product.averageCost
+                    averageCost: productData.product.averageCost,
+                    currentStock: productData.product.currentStock
                   });
                   return { ...item, mongoProduct: productData.product };
                 }
@@ -259,14 +286,31 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
             })
           );
 
+          console.log('[Transaction Load] Completed Shopify line item updates:', 
+            updatedLineItems.map((item: LineItem) => ({
+              name: item.name,
+              hasMongoProduct: !!item.mongoProduct,
+              mongoProductSku: item.mongoProduct?.sku
+            }))
+          );
+
           data.lineItems = updatedLineItems;
         }
+
+        console.log('[Transaction Load] Setting final transaction data:', {
+          id: data._id,
+          source: data.source,
+          lineItemCount: data.lineItems?.length ?? 0,
+          lineItemsWithMongo: data.lineItems?.filter((item: LineItem) => item.mongoProduct).length ?? 0,
+          productCount: data.products?.length ?? 0,
+          productsWithMongo: data.products?.filter((p: ManualProduct) => p.mongoProduct).length ?? 0
+        });
 
         setTransaction(data);
 
         // If transaction has existing profit calculation, set it
         if (data.profitCalculation) {
-          console.log('[Transaction Load] Found existing profit calculation:', {
+          console.log('[Transaction Load] Setting existing profit calculation:', {
             totalProfit: data.profitCalculation.totalProfit,
             totalCost: data.profitCalculation.totalCost,
             totalRevenue: data.profitCalculation.totalRevenue,
@@ -685,9 +729,136 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     }
   };
 
+  const getCalculatedAmounts = (total: number) => {
+    const TAX_RATE = 0.08875;
+    
+    // First, calculate the expected retail amount (pre-tax + tax)
+    let expectedTotal = 0;
+    if (transaction?.source === 'manual' && transaction.products) {
+      // For manual transactions with products, use product totals
+      expectedTotal = transaction.products.reduce((sum, product) => sum + product.totalPrice, 0);
+    } else if (transaction?.lineItems) {
+      // For transactions with line items, calculate from items
+      expectedTotal = transaction.lineItems.reduce((sum, item) => 
+        sum + (Number(item.price) * item.quantity), 0
+      );
+    } else {
+      // For other cases, use the current pre-tax amount if available
+      expectedTotal = transaction?.preTaxAmount ? 
+        transaction.preTaxAmount * (1 + TAX_RATE) : 
+        total; // Fallback to new total if no reference point
+    }
+
+    // Calculate tip or discount based on difference from expected total
+    let tip = 0;
+    let discount = 0;
+    
+    if (total > expectedTotal) {
+      tip = total - expectedTotal;
+    } else if (total < expectedTotal) {
+      discount = expectedTotal - total;
+    }
+
+    // Now calculate tax amounts based on the actual retail amount (total - tip)
+    const totalWithoutTip = total - tip;
+    const preTaxAmount = totalWithoutTip / (1 + TAX_RATE);
+    const calculatedTax = totalWithoutTip - preTaxAmount;
+
+    // Calculate profit details if we have the data
+    let profitCalc = null;
+    if (transaction) {
+      const isVenmoTransaction = transaction.source === 'venmo' || transaction.paymentMethod === 'Venmo';
+      const creditCardFees = isVenmoTransaction ? 0 : 
+        transaction.source === 'shopify' && transaction.shopifyProcessingFee ? 
+          transaction.shopifyProcessingFee : 
+          0;
+
+      profitCalc = {
+        totalRevenue: preTaxAmount + tip,
+        totalCost: profitDetails?.totalCost ?? 0,
+        totalProfit: preTaxAmount + tip - (profitDetails?.totalCost ?? 0) - calculatedTax - creditCardFees,
+        creditCardFees,
+        taxAmount: calculatedTax
+      };
+    }
+
+    console.log('[Total Update] Calculated amounts:', {
+      newTotal: total,
+      expectedTotal: expectedTotal.toFixed(2),
+      tip: tip.toFixed(2),
+      discount: discount.toFixed(2),
+      preTaxAmount: preTaxAmount.toFixed(2),
+      calculatedTax: calculatedTax.toFixed(2)
+    });
+
+    return {
+      preTaxAmount,
+      taxAmount: calculatedTax,
+      tip,
+      discount,
+      profitDetails: profitCalc
+    };
+  };
+
+  const handleTotalUpdate = async () => {
+    if (!transaction) return;
+    
+    try {
+      setSaving(true);
+      const { preTaxAmount, taxAmount, tip, discount } = getCalculatedAmounts(editedTotal);
+      
+      const response = await fetch(`/api/transactions/${transaction._id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: editedTotal,
+          preTaxAmount,
+          taxAmount,
+          tip: tip > 0 ? tip : undefined,
+          discount: discount > 0 ? discount : undefined
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update total');
+      }
+
+      // No need to update local state here since it's already updated in real-time
+      setIsEditingTotal(false);
+    } catch (error) {
+      console.error('Failed to update total:', error);
+      setError(error instanceof Error ? error.message : 'Failed to update total');
+      // Revert changes on error
+      if (transaction) {
+        const { preTaxAmount, taxAmount, tip, discount, profitDetails: originalProfitDetails } = getCalculatedAmounts(transaction.amount);
+        setTransaction(prev => prev ? {
+          ...prev,
+          amount: transaction.amount,
+          preTaxAmount,
+          taxAmount,
+          tip: tip > 0 ? tip : undefined,
+          discount: discount > 0 ? discount : undefined
+        } : null);
+        if (originalProfitDetails) {
+          setProfitDetails(prev => prev ? {
+            ...prev,
+            totalRevenue: originalProfitDetails.totalRevenue,
+            totalProfit: originalProfitDetails.totalProfit,
+            creditCardFees: originalProfitDetails.creditCardFees
+          } : null);
+        }
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   useEffect(() => {
     if (transaction) {
       setCustomerName(transaction.customer || '');
+      setEditedTotal(transaction.amount);
     }
   }, [transaction]);
 
@@ -724,9 +895,34 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
   }
 
   const renderLineItems = () => {
-    if (!transaction) return null;
+    if (!transaction) {
+      console.log('[Product Display] No transaction data available');
+      return null;
+    }
+
+    console.log('[Product Display] Starting render for transaction:', {
+      id: transaction._id,
+      source: transaction.source,
+      hasLineItems: !!transaction.lineItems,
+      lineItemCount: transaction.lineItems?.length ?? 0,
+      hasProducts: !!transaction.products,
+      productCount: transaction.products?.length ?? 0
+    });
 
     if (transaction.source === 'shopify' && transaction.lineItems) {
+      console.log('[Product Display] Rendering Shopify line items:', transaction.lineItems.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+        total: (Number(item.price) * item.quantity).toFixed(2),
+        hasMongoProduct: !!item.mongoProduct,
+        mongoProductDetails: item.mongoProduct ? {
+          name: item.mongoProduct.name,
+          sku: item.mongoProduct.sku,
+          currentStock: item.mongoProduct.currentStock
+        } : null
+      })));
+
       return transaction.lineItems.map(item => (
         <div key={`${item.variant_id || item.name}-${item.quantity}-${item.price}`} className="flex items-center">
           <span>{item.quantity}x</span>
@@ -735,11 +931,30 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
           <span className="ml-2 text-gray-500">
             (${(Number(item.price) * item.quantity).toFixed(2)})
           </span>
+          {item.mongoProduct && (
+            <span className="ml-2 text-sm text-green-600">
+              → {item.mongoProduct.name} (Stock: {item.mongoProduct.currentStock})
+            </span>
+          )}
         </div>
       ));
     }
 
     if (transaction.source === 'square' && transaction.lineItems) {
+      console.log('[Product Display] Rendering Square line items:', transaction.lineItems.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+        grossSalesAmount: item.grossSalesMoney?.amount,
+        calculatedTotal: ((item.grossSalesMoney?.amount ?? item.price * 100) / 100).toFixed(2),
+        hasMongoProduct: !!item.mongoProduct,
+        mongoProductDetails: item.mongoProduct ? {
+          name: item.mongoProduct.name,
+          sku: item.mongoProduct.sku,
+          currentStock: item.mongoProduct.currentStock
+        } : null
+      })));
+
       return transaction.lineItems.map(item => (
         <div key={`${item.name}-${item.quantity}-${item.price}`} className="flex items-center">
           <span>{item.quantity}x</span>
@@ -748,9 +963,48 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
           <span className="ml-2 text-gray-500">
             (${((item.grossSalesMoney?.amount ?? item.price * 100) / 100).toFixed(2)})
           </span>
+          {item.mongoProduct && (
+            <span className="ml-2 text-sm text-green-600">
+              → {item.mongoProduct.name} (Stock: {item.mongoProduct.currentStock})
+            </span>
+          )}
         </div>
       ));
     }
+
+    if (transaction.source === 'manual' && transaction.products) {
+      console.log('[Product Display] Rendering manual products:', transaction.products.map(product => ({
+        name: product.name,
+        quantity: product.quantity,
+        unitPrice: product.unitPrice,
+        totalPrice: product.totalPrice,
+        hasMongoProduct: !!product.mongoProduct,
+        mongoProductDetails: product.mongoProduct ? {
+          name: product.mongoProduct.name,
+          sku: product.mongoProduct.sku,
+          currentStock: product.mongoProduct.currentStock
+        } : null
+      })));
+
+      return transaction.products.map((product, idx) => (
+        <div key={idx} className="flex items-center">
+          <span>{product.quantity}x</span>
+          <span className="ml-2">{product.name}</span>
+          <span className="ml-2 text-gray-500">
+            (${product.totalPrice.toFixed(2)})
+          </span>
+          {product.mongoProduct && (
+            <span className="ml-2 text-sm text-green-600">
+              → {product.mongoProduct.name} (Stock: {product.mongoProduct.currentStock})
+            </span>
+          )}
+        </div>
+      ));
+    }
+
+    console.log('[Product Display] No product data found, showing description:', {
+      description: transaction.description || 'No items'
+    });
 
     return (
       <div className="text-gray-600">
@@ -989,7 +1243,88 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
             )}
             <div className="flex justify-between font-bold text-lg pt-4 border-t">
               <span>Total:</span>
-              <span>${transaction.amount.toFixed(2)}</span>
+              <div className="flex items-center gap-2">
+                {isEditingTotal ? (
+                  <div className="flex items-center gap-2">
+                    <span>$</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={editedTotal}
+                      onChange={(e) => {
+                        const newTotal = Number(e.target.value);
+                        setEditedTotal(newTotal);
+                        // Update transaction state with new calculated amounts
+                        const { preTaxAmount, taxAmount, tip, discount, profitDetails: newProfitDetails } = getCalculatedAmounts(newTotal);
+                        setTransaction(prev => prev ? {
+                          ...prev,
+                          amount: newTotal,
+                          preTaxAmount,
+                          taxAmount,
+                          tip: tip > 0 ? tip : undefined,
+                          discount: discount > 0 ? discount : undefined
+                        } : null);
+                        if (newProfitDetails) {
+                          setProfitDetails(prev => prev ? {
+                            ...prev,
+                            totalRevenue: newProfitDetails.totalRevenue,
+                            totalProfit: newProfitDetails.totalProfit,
+                            creditCardFees: newProfitDetails.creditCardFees
+                          } : null);
+                        }
+                      }}
+                      className="w-24 h-8 text-right"
+                      autoFocus
+                      onBlur={() => {
+                        setIsEditingTotal(false);
+                        handleTotalUpdate();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          setIsEditingTotal(false);
+                          handleTotalUpdate();
+                        } else if (e.key === 'Escape') {
+                          setIsEditingTotal(false);
+                          setEditedTotal(transaction.amount);
+                          const { preTaxAmount, taxAmount, tip, discount, profitDetails: originalProfitDetails } = getCalculatedAmounts(transaction.amount);
+                          setTransaction(prev => prev ? {
+                            ...prev,
+                            amount: transaction.amount,
+                            preTaxAmount,
+                            taxAmount,
+                            tip: tip > 0 ? tip : undefined,
+                            discount: discount > 0 ? discount : undefined
+                          } : null);
+                          if (originalProfitDetails) {
+                            setProfitDetails(prev => prev ? {
+                              ...prev,
+                              totalRevenue: originalProfitDetails.totalRevenue,
+                              totalProfit: originalProfitDetails.totalProfit,
+                              creditCardFees: originalProfitDetails.creditCardFees
+                            } : null);
+                          }
+                        }
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span>${transaction.amount.toFixed(2)}</span>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8"
+                      onClick={() => {
+                        setEditedTotal(transaction.amount);
+                        setIsEditingTotal(true);
+                      }}
+                    >
+                      <Edit2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

@@ -64,4 +64,40 @@ export async function GET(
       { status: 500 }
     )
   }
+}
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const updates = await request.json()
+    const db = await getDb()
+
+    const result = await db.collection('transactions').findOneAndUpdate(
+      { _id: new ObjectId(params.id) },
+      { 
+        $set: {
+          ...updates,
+          updatedAt: new Date().toISOString()
+        }
+      },
+      { returnDocument: 'after' }
+    )
+
+    if (!result) {
+      return NextResponse.json(
+        { error: 'Transaction not found' },
+        { status: 404 }
+      )
+    }
+
+    return NextResponse.json(result)
+  } catch (error) {
+    console.error('Error updating transaction:', error)
+    return NextResponse.json(
+      { error: 'Failed to update transaction' },
+      { status: 500 }
+    )
+  }
 } 

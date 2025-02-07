@@ -34,6 +34,10 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
     quantity: number
     unitPrice: number
     totalPrice: number
+    lastPurchasePrice: number
+    currentEmailPrice: number
+    lastPurchaseTotal: number
+    currentEmailTotal: number
   }>>([])
 
   // Add a computed total that updates whenever selectedProducts changes
@@ -63,6 +67,11 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
       // Set email preview
       setEmailPreview(data.emailBody)
       setIsLastEmail(data.isLastEmail)
+
+      // Set amount from response
+      if (data.amount) {
+        setAmount(Math.round(data.amount * 100) / 100)
+      }
 
       // Handle parsed data if available
       if (data.parsedData) {
@@ -126,29 +135,45 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
               const searchResponse = await fetch(`/api/products/search?query=${encodeURIComponent(searchName)}`)
               const searchData = await searchResponse.json()
               
-              // If no results and we're searching for a "for" product, try without the suffix
-              if (searchName.includes('for') && (!searchData.products || searchData.products.length === 0)) {
-                const baseSearchName = searchName.replace(' 1 lb - Regular', '')
-                console.log('No results, trying without suffix:', baseSearchName)
-                const alternateResponse = await fetch(`/api/products/search?query=${encodeURIComponent(baseSearchName)}`)
-                const alternateData = await alternateResponse.json()
-                if (alternateData.products && alternateData.products.length > 0) {
-                  console.log('Found match with alternate search')
-                  searchData.products = alternateData.products
+              let bestMatch = null
+              
+              // First try to find an exact match for the Regular version
+              if (searchData.products && searchData.products.length > 0) {
+                // Look for exact match first
+                bestMatch = searchData.products.find((p: { name: string }) => 
+                  p.name.toLowerCase() === searchName.toLowerCase()
+                )
+                
+                // If no exact match, look for a Regular version
+                if (!bestMatch) {
+                  bestMatch = searchData.products.find((p: { name: string }) => 
+                    p.name.includes('Regular')
+                  )
+                }
+                
+                // If still no match, use first result as fallback
+                if (!bestMatch) {
+                  bestMatch = searchData.products[0]
+                }
+                
+                if (bestMatch) {
+                  console.log('Found match:', {
+                    name: bestMatch.name,
+                    type: bestMatch.name.includes('Regular') ? 'Regular version' : 
+                          bestMatch.name.includes('Bulk') ? 'Bulk version' : 'Other version',
+                    exactMatch: bestMatch.name.toLowerCase() === searchName.toLowerCase()
+                  })
                 }
               }
               
               console.log('Search results:', {
                 query: searchName,
-                resultsCount: searchData.products?.length || 0,
-                firstMatch: searchData.products?.[0]?.name || 'No match'
+                matchedWith: bestMatch?.name || 'No match',
+                allResults: searchData.products?.map((p: { name: string }) => p.name) || []
               })
 
-              // Find the best matching product
-              const bestMatch = searchData.products?.[0]
-              
               if (bestMatch) {
-                console.log('Found match:', {
+                console.log('Using match:', {
                   name: bestMatch.name,
                   id: bestMatch.id,
                   productId: bestMatch.id,
@@ -158,16 +183,27 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
                 // Double the quantity since email shows half quantities
                 const actualQuantity = parsedProduct.quantity * 2
                 
-                // Round lastPurchasePrice to 2 decimal places and calculate total
-                const unitPrice = Number(bestMatch.lastPurchasePrice.toFixed(2))
-                const totalPrice = Number((unitPrice * actualQuantity).toFixed(2))
+                // Get both the last purchase price and current email price
+                const lastPurchasePrice = Number(bestMatch.lastPurchasePrice.toFixed(2))
+                const currentEmailPrice = parsedProduct.unitPrice && !isNaN(parsedProduct.unitPrice) 
+                  ? Number(parsedProduct.unitPrice.toFixed(2))
+                  : lastPurchasePrice // Fall back to last purchase price if email price is invalid
+                
+                // Calculate totals for both prices
+                const lastPurchaseTotal = Number((lastPurchasePrice * actualQuantity).toFixed(2))
+                const currentEmailTotal = Number((currentEmailPrice * actualQuantity).toFixed(2))
                 
                 const matchedProduct = {
                   productId: bestMatch.id,
                   name: bestMatch.name,
                   quantity: actualQuantity,
-                  unitPrice,
-                  totalPrice
+                  lastPurchasePrice,
+                  lastPurchaseTotal,
+                  currentEmailPrice,
+                  currentEmailTotal,
+                  // Use the current email price as the actual price, falling back to last purchase price if needed
+                  unitPrice: currentEmailPrice || lastPurchasePrice,
+                  totalPrice: currentEmailTotal || lastPurchaseTotal
                 }
 
                 console.log('Matched product details:', {
@@ -176,7 +212,13 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
                   bestMatch: {
                     id: bestMatch.id,
                     productId: bestMatch.id,
-                    name: bestMatch.name
+                    name: bestMatch.name,
+                    priceComparison: {
+                      lastPurchase: lastPurchasePrice,
+                      currentEmail: currentEmailPrice,
+                      difference: Number((currentEmailPrice - lastPurchasePrice).toFixed(2)),
+                      percentChange: Number((((currentEmailPrice - lastPurchasePrice) / lastPurchasePrice) * 100).toFixed(1))
+                    }
                   }
                 })
                 return matchedProduct
@@ -216,7 +258,8 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
     setEmailPreview,
     setIsLastEmail,
     setSupplierOrderNumber,
-    setSelectedProducts
+    setSelectedProducts,
+    setAmount
   ])
 
   useEffect(() => {
@@ -275,7 +318,11 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
       name: product.name,
       quantity: 1,
       unitPrice: product.lastPurchasePrice,
-      totalPrice: product.lastPurchasePrice
+      totalPrice: product.lastPurchasePrice,
+      lastPurchasePrice: product.lastPurchasePrice,
+      currentEmailPrice: product.lastPurchasePrice,
+      lastPurchaseTotal: product.lastPurchasePrice,
+      currentEmailTotal: product.lastPurchasePrice
     }])
     setSearchQuery('')
     setShowSuggestions(false)
@@ -287,7 +334,9 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
         return {
           ...product,
           quantity: newQuantity,
-          totalPrice: Number((product.unitPrice * newQuantity).toFixed(2))
+          totalPrice: Number((product.unitPrice * newQuantity).toFixed(2)),
+          lastPurchaseTotal: Number((product.lastPurchasePrice * newQuantity).toFixed(2)),
+          currentEmailTotal: Number((product.currentEmailPrice * newQuantity).toFixed(2))
         }
       }
       return product
@@ -301,7 +350,9 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
         return {
           ...product,
           unitPrice: roundedUnitPrice,
-          totalPrice: Number((roundedUnitPrice * product.quantity).toFixed(2))
+          totalPrice: Number((roundedUnitPrice * product.quantity).toFixed(2)),
+          lastPurchaseTotal: Number((roundedUnitPrice * product.quantity).toFixed(2)),
+          currentEmailTotal: Number((roundedUnitPrice * product.quantity).toFixed(2))
         }
       }
       return product
@@ -315,7 +366,9 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
         return {
           ...product,
           totalPrice: roundedTotalPrice,
-          unitPrice: Number((roundedTotalPrice / product.quantity).toFixed(2))
+          unitPrice: Number((roundedTotalPrice / product.quantity).toFixed(2)),
+          lastPurchaseTotal: Number((roundedTotalPrice / product.quantity).toFixed(2)),
+          currentEmailTotal: Number((roundedTotalPrice / product.quantity).toFixed(2))
         }
       }
       return product
@@ -646,17 +699,32 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
                     />
                     <span className="flex-grow">{product.name}</span>
                     <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1">
-                        <span>$</span>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={product.unitPrice}
-                          onChange={(e) => handleUnitPriceChange(index, Number(e.target.value) || 0)}
-                          className="w-24"
-                        />
-                        <span>each</span>
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center gap-1 text-sm text-gray-500">
+                          <span>Last: ${product.lastPurchasePrice}</span>
+                          {product.currentEmailPrice !== product.lastPurchasePrice && (
+                            <span className={
+                              product.currentEmailPrice > product.lastPurchasePrice 
+                                ? 'text-red-500' 
+                                : 'text-green-500'
+                            }>
+                              ({product.currentEmailPrice > product.lastPurchasePrice ? '+' : ''}
+                              {(((product.currentEmailPrice - product.lastPurchasePrice) / product.lastPurchasePrice) * 100).toFixed(1)}%)
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span>$</span>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={product.unitPrice}
+                            onChange={(e) => handleUnitPriceChange(index, Number(e.target.value) || 0)}
+                            className="w-24"
+                          />
+                          <span>each</span>
+                        </div>
                       </div>
                       <span>=</span>
                       <div className="flex items-center gap-1">

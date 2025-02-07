@@ -5,6 +5,13 @@ import { useRouter } from 'next/navigation'
 import { Card } from "@/components/ui/card"
 import { Product } from '@/types'
 import { ProductForm } from '@/components/product-form'
+import { ShopifyProductForm } from '@/components/shopify-product-form'
+import { ShopifyProductDetails } from '@/components/shopify-product-details'
+
+// Helper to check if a product is in Shopify
+const isInShopify = (product: Product) => {
+  return Boolean(product.shopifyId && product.shopifyId.startsWith('gid://shopify/ProductVariant/'))
+}
 
 export default function ProductEdit({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -12,22 +19,22 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    async function fetchProduct() {
-      try {
-        const response = await fetch(`/api/products/${params.id}`)
-        if (!response.ok) {
-          throw new Error('Failed to fetch product')
-        }
-        const data = await response.json()
-        setProduct(data)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch product')
-      } finally {
-        setLoading(false)
+  const fetchProduct = async () => {
+    try {
+      const response = await fetch(`/api/products/${params.id}`)
+      if (!response.ok) {
+        throw new Error('Failed to fetch product')
       }
+      const data = await response.json()
+      setProduct(data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch product')
+    } finally {
+      setLoading(false)
     }
+  }
 
+  useEffect(() => {
     fetchProduct()
   }, [params.id])
 
@@ -48,14 +55,29 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto py-8 px-4">
+    <div className="max-w-2xl mx-auto py-8 px-4 space-y-6">
       <Card className="p-6">
-        <h1 className="text-2xl font-semibold mb-6">Edit Product</h1>
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-semibold">Edit Product</h1>
+          {product && !isInShopify(product) && (
+            <ShopifyProductForm 
+              product={product} 
+              onSuccess={fetchProduct}
+            />
+          )}
+        </div>
         <ProductForm 
           initialData={product}
           onSuccess={handleSuccess}
         />
       </Card>
+
+      {isInShopify(product) ? (
+        <ShopifyProductDetails 
+          product={product}
+          onUpdate={fetchProduct}
+        />
+      ) : null}
     </div>
   )
 } 

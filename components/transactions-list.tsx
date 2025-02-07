@@ -83,6 +83,7 @@ type GroupedTransactions = {
     transactions: Array<TransactionData>
     totalAmount: number
     totalTax: number
+    totalPurchases: number
     count: number
   }
 }
@@ -135,10 +136,11 @@ export function TransactionsList() {
       status: t.status,
       amount: t.amount,
       taxAmount: t.taxAmount,
+      type: t.type,
       date: formatInEasternTime(toEasternTime(t.date), 'yyyy-MM-dd HH:mm:ss')
     })));
 
-    const result = transactions.reduce((acc: GroupedTransactions, transaction) => {
+    const result = transactions.reduce<GroupedTransactions>((acc, transaction) => {
       const transactionDate = toEasternTime(transaction.date)
       const dateKey = formatInEasternTime(transactionDate, 'MMMM d, yyyy')
       const typedTransaction = transaction as unknown as TransactionData;
@@ -149,6 +151,7 @@ export function TransactionsList() {
           transactions: [],
           totalAmount: 0,
           totalTax: 0,
+          totalPurchases: 0,
           count: 0
         }
       }
@@ -166,11 +169,16 @@ export function TransactionsList() {
       const isNotCancelledOrRefunded = typedTransaction.status !== 'cancelled' && 
                                      typedTransaction.status !== 'refunded';
       const isNotVoided = typedTransaction.status !== 'void' && !typedTransaction.voidedAt;
+      const isPurchase = typedTransaction.type === 'purchase';
 
       if ((isManual || hasUndefinedStatus || (isValidNonUndefinedStatus && isNotCancelledOrRefunded)) && isNotVoided) {
-        acc[dateKey].totalAmount += typedTransaction.amount
-        acc[dateKey].totalTax += taxAmount
-        acc[dateKey].count += 1
+        if (isPurchase) {
+          acc[dateKey].totalPurchases += typedTransaction.amount;
+        } else {
+          acc[dateKey].totalAmount += typedTransaction.amount;
+        }
+        acc[dateKey].totalTax += taxAmount;
+        acc[dateKey].count += 1;
 
         // Log when we add to totals
         console.log(`Adding to ${dateKey} totals:`, {
@@ -178,15 +186,14 @@ export function TransactionsList() {
           source: typedTransaction.source,
           status: typedTransaction.status,
           amount: typedTransaction.amount,
-          taxAmount,
-          isVoided: typedTransaction.status === 'void' || !!typedTransaction.voidedAt,
-          newTotalAmount: acc[dateKey].totalAmount,
-          newTotalTax: acc[dateKey].totalTax
+          type: typedTransaction.type,
+          addedToPurchases: isPurchase,
+          addedToTotal: !isPurchase
         });
       }
 
-      return acc
-    }, {})
+      return acc;
+    }, {});
 
     // Log final daily totals
     console.log('Final daily totals:', Object.entries(result).map(([date, data]) => {
@@ -205,6 +212,7 @@ export function TransactionsList() {
         date,
         totalAmount: data.totalAmount,
         totalTax: data.totalTax,
+        totalPurchases: data.totalPurchases,
         count: data.count,
         includedTransactions: includedTransactions.map(t => ({
           id: t._id,
@@ -561,13 +569,15 @@ export function TransactionsList() {
     const isInactive = typedTransaction.status === 'cancelled' || typedTransaction.status === 'refunded';
     const isExpanded = expandedItems.has(typedTransaction._id);
     const hasProfitData = typedTransaction.profitCalculation?.totalProfit !== undefined;
+    const isPurchase = typedTransaction.type === 'purchase';
 
     return (
       <div 
         key={typedTransaction._id}
         className={cn(
           "border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer",
-          isInactive && "opacity-60"
+          isInactive && "opacity-60",
+          isPurchase && "bg-red-50"
         )}
       >
         {/* Main Row */}
@@ -596,9 +606,10 @@ export function TransactionsList() {
             {/* Amount */}
             <span className={cn(
               "font-medium",
-              isInactive && "line-through"
+              isInactive && "line-through",
+              isPurchase && "text-red-600"
             )}>
-              ${typedTransaction.amount.toFixed(2)}
+              {isPurchase ? "-" : ""}${typedTransaction.amount.toFixed(2)}
             </span>
 
             {/* Profit (if available) */}
@@ -880,9 +891,9 @@ export function TransactionsList() {
             .sort(([dateA], [dateB]) => 
               new Date(dateB).getTime() - new Date(dateA).getTime()
             )
-            .map(([date, { transactions: dayTransactions }]): JSX.Element => {
+            .map(([date, { transactions: dayTransactions }]) => {
               // Use the same filtering logic as the groupedTransactions calculation
-              const includedTransactions = dayTransactions.filter(t => {
+              const includedTransactions = dayTransactions.filter((t: TransactionData) => {
                 const isManual = t.source === 'manual';
                 const hasUndefinedStatus = t.status === undefined;
                 const isValidNonUndefinedStatus = t.status === 'completed' || t.status === 'UNKNOWN';
@@ -892,8 +903,13 @@ export function TransactionsList() {
                 return (isManual || hasUndefinedStatus || (isValidNonUndefinedStatus && isNotCancelledOrRefunded)) && isNotVoided;
               });
 
-              const totalAmount = includedTransactions.reduce((sum, t) => sum + t.amount, 0)
-              const totalTax = includedTransactions.reduce((sum, t) => sum + calculateTaxDetails(t).taxAmount, 0)
+              const totalAmount = includedTransactions
+                .filter((t: TransactionData) => t.type !== 'purchase')
+                .reduce((sum: number, t: TransactionData) => sum + t.amount, 0);
+              const totalPurchases = includedTransactions
+                .filter((t: TransactionData) => t.type === 'purchase')
+                .reduce((sum: number, t: TransactionData) => sum + t.amount, 0);
+              const totalTax = includedTransactions.reduce((sum: number, t: TransactionData) => sum + calculateTaxDetails(t).taxAmount, 0);
 
               return (
                 <div key={date}>
@@ -903,6 +919,7 @@ export function TransactionsList() {
                       <h3 className="text-sm font-medium">{date}</h3>
                       <div className="text-sm text-gray-600">
                         <span className="mr-4">Total: ${totalAmount.toFixed(2)}</span>
+                        <span className="mr-4">Purchases: ${totalPurchases.toFixed(2)}</span>
                         <span>Tax: ${totalTax.toFixed(2)}</span>
                         <span className="ml-4">
                           {includedTransactions.length} transaction{includedTransactions.length !== 1 ? 's' : ''}
@@ -913,7 +930,7 @@ export function TransactionsList() {
 
                   {/* Transactions */}
                   <div>
-                    {dayTransactions.map(transaction => renderTransactionRow(transaction))}
+                    {dayTransactions.map((transaction: TransactionData) => renderTransactionRow(transaction))}
                   </div>
                 </div>
               );

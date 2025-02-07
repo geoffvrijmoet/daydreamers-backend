@@ -82,6 +82,7 @@ export default function AmexTransactionEdit({ params }: { params: { id: string }
         setAmount(transactionData.transaction.amount || 0)
         setDescription(transactionData.transaction.description || '')
         setSupplier(transactionData.transaction.supplier || '')
+        console.log('Found supplier name:', transactionData.transaction.supplier || 'No supplier set')
         setSupplierOrderNumber(transactionData.transaction.supplierOrderNumber || '')
         
         // Match transaction products with database products to ensure correct IDs

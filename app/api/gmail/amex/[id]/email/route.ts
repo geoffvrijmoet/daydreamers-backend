@@ -93,7 +93,7 @@ export async function GET(
     // Format amount for search: e.g., $311.60 could appear as "311.60" or "311" or "$311.60"
     const amountInteger = Math.floor(amount)
     const amountWithDecimals = amount.toFixed(2)
-    const query = `from:${supplier.invoiceEmail} (${amountWithDecimals} OR ${amountInteger} OR $${amountWithDecimals} OR $${amountInteger})`
+    const query = `from:${supplier.invoiceEmail} subject:"${supplier.invoiceSubjectPattern.replace(/\(\\\d\+\)/g, '')}" (${amountWithDecimals} OR ${amountInteger} OR $${amountWithDecimals} OR $${amountInteger})`
     console.log('Searching for emails with query:', query)
     
     const response = await gmail.users.messages.list({

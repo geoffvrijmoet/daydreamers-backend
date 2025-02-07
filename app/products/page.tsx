@@ -8,12 +8,15 @@ import { ProductList } from '@/components/product-list'
 import { PurchaseInvoiceForm } from '@/components/purchase-invoice-form'
 import { SquareSyncReview } from '@/components/square-sync-review'
 import { ShopifySyncReview } from '@/components/shopify-sync-review'
+import { useRouter } from 'next/navigation'
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'list' | 'new' | 'purchase' | 'sync'>('list')
+
+  const router = useRouter()
 
   useEffect(() => {
     fetchProducts()
@@ -120,7 +123,10 @@ export default function ProductsPage() {
 
         {/* Content */}
         {activeTab === 'list' && (
-          <ProductList products={products} onUpdate={fetchProducts} />
+          <>
+            <ProductList products={products} onUpdate={fetchProducts} />
+            
+          </>
         )}
         
         {activeTab === 'new' && (

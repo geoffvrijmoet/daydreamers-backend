@@ -1,5 +1,3 @@
-
-
 export interface BaseTransaction {
   date: string
   type: 'sale' | 'purchase' | 'refund'
@@ -74,7 +72,8 @@ export type CostHistoryEntry = {
 }
 
 export type Product = {
-  id: string
+  _id?: string  // MongoDB ID
+  id: string    // Frontend ID
   name: string
   sku: string
   description?: string

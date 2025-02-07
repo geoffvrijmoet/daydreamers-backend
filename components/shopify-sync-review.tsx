@@ -1,390 +1,430 @@
 'use client'
 
-import { useState } from 'react'
-import { Button } from './ui/button'
-import { Card } from './ui/card'
-import { Input } from './ui/input'
-import { Loader2, ChevronDown, ChevronRight, Search } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd'
+import { Product } from '@/types'
+import { cn } from '@/lib/utils'
+import { StrictMode } from 'react'
 
-type MongoProduct = {
-  _id: string
-  name: string
-  sku: string
-  retailPrice: number
-}
-
-type ShopifyProduct = {
+interface ShopifyProduct {
   id: string
   title: string
   description?: string
   sku?: string
   price: number
   variantId: string
+  mongoProductId?: string
 }
 
-type ProductWithMatches = {
+interface ShopifyPreviewProduct {
   shopify: ShopifyProduct
-  matches: MongoProduct[]
-  selectedMatch?: string // MongoDB _id of selected match
+  matches: Array<{
+    _id: string
+    name: string
+    sku: string
+    retailPrice: number
+  }>
+  selectedMatch?: string
   isExistingMatch: boolean
 }
 
-interface ShopifySyncReviewProps {
-  onSuccess?: () => void
+interface ShopifyPreviewResponse {
+  products: ShopifyPreviewProduct[]
+  totalShopify: number
+  totalMongo: number
+  totalMatched: number
+  totalUnmatched: number
 }
 
-export function ShopifySyncReview({ onSuccess }: ShopifySyncReviewProps) {
+function MatchedProductPair({ mongoProduct, shopifyProduct }: {
+  mongoProduct: Product
+  shopifyProduct: ShopifyProduct
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-4 p-4 border rounded-lg bg-green-50 border-green-200">
+      <div>
+        <h4 className="font-medium">{mongoProduct.name}</h4>
+        <p className="text-sm text-gray-500">SKU: {mongoProduct.sku}</p>
+        <p className="text-sm text-gray-500">Price: ${mongoProduct.retailPrice.toFixed(2)}</p>
+      </div>
+      <div>
+        <h4 className="font-medium">{shopifyProduct.title}</h4>
+        <p className="text-sm text-gray-500">SKU: {shopifyProduct.sku || 'No SKU'}</p>
+        <p className="text-sm text-gray-500">
+          Price: ${typeof shopifyProduct.price === 'number' ? shopifyProduct.price.toFixed(2) : 'N/A'}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function ProductList({ products, matches, onSearch }: {
+  products: Product[]
+  matches: Record<string, string>
+  onSearch: (productId: string, term: string) => void
+}) {
+  // Track search terms for each product
+  const [searchTerms, setSearchTerms] = useState<Record<string, string>>({})
+
+  const handleSearch = (productId: string, term: string) => {
+    setSearchTerms(prev => ({ ...prev, [productId]: term }))
+    onSearch(productId, term)
+  }
+
+  // Reset search ONLY when matches object changes
+  useEffect(() => {
+    // Only reset if there are actual changes to matches
+    setSearchTerms({})
+    products.forEach(product => {
+      onSearch(product._id || product.id, '')
+    })
+  }, [matches]) // Remove products and onSearch from dependencies
+
+  return (
+    <Droppable droppableId="mongo-list">
+      {(provided) => (
+        <div
+          ref={provided.innerRef}
+          {...provided.droppableProps}
+          className="grid grid-rows-[auto] gap-4 content-start"
+        >
+          {products.map((product, index) => (
+            <Draggable
+              key={product._id || product.id}
+              draggableId={`mongo-${product._id || product.id}`}
+              index={index}
+              isDragDisabled={Object.values(matches).includes(product._id || product.id)}
+            >
+              {(provided, snapshot) => (
+                <div
+                  ref={provided.innerRef}
+                  {...provided.draggableProps}
+                  {...provided.dragHandleProps}
+                  className={cn(
+                    "p-4 rounded-lg border min-h-[120px] flex flex-col justify-between",
+                    Object.values(matches).includes(product._id || product.id) ? "border-green-200 bg-green-50" : "border-gray-200",
+                    snapshot.isDragging ? "shadow-lg" : ""
+                  )}
+                >
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="font-medium">{product.name}</h4>
+                        <p className="text-sm text-gray-500">SKU: {product.sku}</p>
+                        <p className="text-sm text-gray-500">Price: ${product.retailPrice.toFixed(2)}</p>
+                      </div>
+                      {Object.values(matches).includes(product._id || product.id) && (
+                        <div className="text-sm text-green-600">
+                          ✓ Matched
+                        </div>
+                      )}
+                    </div>
+                    {!Object.values(matches).includes(product._id || product.id) && (
+                      <Input
+                        placeholder="Search matching Shopify product..."
+                        value={searchTerms[product._id || product.id] || ''}
+                        onChange={e => handleSearch(product._id || product.id, e.target.value)}
+                        className="text-sm"
+                        size={40}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+            </Draggable>
+          ))}
+          {provided.placeholder}
+        </div>
+      )}
+    </Droppable>
+  )
+}
+
+function ShopifyProductList({ products, matches, visibilityFilter }: {
+  products: ShopifyProduct[]
+  matches: Record<string, string>
+  visibilityFilter: Record<string, boolean>
+}) {
+  return (
+    <div className="grid grid-rows-[auto] gap-4 content-start">
+      {products.map(product => (
+        <Droppable
+          key={product.id}
+          droppableId={`shopify-${product.id}`}
+        >
+          {(provided, snapshot) => (
+            <div
+              ref={provided.innerRef}
+              {...provided.droppableProps}
+              style={{ display: visibilityFilter[product.id] === false ? 'none' : undefined }}
+              className={cn(
+                "p-4 rounded-lg border min-h-[120px] flex flex-col justify-between",
+                matches[product.id] ? "border-green-200 bg-green-50" : "border-gray-200",
+                snapshot.isDraggingOver ? "border-blue-500 bg-blue-50" : ""
+              )}
+            >
+              <div className="flex justify-between items-start">
+                <div>
+                  <h4 className="font-medium">{product.title}</h4>
+                  <p className="text-sm text-gray-500">
+                    SKU: {product.sku || 'No SKU'}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Price: ${typeof product.price === 'number' ? product.price.toFixed(2) : 'N/A'}
+                  </p>
+                </div>
+                {matches[product.id] && (
+                  <div className="text-sm text-green-600">
+                    ✓ Matched
+                  </div>
+                )}
+              </div>
+              {provided.placeholder}
+            </div>
+          )}
+        </Droppable>
+      ))}
+    </div>
+  )
+}
+
+export function ShopifySyncReview() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [products, setProducts] = useState<ProductWithMatches[]>([])
-  const [syncing, setSyncing] = useState(false)
-  const [step, setStep] = useState<'initial' | 'review'>('initial')
-  const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set())
-  const [searchResults, setSearchResults] = useState<Map<string, MongoProduct[]>>(new Map())
-  const [searching, setSearching] = useState<Set<string>>(new Set())
-  const [stats, setStats] = useState<{
-    totalShopify: number
-    totalMongo: number
-    totalMatched: number
-    totalUnmatched: number
-  }>({
-    totalShopify: 0,
-    totalMongo: 0,
-    totalMatched: 0,
-    totalUnmatched: 0
-  })
+  const [shopifyProducts, setShopifyProducts] = useState<ShopifyProduct[]>([])
+  const [mongoProducts, setMongoProducts] = useState<Product[]>([])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [matches, setMatches] = useState<Record<string, string>>({})
+  const [productSearches, setProductSearches] = useState<Record<string, string>>({})
+  const [shopifyVisibility, setShopifyVisibility] = useState<Record<string, boolean>>({})
 
-  // Fetch products from Shopify
-  const fetchShopifyProducts = async () => {
+  useEffect(() => {
+    fetchProducts()
+  }, [])
+
+  // Log whenever matches change
+  useEffect(() => {
+    console.log('Matches updated:', {
+      totalMatches: Object.keys(matches).length,
+      matches: matches
+    })
+  }, [matches])
+
+  // Fetch both MongoDB and Shopify products
+  const fetchProducts = async () => {
     setLoading(true)
     setError(null)
+
     try {
-      const response = await fetch('/api/products/shopify/preview')
-      if (!response.ok) {
-        throw new Error('Failed to fetch Shopify products')
-      }
-      const data = await response.json()
+      // Fetch MongoDB products
+      const mongoResponse = await fetch('/api/products')
+      if (!mongoResponse.ok) throw new Error('Failed to fetch MongoDB products')
+      const mongoData = await mongoResponse.json()
+      setMongoProducts(mongoData.products)
+
+      // Fetch Shopify products
+      const shopifyResponse = await fetch('/api/products/shopify/preview')
+      if (!shopifyResponse.ok) throw new Error('Failed to fetch Shopify products')
+      const shopifyData = await shopifyResponse.json() as ShopifyPreviewResponse
       
-      setProducts(data.products)
-      setStats({
-        totalShopify: data.totalShopify,
-        totalMongo: data.totalMongo,
-        totalMatched: data.totalMatched,
-        totalUnmatched: data.totalUnmatched
+      // Extract just the Shopify product data we need
+      const shopifyProducts = shopifyData.products.map((p: ShopifyPreviewProduct) => ({
+        id: p.shopify.id,
+        title: p.shopify.title,
+        sku: p.shopify.sku,
+        price: p.shopify.price,
+        variantId: p.shopify.variantId
+      }))
+      setShopifyProducts(shopifyProducts)
+
+      // Initialize matches from existing connections
+      const initialMatches: Record<string, string> = {}
+      shopifyData.products.forEach((p: ShopifyPreviewProduct) => {
+        if (p.isExistingMatch && p.selectedMatch) {
+          initialMatches[p.shopify.id] = p.selectedMatch
+        }
       })
-      setStep('review')
+      setMatches(initialMatches)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch Shopify products')
+      console.error('Error fetching products:', err)
+      setError(err instanceof Error ? err.message : 'Failed to fetch products')
     } finally {
       setLoading(false)
     }
   }
 
-  // Toggle product expansion
-  const toggleProduct = (productId: string) => {
-    setExpandedProducts(prev => {
-      const next = new Set(prev)
-      if (next.has(productId)) {
-        next.delete(productId)
-      } else {
-        next.add(productId)
-      }
-      return next
+  const handleDragEnd = (result: DropResult) => {
+    if (!result.destination) return
+
+    const { draggableId, destination } = result
+    const mongoId = draggableId.replace('mongo-', '')
+    const shopifyId = destination.droppableId.replace('shopify-', '')
+    
+    console.log('Creating new match:', {
+      mongoId,
+      shopifyId,
+      mongoProduct: mongoProducts.find(p => (p._id || p.id) === mongoId)?.name,
+      shopifyProduct: shopifyProducts.find(p => p.id === shopifyId)?.title
     })
+
+    setMatches(prev => ({
+      ...prev,
+      [shopifyId]: mongoId
+    }))
+
+    // Reset all search filters
+    setProductSearches({})
+    setShopifyVisibility({})
   }
 
-  // Update selected match for a product
-  const updateSelectedMatch = (shopifyId: string, mongoId: string | undefined) => {
-    setProducts(prev => prev.map(p => 
-      p.shopify.id === shopifyId && !p.isExistingMatch 
-        ? { ...p, selectedMatch: mongoId }
-        : p
-    ))
-  }
-
-  // Search for MongoDB products
-  const searchMongoProducts = async (shopifyId: string, query: string) => {
-    if (!query.trim()) {
-      setSearchResults(prev => {
-        const next = new Map(prev)
-        next.delete(shopifyId)
-        return next
-      })
-      return
-    }
-
-    try {
-      const response = await fetch(`/api/products/search?q=${encodeURIComponent(query)}`)
-      if (!response.ok) {
-        throw new Error('Failed to search products')
-      }
-      const data = await response.json()
-      
-      setSearchResults(prev => {
-        const next = new Map(prev)
-        next.set(shopifyId, data.products)
-        return next
-      })
-    } catch (err) {
-      console.error('Search error:', err)
-    }
-  }
-
-  // Handle search input
-  const handleSearch = async (shopifyId: string, query: string) => {
-    // Add to searching set to show loading state
-    setSearching(prev => new Set(prev).add(shopifyId))
-    
-    // Debounce search
-    await new Promise(resolve => setTimeout(resolve, 300))
-    
-    await searchMongoProducts(shopifyId, query)
-    
-    // Remove from searching set
-    setSearching(prev => {
-      const next = new Set(prev)
-      next.delete(shopifyId)
-      return next
-    })
-  }
-
-  // Handle the final sync
   const handleSync = async () => {
-    setSyncing(true)
     try {
-      const selectedMatches = products
-        .filter(p => p.selectedMatch) // Only include products with selected matches
-        .map(p => ({
-          shopifyId: p.shopify.id,
-          shopifyVariantId: p.shopify.variantId,
-          mongoId: p.selectedMatch
-        }))
-
+      setLoading(true)
       const response = await fetch('/api/products/sync/shopify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matches: selectedMatches })
+        body: JSON.stringify({ matches })
       })
 
       if (!response.ok) {
         throw new Error('Failed to sync products')
       }
 
-      // Reset state after successful sync
-      setProducts([])
-      setStep('initial')
-      onSuccess?.()
+      // Refresh the products list
+      await fetchProducts()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sync products')
     } finally {
-      setSyncing(false)
+      setLoading(false)
     }
   }
 
-  if (step === 'initial') {
-    return (
-      <Card className="p-6">
-        <h2 className="text-lg font-medium mb-4">Match Shopify Products</h2>
-        <p className="text-sm text-gray-600 mb-4">
-          This will fetch your Shopify catalog and help you match products with your existing database.
-        </p>
-        <Button
-          onClick={fetchShopifyProducts}
-          disabled={loading}
-        >
-          {loading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Fetching Products...
-            </>
-          ) : (
-            'Fetch Shopify Products'
-          )}
-        </Button>
-        {error && (
-          <p className="mt-2 text-sm text-red-600">{error}</p>
-        )}
-      </Card>
-    )
-  }
+  // Memoize the search handler to prevent unnecessary re-renders
+  const handleProductSearch = useCallback((productId: string, term: string) => {
+    setProductSearches(prev => ({ ...prev, [productId]: term }))
 
-  const selectedCount = products.filter(p => p.selectedMatch).length
+    // Update visibility of Shopify products based on search term
+    const newVisibility: Record<string, boolean> = {}
+    shopifyProducts.forEach(product => {
+      const searchTerm = term.toLowerCase()
+      const isVisible = 
+        product.title.toLowerCase().includes(searchTerm) ||
+        (product.sku || '').toLowerCase().includes(searchTerm)
+      newVisibility[product.id] = isVisible
+    })
+    setShopifyVisibility(newVisibility)
+  }, [shopifyProducts])
+
+  // Get matched product pairs
+  const matchedPairs = Object.entries(matches).map(([shopifyId, mongoId]) => {
+    const shopifyProduct = shopifyProducts.find(p => p.id === shopifyId)
+    const mongoProduct = mongoProducts.find(p => (p._id || p.id) === mongoId)
+    return { shopifyProduct, mongoProduct }
+  }).filter((pair): pair is { shopifyProduct: ShopifyProduct, mongoProduct: Product } => 
+    pair.shopifyProduct !== undefined && pair.mongoProduct !== undefined
+  )
+
+  // Get unmatched products
+  const unmatchedMongoProducts = mongoProducts.filter(p => 
+    !Object.values(matches).includes(p._id || p.id)
+  )
+
+  const unmatchedShopifyProducts = shopifyProducts.filter(p => 
+    !Object.keys(matches).includes(p.id)
+  )
+
+  // Filter unmatched MongoDB products by search term
+  const filteredMongoProducts = unmatchedMongoProducts.filter(product =>
+    product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    product.sku.toLowerCase().includes(searchTerm.toLowerCase())
+  )
 
   return (
-    <Card className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        <div>
-          <h2 className="text-lg font-medium">Match Shopify Products</h2>
-          <div className="text-sm text-gray-600 space-y-1">
-            <p>Found {stats.totalShopify} Shopify products</p>
-            <p>{stats.totalMatched} already matched, {stats.totalUnmatched} unmatched products in database</p>
+    <StrictMode>
+      <Card className="p-6">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h2 className="text-xl font-semibold">Match Shopify Products</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {matchedPairs.length} products matched, {unmatchedMongoProducts.length} MongoDB and {unmatchedShopifyProducts.length} Shopify products remaining
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={fetchProducts}
+              disabled={loading}
+            >
+              {loading ? 'Loading...' : 'Refresh Products'}
+            </Button>
+            <Button
+              onClick={handleSync}
+              disabled={loading || Object.keys(matches).length === 0}
+            >
+              {loading ? 'Syncing...' : `Sync ${Object.keys(matches).length} Matches`}
+            </Button>
           </div>
         </div>
-        <div className="space-x-2">
-          <Button
-            variant="outline"
-            onClick={() => setStep('initial')}
-            disabled={syncing}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSync}
-            disabled={syncing || selectedCount === 0}
-          >
-            {syncing ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Syncing...
-              </>
-            ) : (
-              `Sync ${selectedCount} New Matches`
-            )}
-          </Button>
-        </div>
-      </div>
 
-      {error && (
-        <p className="mb-4 text-sm text-red-600">{error}</p>
-      )}
+        {error && (
+          <div className="text-red-600 mb-4">{error}</div>
+        )}
 
-      <div className="space-y-2">
-        {products.map(product => (
-          <div 
-            key={product.shopify.id} 
-            className={`border rounded-md ${product.isExistingMatch ? 'bg-gray-50' : ''}`}
-          >
-            <div 
-              className="flex items-center p-4 cursor-pointer hover:bg-gray-100"
-              onClick={() => toggleProduct(product.shopify.id)}
-            >
-              {expandedProducts.has(product.shopify.id) ? (
-                <ChevronDown className="w-4 h-4 mr-2 text-gray-500" />
-              ) : (
-                <ChevronRight className="w-4 h-4 mr-2 text-gray-500" />
-              )}
-              <div className="flex-1">
-                <span className="font-medium">{product.shopify.title}</span>
-                <span className="ml-2 text-sm text-gray-500">
-                  ${product.shopify.price.toFixed(2)}
-                </span>
-                {product.shopify.sku && (
-                  <span className="ml-2 text-sm text-gray-500">
-                    (SKU: {product.shopify.sku})
-                  </span>
-                )}
-              </div>
-              <div className="text-sm">
-                {product.isExistingMatch ? (
-                  <span className="text-green-600">Already Matched</span>
-                ) : (
-                  <span className="text-gray-500">
-                    {product.matches.length} potential matches
-                  </span>
-                )}
-              </div>
+        {/* Matched Products Section */}
+        {matchedPairs.length > 0 && (
+          <div className="mb-8">
+            <h3 className="text-lg font-medium mb-4">Matched Products</h3>
+            <div className="space-y-4">
+              {matchedPairs.map(({ mongoProduct, shopifyProduct }) => (
+                <MatchedProductPair
+                  key={`${mongoProduct._id}-${shopifyProduct.id}`}
+                  mongoProduct={mongoProduct}
+                  shopifyProduct={shopifyProduct}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Unmatched Products Section */}
+        {(unmatchedMongoProducts.length > 0 || unmatchedShopifyProducts.length > 0) && (
+          <div>
+            <h3 className="text-lg font-medium mb-4">Match Remaining Products</h3>
+            <div className="mb-4">
+              <Input
+                placeholder="Search MongoDB products..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="max-w-sm"
+              />
             </div>
 
-            {expandedProducts.has(product.shopify.id) && (
-              <div className="px-4 pb-4 space-y-4">
+            <DragDropContext onDragEnd={handleDragEnd}>
+              <div className="grid grid-cols-2 gap-8">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-                  <div className="text-sm text-gray-600 whitespace-pre-wrap">
-                    {product.shopify.description}
-                  </div>
+                  <h4 className="font-medium text-gray-500 mb-4">MongoDB Products ({unmatchedMongoProducts.length})</h4>
+                  <ProductList
+                    products={filteredMongoProducts}
+                    matches={matches}
+                    onSearch={handleProductSearch}
+                  />
                 </div>
-
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {product.isExistingMatch ? 'Current Match' : 'Select Matching Product'}
-                  </label>
-                  <div className="space-y-2">
-                    {!product.isExistingMatch && (
-                      <div className="flex items-center">
-                        <input
-                          type="radio"
-                          name={`match-${product.shopify.id}`}
-                          checked={!product.selectedMatch}
-                          onChange={() => updateSelectedMatch(product.shopify.id, undefined)}
-                          className="mr-2"
-                        />
-                        <span className="text-sm text-gray-600">No match - skip this product</span>
-                      </div>
-                    )}
-                    
-                    {/* Show matches section */}
-                    {product.matches.length > 0 ? (
-                      product.matches.map(match => (
-                        <div key={match._id} className="flex items-center">
-                          {!product.isExistingMatch && (
-                            <input
-                              type="radio"
-                              name={`match-${product.shopify.id}`}
-                              checked={product.selectedMatch === match._id}
-                              onChange={() => updateSelectedMatch(product.shopify.id, match._id)}
-                              className="mr-2"
-                            />
-                          )}
-                          <span className="text-sm">
-                            {match.name}
-                            <span className="ml-2 text-gray-500">
-                              ${match.retailPrice.toFixed(2)}
-                              {match.sku && ` - SKU: ${match.sku}`}
-                            </span>
-                            {product.isExistingMatch && (
-                              <span className="ml-2 text-green-600">(Current Match)</span>
-                            )}
-                          </span>
-                        </div>
-                      ))
-                    ) : !product.isExistingMatch && (
-                      // Show search bar for products with no matches
-                      <div className="space-y-2">
-                        <div className="relative">
-                          <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
-                          <Input
-                            placeholder="Search for a product to match..."
-                            className="pl-8"
-                            onChange={e => handleSearch(product.shopify.id, e.target.value)}
-                          />
-                        </div>
-                        
-                        {/* Show search results */}
-                        {searching.has(product.shopify.id) ? (
-                          <div className="text-sm text-gray-600">
-                            Searching...
-                          </div>
-                        ) : searchResults.get(product.shopify.id)?.length ? (
-                          <div className="space-y-1">
-                            {searchResults.get(product.shopify.id)?.map(result => (
-                              <div key={result._id} className="flex items-center">
-                                <input
-                                  type="radio"
-                                  name={`match-${product.shopify.id}`}
-                                  checked={product.selectedMatch === result._id}
-                                  onChange={() => updateSelectedMatch(product.shopify.id, result._id)}
-                                  className="mr-2"
-                                />
-                                <span className="text-sm">
-                                  {result.name}
-                                  <span className="ml-2 text-gray-500">
-                                    ${result.retailPrice.toFixed(2)}
-                                    {result.sku && ` - SKU: ${result.sku}`}
-                                  </span>
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                    )}
-                  </div>
+                  <h4 className="font-medium text-gray-500 mb-4">Shopify Products ({unmatchedShopifyProducts.length})</h4>
+                  <ShopifyProductList
+                    products={unmatchedShopifyProducts}
+                    matches={matches}
+                    visibilityFilter={shopifyVisibility}
+                  />
                 </div>
               </div>
-            )}
+            </DragDropContext>
           </div>
-        ))}
-      </div>
-    </Card>
+        )}
+      </Card>
+    </StrictMode>
   )
 } 

@@ -6,6 +6,9 @@ import { Card } from "@/components/ui/card"
 import { calculateProfitPerUnit, getPreTaxPrice } from '@/lib/utils/pricing'
 import { Input } from "@/components/ui/input"
 import { ChevronDown, ChevronRight } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 
 type ProductListProps = {
   products: Product[]
@@ -122,6 +125,7 @@ function CostAnalysis({ product }: { product: Product }) {
 }
 
 export function ProductList({ products, onUpdate }: ProductListProps) {
+  const router = useRouter()
   const [sortBy, setSortBy] = useState<'name' | 'profit' | 'stock'>('name')
   const [filterLowStock, setFilterLowStock] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
@@ -274,59 +278,68 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
 
       {/* Product List */}
       <div className="space-y-2">
-        {groupedProducts.map(group => (
-          <Card key={group[0].id} className="p-4">
-            <div 
-              className="flex items-center justify-between cursor-pointer group"
-              onClick={() => toggleProductExpansion(group[0].id)}
-            >
-              <div className="flex items-center gap-4">
-                {expandedProducts.includes(group[0].id) ? (
-                  <ChevronDown className="h-4 w-4 text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                ) : (
-                  <ChevronRight className="h-4 w-4 text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+        {groupedProducts.map((group, groupIndex) => (
+          <Card key={groupIndex} className="p-4">
+            {group.map((product, productIndex) => (
+              <div 
+                key={product.id}
+                className={cn(
+                  "py-2",
+                  productIndex !== 0 && "border-t border-gray-100"
                 )}
-                <div>
-                  <h3 className="text-lg font-medium">
-                    {group[0].name.split('-')[0].trim()}
-                  </h3>
-                  <p className="text-sm text-gray-500">
-                    {group.length > 1 ? `${group.length} variants` : `SKU: ${group[0].sku}`}
-                  </p>
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => toggleProductExpansion(product.id)}
+                      className="text-gray-500 hover:text-gray-700"
+                    >
+                      {expandedProducts.includes(product.id) ? (
+                        <ChevronDown className="h-5 w-5" />
+                      ) : (
+                        <ChevronRight className="h-5 w-5" />
+                      )}
+                    </button>
+                    <div>
+                      <h3 className="font-medium">{product.name}</h3>
+                      <p className="text-sm text-gray-500">SKU: {product.sku}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push(`/products/${product.id}`)}
+                    >
+                      Edit Product
+                    </Button>
+                    <div className="text-right">
+                      {product.currentStock === 1 ? (
+                        <>
+                          <p className="font-medium">${product.retailPrice.toFixed(2)}</p>
+                          <p className="text-sm text-gray-500">Stock: {product.currentStock}</p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="font-medium">
+                            ${Math.min(...group.map(p => p.retailPrice)).toFixed(2)} - 
+                            ${Math.max(...group.map(p => p.retailPrice)).toFixed(2)}
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            Total Stock: {group.reduce((sum, p) => sum + p.currentStock, 0)}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                    {!product.active && (
+                      <span className="text-sm text-gray-500">(Hidden)</span>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-8">
-                <div className="text-right">
-                  {group.length === 1 ? (
-                    <>
-                      <p className="font-medium">${group[0].retailPrice.toFixed(2)}</p>
-                      <p className="text-sm text-gray-500">Stock: {group[0].currentStock}</p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="font-medium">
-                        ${Math.min(...group.map(p => p.retailPrice)).toFixed(2)} - 
-                        ${Math.max(...group.map(p => p.retailPrice)).toFixed(2)}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        Total Stock: {group.reduce((sum, p) => sum + p.currentStock, 0)}
-                      </p>
-                    </>
-                  )}
-                </div>
-                {!group.some(p => p.active) && (
-                  <span className="text-sm text-gray-500">(Hidden)</span>
-                )}
-              </div>
-            </div>
-
-            {/* Expanded Content */}
-            {expandedProducts.includes(group[0].id) && (
-              <div className="mt-4 border-t border-gray-200 dark:border-gray-700 pt-4">
-                {group.map((product, index) => (
-                  <div key={product.id} className={index > 0 ? "mt-8 pt-4 border-t border-gray-200" : ""}>
-                    <h4 className="text-md font-medium mb-4">{product.name}</h4>
-                    
+                
+                {/* Expanded Content */}
+                {expandedProducts.includes(product.id) && (
+                  <div className="mt-4 border-t border-gray-200 dark:border-gray-700 pt-4">
                     {/* Editable Fields */}
                     <div className="grid grid-cols-2 gap-4 mb-4">
                       <div>
@@ -341,13 +354,19 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
                                 className="w-24"
                               />
                               <button
-                                onClick={() => handleUpdateField(product.id, 'currentStock', editingProduct.value)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUpdateField(product.id, 'currentStock', editingProduct.value);
+                                }}
                                 className="text-xs text-green-600 hover:text-green-700"
                               >
                                 Save
                               </button>
                               <button
-                                onClick={() => setEditingProduct(null)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingProduct(null);
+                                }}
                                 className="text-xs text-gray-500 hover:text-gray-600"
                               >
                                 Cancel
@@ -383,13 +402,19 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
                                 className="w-24"
                               />
                               <button
-                                onClick={() => handleUpdateField(product.id, 'retailPrice', editingProduct.value)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUpdateField(product.id, 'retailPrice', editingProduct.value);
+                                }}
                                 className="text-xs text-green-600 hover:text-green-700"
                               >
                                 Save
                               </button>
                               <button
-                                onClick={() => setEditingProduct(null)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingProduct(null);
+                                }}
                                 className="text-xs text-gray-500 hover:text-gray-600"
                               >
                                 Cancel
@@ -429,23 +454,9 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
                       )}
                     </div>
                   </div>
-                ))}
-
-                {/* Delete Button */}
-                <div className="mt-4 flex justify-end">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedProducts(group.map(p => p.id));
-                      setShowBulkDelete(true);
-                    }}
-                    className="text-sm text-red-600 hover:text-red-700"
-                  >
-                    Delete {group.length > 1 ? 'All Variants' : 'Product'}
-                  </button>
-                </div>
+                )}
               </div>
-            )}
+            ))}
           </Card>
         ))}
       </div>

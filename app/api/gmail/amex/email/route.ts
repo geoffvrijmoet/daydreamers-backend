@@ -85,7 +85,8 @@ export async function GET(request: Request) {
     const amount = amountMatch ? Number(amountMatch[1].replace(',', '')) : null
 
     // Now search for the supplier's invoice email
-    const query = `from:${supplier.invoiceEmail} ${amount ? `(${amount} OR $${amount})` : ''}`
+    // First try a broader search without subject or amount to see if we get any results
+    const query = `from:${supplier.invoiceEmail}`;
     console.log('Searching for emails with query:', query)
     
     const response = await gmail.users.messages.list({
@@ -105,8 +106,9 @@ export async function GET(request: Request) {
     // Create a regex pattern from the supplier's subject pattern
     const subjectPattern = new RegExp(supplier.invoiceSubjectPattern, 'i')
     console.log('Using regex pattern:', subjectPattern)
+    console.log('Amount to match:', amount)
 
-    // Find the first email that matches the subject pattern
+    // Find the first email that matches both subject pattern and amount
     let matchingEmail: gmail_v1.Schema$Message | null = null
     let skipped = 0
     
@@ -114,15 +116,34 @@ export async function GET(request: Request) {
       const email = await gmail.users.messages.get({
         userId: 'me',
         id: message.id!,
-        format: 'metadata',
-        metadataHeaders: ['subject']
+        format: 'full'
       })
 
       const subject = email.data.payload?.headers?.find(
         h => h.name?.toLowerCase() === 'subject'
       )?.value
 
-      if (subject && subjectPattern.test(subject)) {
+      // Get the email body to check for amount
+      const body = email.data.payload?.parts?.[0]?.body?.data || email.data.payload?.body?.data
+      if (!body) continue;
+
+      const decodedEmailBody = Buffer.from(body, 'base64').toString('utf-8')
+      
+      // Look for amount in the email body
+      const hasAmount = amount !== null && (
+        decodedEmailBody.includes(`$${amount.toFixed(2)}`) ||
+        decodedEmailBody.includes(`$${Math.floor(amount)}`) ||
+        decodedEmailBody.includes(`${amount.toFixed(2)}`) ||
+        decodedEmailBody.includes(`${Math.floor(amount)}`)
+      )
+
+      console.log('Checking email:', {
+        subject,
+        hasMatchingSubject: subject && subjectPattern.test(subject),
+        hasMatchingAmount: hasAmount
+      })
+
+      if (subject && subjectPattern.test(subject) && hasAmount) {
         if (skipped < skip) {
           skipped++
           continue
@@ -192,8 +213,7 @@ export async function GET(request: Request) {
           nameSelector, 
           quantityPattern,
           quantityFlags = '',
-          quantityGroupIndex = 2,
-          priceSelector 
+          quantityGroupIndex = 2
         } = supplier.emailParsing.products
 
         // Use jsdom to parse the HTML
@@ -206,7 +226,8 @@ export async function GET(request: Request) {
         
         containers.forEach((container: Element) => {
           const nameEl = container.querySelector(nameSelector)
-          const priceEl = container.querySelector(priceSelector)
+          // Get the price from the last cell in the row that contains a price
+          const priceEl = container.querySelector('.kl-table-subblock:last-of-type div span')
           
           if (nameEl && priceEl) {
             const name = nameEl.textContent
@@ -218,18 +239,71 @@ export async function GET(request: Request) {
               const quantityMatch = name.match(new RegExp(quantityPattern, quantityFlags))
               const quantity = quantityMatch ? parseInt(quantityMatch[quantityGroupIndex]) : 1
               
-              // Get clean name by removing the " x N" pattern, not the whole name
+              // Get clean name by removing the " x N" pattern
               const cleanName = name.replace(/ x \d+$/, '').trim()
               console.log('Parsed data:')
               console.log('- Clean name:', cleanName)
               console.log('- Quantity:', quantity)
+
+              // Extract price from the price element
+              let unitPrice = 0
+              let totalPrice = 0
+              if (priceEl.textContent) {
+                // Get the price text and try to extract the price
+                const priceText = priceEl.textContent.trim()
+                console.log('Raw price text:', priceText)
+
+                // Try to extract the price using a regex that looks for $XX.XX format
+                const priceMatch = priceText.match(/\$(\d+(?:\.\d{2})?)/);
+                if (priceMatch) {
+                  totalPrice = parseFloat(priceMatch[1])
+                  unitPrice = totalPrice / quantity
+
+                  // Apply 20% discount
+                  unitPrice = unitPrice * 0.8
+                  totalPrice = totalPrice * 0.8
+
+                  // Double the quantity since email shows half quantities
+                  const actualQuantity = quantity * 2
+
+                  // Divide by 2 since prices are for 2lb increments
+                  unitPrice = unitPrice / 2
+                  
+                  // Calculate total price based on actual quantity
+                  totalPrice = (unitPrice * actualQuantity)
+
+                  // Round to 2 decimal places
+                  unitPrice = Math.round(unitPrice * 100) / 100
+                  totalPrice = Math.round(totalPrice * 100) / 100
+
+                  // Ensure we have valid numbers
+                  if (isNaN(unitPrice) || isNaN(totalPrice)) {
+                    unitPrice = 0
+                    totalPrice = 0
+                  }
+
+                  console.log('Parsed price data:', {
+                    rawPrice: priceText,
+                    priceMatch: priceMatch[1],
+                    quantity: actualQuantity,
+                    unitPrice,
+                    totalPrice,
+                    note: 'Prices are per 1lb (divided by 2 from email prices which show 2lb increments)'
+                  })
+                } else {
+                  console.log('Could not extract price from:', priceText)
+                }
+              }
               
-              products.push({
-                name: cleanName,
-                quantity,
-                unitPrice: 0, // We'll use the database price instead
-                totalPrice: 0 // We'll use the database price instead
-              })
+              // Only add products that have valid prices and are not links
+              if (unitPrice > 0 && totalPrice > 0 && !cleanName.toLowerCase().includes('click here')) {
+                products.push({
+                  name: cleanName,
+                  quantity,
+                  unitPrice,
+                  totalPrice
+                })
+              }
             }
           }
         })
@@ -237,9 +311,24 @@ export async function GET(request: Request) {
         console.log('\nTotal products found:', products.length)
         console.log('Final parsed products:', JSON.stringify(products, null, 2))
 
+        // Deduplicate products by name before calculating total
+        const uniqueProducts = Array.from(
+          products.reduce((map, product) => {
+            if (!map.has(product.name)) {
+              map.set(product.name, product)
+            }
+            return map
+          }, new Map()).values()
+        )
+
+        // Calculate total amount from unique products
+        const totalAmount = Math.round(uniqueProducts.reduce((sum, product) => sum + product.totalPrice, 0) * 100) / 100
+        console.log('Total amount:', totalAmount)
+
         parsedData = {
           orderNumber,
-          products
+          products: uniqueProducts,
+          totalAmount
         }
       }
     }
@@ -248,6 +337,7 @@ export async function GET(request: Request) {
       emailBody: decodedBody,
       extractedSupplier: supplier.name,
       parsedData,
+      amount: parsedData?.totalAmount || 0,
       isLastEmail: skipped + 1 >= response.data.messages.length
     })
 
