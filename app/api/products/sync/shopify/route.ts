@@ -13,11 +13,18 @@ export async function POST(request: Request) {
     const db = await getDb()
     console.log('Starting Shopify product sync...')
 
-    // Get matches from request
-    const { matches } = await request.json() as { matches: ProductMatch[] }
+    // Get matches from request and transform to array format
+    const { matches } = await request.json() as { matches: Record<string, string> }
+    
+    // Transform matches object to array of ProductMatch objects
+    const matchesArray: ProductMatch[] = Object.entries(matches).map(([shopifyId, mongoId]) => ({
+      shopifyId,
+      shopifyVariantId: shopifyId, // In this case they're the same
+      mongoId
+    }))
     
     // Process each match
-    const updates = await Promise.all(matches.map(async (match) => {
+    const updates = await Promise.all(matchesArray.map(async (match) => {
       try {
         // Update MongoDB product with Shopify IDs
         const result = await db.collection('products').updateOne(

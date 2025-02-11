@@ -96,15 +96,36 @@ export function ManualTransactionForm() {
   }
 
   const calculateTotals = () => {
-    const productsSubtotal = selectedProducts.reduce((sum, item) => sum + item.totalPrice, 0)
-    const subtotal = productsSubtotal + shippingAmount // Shipping is taxable
-    const finalTotal = manualTotal ?? subtotal
-    const adjustment = finalTotal - subtotal // This will be positive for tips, negative for discounts
+    const TAX_RATE = 0.08875;
+    
+    // Products total (including tax)
+    const productsWithTax = selectedProducts.reduce((sum, item) => sum + item.totalPrice, 0);
+    
+    // Work backwards to get pre-tax amount for products
+    const productsPreTax = productsWithTax / (1 + TAX_RATE);
+    const productsTaxAmount = productsWithTax - productsPreTax;
+    
+    // Add shipping (shipping is taxable)
+    const shippingPreTax = shippingAmount;
+    const shippingTax = shippingPreTax * TAX_RATE;
+    const shippingWithTax = shippingPreTax + shippingTax;
+    
+    // Total amounts
+    const totalPreTax = productsPreTax + shippingPreTax;
+    const totalTax = productsTaxAmount + shippingTax;
+    const subtotalWithTax = productsWithTax + shippingWithTax; // Total with tax before tip/discount
+    
+    // Handle manual total override (for tips/discounts)
+    const finalTotal = manualTotal ?? subtotalWithTax;
+    const adjustment = finalTotal - subtotalWithTax;
 
     return { 
-      productsSubtotal,
+      productsWithTax,
+      productsPreTax,
       shipping: shippingAmount,
-      subtotal, // This is the taxable amount (products + shipping)
+      totalPreTax, // Total pre-tax amount (products + shipping)
+      totalTax, // Total tax amount
+      subtotalWithTax, // What customer pays (includes tax but not tip)
       finalTotal,
       tip: adjustment > 0 ? adjustment : 0,
       discount: adjustment < 0 ? -adjustment : 0
@@ -114,7 +135,7 @@ export function ManualTransactionForm() {
   const handleSubmit = async () => {
     try {
       setLoading(true)
-      const { subtotal, finalTotal, tip, discount } = calculateTotals()
+      const { totalPreTax, finalTotal, tip, discount, totalTax } = calculateTotals()
 
       const response = await fetch('/api/transactions/manual', {
         method: 'POST',
@@ -123,7 +144,9 @@ export function ManualTransactionForm() {
           type: 'sale',
           date,
           amount: finalTotal,
-          productsTotal: subtotal - shippingAmount,
+          productsTotal: totalPreTax - shippingAmount, // Pre-tax products total
+          preTaxAmount: totalPreTax, // Total pre-tax amount (products + shipping)
+          taxAmount: totalTax,
           shipping: shippingAmount,
           products: selectedProducts,
           tip: tip || undefined,
@@ -141,7 +164,7 @@ export function ManualTransactionForm() {
       setManualTotal(null)
       setCustomer('')
       setPaymentMethod('')
-      setShippingAmount(0) // Reset shipping
+      setShippingAmount(0)
 
     } catch (error) {
       console.error('Error creating transaction:', error)
@@ -150,13 +173,13 @@ export function ManualTransactionForm() {
     }
   }
 
-  const { productsSubtotal, subtotal, finalTotal, tip, discount } = calculateTotals()
+  const { productsWithTax, productsPreTax, shipping, totalPreTax, totalTax, subtotalWithTax, finalTotal, tip, discount } = calculateTotals()
 
   if (!isOpen) {
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
+        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-violet-400 hover:bg-violet-500"
       >
         Add Sale
       </button>
@@ -302,18 +325,40 @@ export function ManualTransactionForm() {
       {/* Totals */}
       <div className="space-y-1 mb-4 text-sm">
         <div className="flex justify-between">
-          <span>Products Subtotal:</span>
-          <span>${productsSubtotal.toFixed(2)}</span>
+          <span>Products Total (with tax):</span>
+          <span>${productsWithTax.toFixed(2)}</span>
         </div>
-        {shippingAmount > 0 && (
-          <div className="flex justify-between">
-            <span>Shipping:</span>
-            <span>+${shippingAmount.toFixed(2)}</span>
-          </div>
+        <div className="flex justify-between text-gray-500 text-xs">
+          <span className="pl-4">Products (pre-tax):</span>
+          <span>${productsPreTax.toFixed(2)}</span>
+        </div>
+        <div className="flex justify-between text-gray-500 text-xs">
+          <span className="pl-4">Products Tax:</span>
+          <span>${(productsWithTax - productsPreTax).toFixed(2)}</span>
+        </div>
+        {shipping > 0 && (
+          <>
+            <div className="flex justify-between">
+              <span>Shipping:</span>
+              <span>+${shipping.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between text-gray-500 text-xs">
+              <span className="pl-4">Shipping Tax:</span>
+              <span>+${(shipping * 0.08875).toFixed(2)}</span>
+            </div>
+          </>
         )}
+        <div className="flex justify-between border-t pt-1">
+          <span>Pre-tax Amount:</span>
+          <span>${totalPreTax.toFixed(2)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>Sales Tax (8.875%):</span>
+          <span>+${totalTax.toFixed(2)}</span>
+        </div>
         <div className="flex justify-between font-medium">
-          <span>Taxable Subtotal:</span>
-          <span>${subtotal.toFixed(2)}</span>
+          <span>Subtotal with Tax:</span>
+          <span>${subtotalWithTax.toFixed(2)}</span>
         </div>
         {tip > 0 && (
           <div className="flex justify-between text-green-600">
@@ -327,7 +372,7 @@ export function ManualTransactionForm() {
             <span>-${discount.toFixed(2)}</span>
           </div>
         )}
-        <div className="flex justify-between font-medium">
+        <div className="flex justify-between font-medium border-t pt-1">
           <span>Final Total:</span>
           <span>${finalTotal.toFixed(2)}</span>
         </div>

@@ -192,7 +192,7 @@ export function PurchaseForm({ onSuccess, onCancel }: PurchaseFormProps) {
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
+        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-400 hover:bg-red-500"
       >
         Add Purchase
       </button>

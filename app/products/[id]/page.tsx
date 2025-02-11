@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation'
 import { Card } from "@/components/ui/card"
 import { Product } from '@/types'
 import { ProductForm } from '@/components/product-form'
-import { ShopifyProductForm } from '@/components/shopify-product-form'
 import { ShopifyProductDetails } from '@/components/shopify-product-details'
+import { CreateShopifyProductForm } from '@/components/create-shopify-product-form'
 
 // Helper to check if a product is in Shopify
 const isInShopify = (product: Product) => {
@@ -59,12 +59,6 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
       <Card className="p-6">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-semibold">Edit Product</h1>
-          {product && !isInShopify(product) && (
-            <ShopifyProductForm 
-              product={product} 
-              onSuccess={fetchProduct}
-            />
-          )}
         </div>
         <ProductForm 
           initialData={product}
@@ -77,7 +71,12 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
           product={product}
           onUpdate={fetchProduct}
         />
-      ) : null}
+      ) : (
+        <CreateShopifyProductForm 
+          product={product}
+          onSuccess={fetchProduct}
+        />
+      )}
     </div>
   )
 } 

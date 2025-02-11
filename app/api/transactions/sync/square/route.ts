@@ -102,15 +102,37 @@ export async function POST(request: Request) {
       }
 
       const refundInfo = order.id ? refundMap.get(order.id) : undefined
+
+      // Calculate tax amounts
+      const TAX_RATE = 0.08875;
+      const totalAmount = order.totalMoney?.amount ? Number(order.totalMoney.amount) / 100 : 0;
+      const tipAmount = order.tenders?.[0]?.tipMoney?.amount 
+        ? Number(order.tenders[0].tipMoney.amount) / 100 
+        : 0;
+      
+      // Subtotal includes tax but not tip
+      const subtotal = totalAmount - tipAmount;
+      // Work backwards to find pre-tax amount
+      const preTaxAmount = subtotal / (1 + TAX_RATE);
+      const calculatedTax = subtotal - preTaxAmount;
+
+      console.log('[Square Sync] Tax calculation:', {
+        totalAmount,
+        tipAmount,
+        subtotal,
+        preTaxAmount,
+        calculatedTax,
+        effectiveTaxRate: ((calculatedTax / preTaxAmount) * 100).toFixed(3) + '%'
+      });
+
       const transaction: Omit<Transaction, '_id'> = {
         id: squareId,
         date: order.createdAt ?? new Date().toISOString(),
         type: 'sale',
-        amount: order.totalMoney?.amount ? Number(order.totalMoney.amount) / 100 : 0,
-        preTaxAmount: order.totalMoney?.amount 
-          ? (Number(order.totalMoney.amount) - Number(order.totalTaxMoney?.amount || 0)) / 100 
-          : undefined,
-        taxAmount: order.totalTaxMoney?.amount ? Number(order.totalTaxMoney.amount) / 100 : undefined,
+        amount: totalAmount,
+        preTaxAmount,
+        taxAmount: calculatedTax,
+        tip: tipAmount || undefined,
         description: order.lineItems?.[0]?.name 
           ? `Square: ${order.lineItems[0].name}${order.lineItems.length > 1 ? ` (+${order.lineItems.length - 1} more)` : ''}`
           : `Square Order #${order.id}`,

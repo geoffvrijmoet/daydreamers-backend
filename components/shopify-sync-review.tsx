@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -68,9 +68,11 @@ function ProductList({ products, matches, onSearch }: {
 }) {
   // Track search terms for each product
   const [searchTerms, setSearchTerms] = useState<Record<string, string>>({})
+  const [activeSearchId, setActiveSearchId] = useState<string | null>(null)
 
   const handleSearch = (productId: string, term: string) => {
     setSearchTerms(prev => ({ ...prev, [productId]: term }))
+    setActiveSearchId(term ? productId : null)
     onSearch(productId, term)
   }
 
@@ -78,10 +80,25 @@ function ProductList({ products, matches, onSearch }: {
   useEffect(() => {
     // Only reset if there are actual changes to matches
     setSearchTerms({})
+    setActiveSearchId(null)
     products.forEach(product => {
       onSearch(product._id || product.id, '')
     })
   }, [matches]) // Remove products and onSearch from dependencies
+
+  // Sort products to move actively searched product to top
+  const sortedProducts = useMemo(() => {
+    if (!activeSearchId) return products;
+    
+    return [...products].sort((a, b) => {
+      const aId = a._id || a.id;
+      const bId = b._id || b.id;
+      
+      if (aId === activeSearchId) return -1;
+      if (bId === activeSearchId) return 1;
+      return 0;
+    });
+  }, [products, activeSearchId]);
 
   return (
     <Droppable droppableId="mongo-list">
@@ -91,7 +108,7 @@ function ProductList({ products, matches, onSearch }: {
           {...provided.droppableProps}
           className="grid grid-rows-[auto] gap-4 content-start"
         >
-          {products.map((product, index) => (
+          {sortedProducts.map((product, index) => (
             <Draggable
               key={product._id || product.id}
               draggableId={`mongo-${product._id || product.id}`}
@@ -106,6 +123,7 @@ function ProductList({ products, matches, onSearch }: {
                   className={cn(
                     "p-4 rounded-lg border min-h-[120px] flex flex-col justify-between",
                     Object.values(matches).includes(product._id || product.id) ? "border-green-200 bg-green-50" : "border-gray-200",
+                    (product._id || product.id) === activeSearchId ? "border-blue-500 shadow-md" : "",
                     snapshot.isDragging ? "shadow-lg" : ""
                   )}
                 >
@@ -189,6 +207,42 @@ function ShopifyProductList({ products, matches, visibilityFilter }: {
       ))}
     </div>
   )
+}
+
+// Add similarity scoring function
+function calculateSimilarity(mongoName: string, shopifyTitle: string): number {
+  const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const mongoNorm = normalize(mongoName);
+  const shopifyNorm = normalize(shopifyTitle);
+
+  // Direct substring match
+  if (mongoNorm.includes(shopifyNorm) || shopifyNorm.includes(mongoNorm)) {
+    return 0.8;
+  }
+
+  // Word-by-word similarity
+  const mongoWords = mongoNorm.split(/\s+/);
+  const shopifyWords = shopifyNorm.split(/\s+/);
+  let matchedWords = 0;
+
+  mongoWords.forEach(word => {
+    if (shopifyWords.some(shopifyWord => 
+      shopifyWord.includes(word) || word.includes(shopifyWord)
+    )) {
+      matchedWords++;
+    }
+  });
+
+  return matchedWords / Math.max(mongoWords.length, shopifyWords.length);
+}
+
+// Add sorting function for unmatched products
+function sortByMostSimilar(mongoProducts: Product[], shopifyProducts: ShopifyProduct[]): Product[] {
+  return [...mongoProducts].sort((a, b) => {
+    const aMaxSimilarity = Math.max(...shopifyProducts.map(sp => calculateSimilarity(a.name, sp.title)));
+    const bMaxSimilarity = Math.max(...shopifyProducts.map(sp => calculateSimilarity(b.name, sp.title)));
+    return bMaxSimilarity - aMaxSimilarity;
+  });
 }
 
 export function ShopifySyncReview() {
@@ -327,20 +381,30 @@ export function ShopifySyncReview() {
     pair.shopifyProduct !== undefined && pair.mongoProduct !== undefined
   )
 
-  // Get unmatched products
+  // Get unmatched products and sort them by similarity
   const unmatchedMongoProducts = mongoProducts.filter(p => 
     !Object.values(matches).includes(p._id || p.id)
-  )
+  );
 
   const unmatchedShopifyProducts = shopifyProducts.filter(p => 
     !Object.keys(matches).includes(p.id)
-  )
+  );
 
-  // Filter unmatched MongoDB products by search term
-  const filteredMongoProducts = unmatchedMongoProducts.filter(product =>
+  // Sort unmatched MongoDB products by similarity to Shopify products
+  const sortedMongoProducts = sortByMostSimilar(unmatchedMongoProducts, unmatchedShopifyProducts);
+
+  // Filter sorted MongoDB products by search term
+  const filteredMongoProducts = sortedMongoProducts.filter(product =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     product.sku.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+  );
+
+  // Sort Shopify products based on similarity to the filtered MongoDB products
+  const sortedShopifyProducts = [...unmatchedShopifyProducts].sort((a, b) => {
+    const aMaxSimilarity = Math.max(...filteredMongoProducts.map(mp => calculateSimilarity(mp.name, a.title)));
+    const bMaxSimilarity = Math.max(...filteredMongoProducts.map(mp => calculateSimilarity(mp.name, b.title)));
+    return bMaxSimilarity - aMaxSimilarity;
+  });
 
   return (
     <StrictMode>
@@ -415,7 +479,7 @@ export function ShopifySyncReview() {
                 <div>
                   <h4 className="font-medium text-gray-500 mb-4">Shopify Products ({unmatchedShopifyProducts.length})</h4>
                   <ShopifyProductList
-                    products={unmatchedShopifyProducts}
+                    products={sortedShopifyProducts}
                     matches={matches}
                     visibilityFilter={shopifyVisibility}
                   />

@@ -86,6 +86,28 @@ export async function GET(
           tags
           status
           publishedAt
+          media(first: 20) {
+            edges {
+              node {
+                id
+                mediaContentType
+                ... on MediaImage {
+                  id
+                  image {
+                    url
+                    width
+                    height
+                    altText
+                  }
+                }
+                preview {
+                  image {
+                    url
+                  }
+                }
+              }
+            }
+          }
           variants(first: 10) {
             edges {
               node {
@@ -94,6 +116,7 @@ export async function GET(
                 price
                 compareAtPrice
                 barcode
+                sku
                 weight
                 weightUnit
                 requiresShipping
@@ -136,6 +159,15 @@ export async function GET(
       tags: data.product.tags,
       status: data.product.status,
       published_at: data.product.publishedAt,
+      images: data.product.media.edges.map(edge => ({
+        id: edge.node.id,
+        url: edge.node.mediaContentType === 'IMAGE' 
+          ? edge.node.image?.url 
+          : edge.node.preview?.image?.url,
+        width: edge.node.image?.width,
+        height: edge.node.image?.height,
+        altText: edge.node.image?.altText
+      })).filter(img => img.url),
       variants
     }
 
@@ -149,7 +181,7 @@ export async function GET(
   }
 }
 
-// POST endpoint to create Shopify product
+// POST endpoint to create Shopify product or add variant
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
@@ -157,6 +189,8 @@ export async function POST(
   try {
     const body = await request.json()
     const { 
+      mode,
+      existingProductId,
       title, 
       description, 
       vendor, 
@@ -165,29 +199,159 @@ export async function POST(
       price, 
       compareAtPrice, 
       barcode,
+      sku,
       weight,
       weightUnit,
       requiresShipping,
-      taxable
+      taxable,
+      imageIds = []
     } = body
 
-    // Create product in Shopify
-    const shopifyProduct = await shopifyClient.product.create({
-      title,
-      body_html: description,
-      vendor,
-      product_type: productType,
-      tags: tags.split(',').map((tag: string) => tag.trim()).filter(Boolean),
-      variants: [{
-        price: price.toString(),
-        compare_at_price: compareAtPrice?.toString(),
-        barcode,
-        weight,
-        weight_unit: weightUnit,
-        requires_shipping: requiresShipping,
-        taxable
-      }]
-    })
+    let shopifyProduct;
+
+    if (mode === 'variant' && existingProductId) {
+      // Add variant to existing product
+      const mutation = `
+        mutation productVariantCreate($input: ProductVariantInput!) {
+          productVariantCreate(input: $input) {
+            productVariant {
+              id
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `
+
+      // For variants, construct the full title by combining parent product title with variant title
+      const variantTitle = title.trim();
+
+      const variables = {
+        input: {
+          productId: existingProductId,
+          price: price.toString(),
+          compareAtPrice: compareAtPrice?.toString(),
+          barcode,
+          sku,
+          weight,
+          weightUnit: weightUnit === 'lb' ? 'POUNDS' :
+                     weightUnit === 'oz' ? 'OUNCES' :
+                     weightUnit === 'kg' ? 'KILOGRAMS' :
+                     'GRAMS',
+          requiresShipping,
+          taxable,
+          options: [variantTitle],
+          inventoryItem: {
+            tracked: true
+          },
+          media: imageIds.map(id => ({ mediaId: id }))
+        }
+      }
+
+      const response = await shopifyClient.graphql(mutation, variables)
+      
+      if (response.productVariantCreate.userErrors.length > 0) {
+        throw new Error(response.productVariantCreate.userErrors[0].message)
+      }
+
+      shopifyProduct = {
+        variants: [{ id: response.productVariantCreate.productVariant.id }]
+      }
+    } else {
+      // Create new product with GraphQL to support media attachment
+      const mutation = `
+        mutation productCreate($input: ProductInput!) {
+          productCreate(input: $input) {
+            product {
+              id
+              variants(first: 1) {
+                edges {
+                  node {
+                    id
+                  }
+                }
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `
+
+      const variables = {
+        input: {
+          title,
+          descriptionHtml: description,
+          vendor,
+          productType,
+          tags: tags.split(',').map((tag: string) => tag.trim()).filter(Boolean),
+          variants: [{
+            price: price.toString(),
+            compareAtPrice: compareAtPrice?.toString(),
+            barcode,
+            sku,
+            weight,
+            weightUnit: weightUnit === 'lb' ? 'POUNDS' :
+                       weightUnit === 'oz' ? 'OUNCES' :
+                       weightUnit === 'kg' ? 'KILOGRAMS' :
+                       'GRAMS',
+            requiresShipping,
+            taxable,
+            inventoryItem: {
+              tracked: true,
+              cost: body.cost?.toString()
+            }
+          }]
+        }
+      }
+
+      const response = await shopifyClient.graphql(mutation, variables)
+      
+      if (response.productCreate.userErrors.length > 0) {
+        throw new Error(response.productCreate.userErrors[0].message)
+      }
+
+      const productId = response.productCreate.product.id
+      const variantId = response.productCreate.product.variants.edges[0].node.id
+
+      // If we have images, attach them to the product
+      if (imageIds.length > 0) {
+        const attachMediaMutation = `
+          mutation productAppendMedia($input: ProductAppendMediaInput!) {
+            productAppendMedia(input: $input) {
+              product {
+                id
+              }
+              mediaUserErrors {
+                field
+                message
+              }
+            }
+          }
+        `
+
+        const mediaResponse = await shopifyClient.graphql(attachMediaMutation, {
+          input: {
+            productId,
+            mediaIds: imageIds
+          }
+        })
+
+        if (mediaResponse.productAppendMedia.mediaUserErrors.length > 0) {
+          throw new Error(mediaResponse.productAppendMedia.mediaUserErrors[0].message)
+        }
+      }
+
+      shopifyProduct = {
+        variants: [{
+          id: variantId
+        }]
+      }
+    }
 
     // Update our database with the Shopify ID
     const db = await getDb()

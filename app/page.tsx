@@ -3,8 +3,6 @@
 import { Card } from "@/components/ui/card";
 import { TransactionsList } from "@/components/transactions-list";
 import { AmexTransactions } from "@/components/amex-transactions";
-import { ManualTransactionForm } from '@/components/manual-transaction-form'
-import { PurchaseForm } from '@/components/purchase-form'
 import { useMetrics } from '@/lib/hooks/useMetrics'
 import { SyncButton } from '@/components/sync-button'
 
@@ -18,8 +16,6 @@ export default function Home() {
         <div className="flex justify-between mb-8">
           {/* Quick Actions */}
           <div className="flex flex-col gap-2">
-            <PurchaseForm />
-            <ManualTransactionForm />
             <SyncButton />
             <button className="button">
               Update Inventory

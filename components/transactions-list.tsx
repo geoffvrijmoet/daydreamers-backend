@@ -13,6 +13,8 @@ import { subDays, startOfYear, startOfDay } from 'date-fns'
 import { toEasternTime, formatInEasternTime } from '@/lib/utils/dates'
 import { useRouter } from 'next/navigation'
 import { ChevronDown, ChevronRight } from "lucide-react"
+import { ManualTransactionForm } from "@/components/manual-transaction-form"
+import { PurchaseForm } from '@/components/purchase-form'
 
 interface TransactionData {
   _id: string
@@ -759,7 +761,13 @@ export function TransactionsList() {
   return (
     <Card>
       <div className="flex flex-col gap-4 mb-4">
-        <h2 className="text-lg">Sales</h2>
+        <div className="flex justify-between items-center">
+          <h2 className="text-lg">Sales</h2>
+          <div className="flex gap-2">
+            <ManualTransactionForm />
+            <PurchaseForm />
+          </div>
+        </div>
         
         <div className="flex flex-wrap items-center gap-4">
           {/* Quick select buttons */}

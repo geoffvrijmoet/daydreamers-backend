@@ -7,18 +7,16 @@ export async function POST(request: Request) {
     const db = await getDb()
     const data = await request.json()
 
-    // Calculate tax on products + shipping
-    const taxRate = 0.08875
-    const taxableAmount = (data.productsTotal || 0) + (data.shipping || 0)
-    const taxAmount = taxableAmount * taxRate
-
+    // The frontend now sends us:
+    // - preTaxAmount: total amount before tax (products + shipping)
+    // - taxAmount: calculated tax amount
+    // - amount: final total including tax and tip
+    
     // The date from the form is already in Eastern time, so we should store it as is
     const now = fromEasternTime(new Date())
     const transaction = {
       ...data,
       date: data.date, // Don't convert the date since it's already in Eastern time
-      preTaxAmount: taxableAmount,
-      taxAmount,
       createdAt: now,
       updatedAt: now
     }

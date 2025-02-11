@@ -108,6 +108,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
   const [profitDetails, setProfitDetails] = useState<TransactionProfitDetails | null>(null)
   const [saving, setSaving] = useState(false)
   const [fetchingFees, setFetchingFees] = useState(false)
+  const [fetchingSquareDetails, setFetchingSquareDetails] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState(false)
   const [customerName, setCustomerName] = useState('')
   const [isEditingTotal, setIsEditingTotal] = useState(false)
@@ -118,8 +119,11 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
   const isVenmoTransaction = transaction?.source === 'venmo' || transaction?.paymentMethod === 'Venmo';
   const creditCardFees = isVenmoTransaction ? 0 : 
     transaction?.source === 'shopify' && transaction?.shopifyProcessingFee ? 
-      transaction.shopifyProcessingFee : 
-      0; // Only use actual fees from platforms
+      transaction.shopifyProcessingFee :
+    transaction?.source === 'square' ?
+      // Square fee is 2.6% + $0.10 per transaction
+      ((transaction.amount * 0.026) + 0.10) :
+      0;
 
   const refetchShopifyFees = async () => {
     if (!transaction || transaction.source !== 'shopify') return;
@@ -177,6 +181,48 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     }
   };
 
+  const refetchSquareDetails = async () => {
+    if (!transaction || transaction.source !== 'square') return;
+
+    try {
+      setFetchingSquareDetails(true);
+      
+      console.log('[Refetch Square] Starting details fetch:', {
+        transactionId: transaction._id,
+        transactionInternalId: transaction.id
+      });
+
+      const response = await fetch(`/api/transactions/${transaction._id}/square-details`, {
+        method: 'POST'
+      });
+
+      console.log('[Refetch Square] Response received:', {
+        status: response.status,
+        ok: response.ok,
+        statusText: response.statusText
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to fetch Square details');
+      }
+
+      const data = await response.json();
+      console.log('[Refetch Square] Success:', {
+        message: data.message,
+        updatedTransaction: data.transaction
+      });
+
+      setTransaction(data.transaction);
+      alert('Successfully updated Square transaction details');
+    } catch (err) {
+      console.error('[Refetch Square] Error:', err);
+      alert(err instanceof Error ? err.message : 'Failed to fetch Square details');
+    } finally {
+      setFetchingSquareDetails(false);
+    }
+  };
+
   useEffect(() => {
     const fetchTransaction = async () => {
       try {
@@ -206,7 +252,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
         // If it's a manual transaction, fetch MongoDB products for all products
         if (data.source === 'manual' && data.products?.length > 0) {
           console.log('[Transaction Load] Starting MongoDB product fetch for manual products:', 
-            data.products.map(p => ({ name: p.name, productId: p.productId }))
+            data.products.map((p: ManualProduct) => ({ name: p.name, productId: p.productId }))
           );
 
           const updatedProducts = await Promise.all(
@@ -296,6 +342,54 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
 
           data.lineItems = updatedLineItems;
         }
+        // If it's a Square transaction, fetch MongoDB products for all line items
+        else if (data.source === 'square' && data.lineItems?.length > 0) {
+          console.log('[Transaction Load] Starting MongoDB product fetch for Square line items:', 
+            data.lineItems.map(item => ({ 
+              name: item.name, 
+              sku: item.sku // This should be the Square catalogObjectId
+            }))
+          );
+
+          const updatedLineItems = await Promise.all(
+            data.lineItems!.map(async (item: LineItem) => {
+              if (!item.sku) {
+                console.log(`[Transaction Load] Skipping MongoDB fetch - no SKU/catalogObjectId for ${item.name}`);
+                return item;
+              }
+              
+              try {
+                console.log(`[Transaction Load] Fetching MongoDB product for ${item.name} (Square ID: ${item.sku})`);
+                const productResponse = await fetch(`/api/products/square/${item.sku}`);
+                const productData = await productResponse.json();
+                
+                if (productData.product) {
+                  console.log(`[Transaction Load] Successfully fetched MongoDB product for ${item.name}:`, {
+                    name: productData.product.name,
+                    sku: productData.product.sku,
+                    averageCost: productData.product.averageCost,
+                    currentStock: productData.product.currentStock
+                  });
+                  return { ...item, mongoProduct: productData.product };
+                }
+              } catch (err) {
+                console.error(`[Transaction Load] Error fetching MongoDB product for ${item.name}:`, err);
+              }
+              
+              return item;
+            })
+          );
+
+          console.log('[Transaction Load] Completed Square line item updates:', 
+            updatedLineItems.map((item: LineItem) => ({
+              name: item.name,
+              hasMongoProduct: !!item.mongoProduct,
+              mongoProductSku: item.mongoProduct?.sku
+            }))
+          );
+
+          data.lineItems = updatedLineItems;
+        }
 
         console.log('[Transaction Load] Setting final transaction data:', {
           id: data._id,
@@ -339,30 +433,44 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     const TAX_RATE = 0.08875;
     let preTaxAmount, calculatedTax;
     
-    // For Shopify orders, use the actual tax amount from Shopify
-    if (transaction.source === 'shopify') {
-      // Use the actual tax amount from Shopify
-      calculatedTax = transaction.taxAmount;
-      preTaxAmount = transaction.preTaxAmount ?? (transaction.amount - (transaction.taxAmount ?? 0) - (transaction.tip ?? 0));
-      
-      console.log('[Profit Calc] Using Shopify tax data:', {
-        taxAmount: calculatedTax,
-        preTaxAmount: preTaxAmount,
-        totalAmount: transaction.amount
-      });
-    } else {
-      // For non-Shopify orders, calculate tax from total
-      const totalWithoutTip = transaction.amount - (transaction.tip ?? 0);
-      preTaxAmount = totalWithoutTip / (1 + TAX_RATE);
-      calculatedTax = preTaxAmount * TAX_RATE;
+    // Calculate pre-tax amount and tax
+    preTaxAmount = transaction.preTaxAmount;
+    calculatedTax = transaction.taxAmount;
+
+    if (!preTaxAmount || !calculatedTax) {
+      if (transaction.source === 'shopify') {
+        // For Shopify, we can trust the tax amount directly
+        preTaxAmount = transaction.amount - (transaction.taxAmount ?? 0) - (transaction.tip ?? 0);
+        calculatedTax = transaction.taxAmount ?? 0;
+      } else if (transaction.source === 'square') {
+        // For Square, we need to work backwards from the total
+        // Subtotal includes tax but not tip
+        const subtotal = transaction.amount - (transaction.tip ?? 0);
+        // Work backwards to find pre-tax amount
+        preTaxAmount = subtotal / (1 + TAX_RATE);
+        calculatedTax = subtotal - preTaxAmount;
+
+        console.log('[Square Tax] Calculation:', {
+          total: transaction.amount,
+          tip: transaction.tip,
+          subtotal,
+          preTaxAmount,
+          calculatedTax,
+          effectiveTaxRate: ((calculatedTax / preTaxAmount) * 100).toFixed(3) + '%'
+        });
+      } else {
+        // For manual transactions, assume no tax
+        preTaxAmount = transaction.amount;
+        calculatedTax = 0;
+      }
     }
     
     // Check both source and paymentMethod for Venmo
     const isVenmoTransaction = transaction.source === 'venmo' || transaction.paymentMethod === 'Venmo';
     const creditCardFees = isVenmoTransaction ? 0 : 
       transaction.source === 'shopify' && transaction.shopifyProcessingFee ? 
-        transaction.shopifyProcessingFee : 
-        0; // Only use actual fees from platforms
+        transaction.shopifyProcessingFee :
+      0; // Only use actual fees from platforms
     
     console.log('Transaction details:', {
       source: transaction.source,
@@ -395,7 +503,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
       
       const totalItemRevenue = itemRevenues.reduce((sum, item) => sum + item.revenue, 0);
 
-      transaction.lineItems.forEach(item => {
+      transaction.lineItems.forEach((item: LineItem) => {
         console.log(`[Profit Calc] Processing item:`, {
           name: item.name,
           quantity: item.quantity,
@@ -458,10 +566,31 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     }
     // Handle Square transactions
     else if (transaction.source === 'square' && transaction.lineItems) {
+      console.log('[Profit Calc] Processing Square transaction line items:', transaction.lineItems.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        price: (item.grossSalesMoney?.amount ?? item.price * 100) / 100,
+        hasMongoProduct: !!item.mongoProduct,
+        mongoProductDetails: item.mongoProduct ? {
+          name: item.mongoProduct.name,
+          sku: item.mongoProduct.sku,
+          averageCost: item.mongoProduct.averageCost,
+          currentStock: item.mongoProduct.currentStock
+        } : null
+      })));
+
+      console.log('[Profit Calc] Square transaction details:', {
+        totalAmount: transaction.amount,
+        preTaxAmount: transaction.preTaxAmount,
+        taxAmount: transaction.taxAmount,
+        tip: transaction.tip,
+        creditCardFees
+      });
+
       const totalItemRevenue = transaction.lineItems.reduce((sum, item) => 
         sum + ((item.grossSalesMoney?.amount ?? item.price * 100) / 100) * item.quantity, 0);
 
-      transaction.lineItems.forEach(item => {
+      transaction.lineItems.forEach((item: LineItem) => {
         const quantity = item.quantity;
         const price = (item.grossSalesMoney?.amount ?? item.price * 100) / 100;
         const revenue = price * quantity;
@@ -476,13 +605,44 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
           quantity,
           salePrice: price,
           itemCost: 0,
-          itemProfit: revenue - itemTaxShare - itemFeesShare,
+          itemProfit: 0,
           hasCostData: false
         };
 
+        if (item.mongoProduct?.averageCost) {
+          const costPerUnit = item.mongoProduct.averageCost;
+          const totalCost = costPerUnit * quantity;
+          const profit = revenue - totalCost - itemTaxShare - itemFeesShare;
+
+          console.log(`[Profit Calc] Item ${item.name} profit calculation:`, {
+            revenue,
+            costPerUnit,
+            totalCost,
+            taxShare: itemTaxShare,
+            feesShare: itemFeesShare,
+            profit,
+            margin: ((profit / revenue) * 100).toFixed(1) + '%'
+          });
+
+          calculation.itemCost = totalCost;
+          calculation.itemProfit = profit;
+          calculation.hasCostData = true;
+
+          profitDetails.totalCost += totalCost;
+          profitDetails.totalProfit += profit;
+        } else {
+          console.log(`[Profit Calc] Item ${item.name} missing cost data:`, {
+            mongoProduct: item.mongoProduct ? {
+              name: item.mongoProduct.name,
+              sku: item.mongoProduct.sku,
+              averageCost: item.mongoProduct.averageCost
+            } : 'No MongoDB product linked'
+          });
+          profitDetails.itemsWithoutCost++;
+        }
+
         profitDetails.totalRevenue += revenue;
         profitDetails.lineItemProfits.push(calculation);
-        profitDetails.itemsWithoutCost++;
       });
     }
     // Handle manual transactions
@@ -490,7 +650,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
       const totalItemRevenue = transaction.products.reduce((sum, product) => 
         sum + product.totalPrice, 0);
 
-      transaction.products.forEach(item => {
+      transaction.products.forEach((item: ManualProduct) => {
         console.log(`[Profit Calc] Processing manual product:`, {
           name: item.name,
           quantity: item.quantity,
@@ -1055,6 +1215,17 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
                   className="mt-2 text-xs"
                 >
                   {fetchingFees ? 'Fetching...' : 'Refetch Shopify Fees'}
+                </Button>
+              )}
+              {transaction.source === 'square' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={refetchSquareDetails}
+                  disabled={fetchingSquareDetails}
+                  className="mt-2 text-xs"
+                >
+                  {fetchingSquareDetails ? 'Fetching...' : 'Re-fetch Square Details'}
                 </Button>
               )}
             </div>
