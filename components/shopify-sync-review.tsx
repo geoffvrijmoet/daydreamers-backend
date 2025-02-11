@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -84,7 +84,7 @@ function ProductList({ products, matches, onSearch }: {
     products.forEach(product => {
       onSearch(product._id || product.id, '')
     })
-  }, [matches]) // Remove products and onSearch from dependencies
+  }, [matches, products, onSearch])
 
   // Sort products to move actively searched product to top
   const sortedProducts = useMemo(() => {
@@ -252,7 +252,6 @@ export function ShopifySyncReview() {
   const [mongoProducts, setMongoProducts] = useState<Product[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [matches, setMatches] = useState<Record<string, string>>({})
-  const [productSearches, setProductSearches] = useState<Record<string, string>>({})
   const [shopifyVisibility, setShopifyVisibility] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
@@ -330,8 +329,22 @@ export function ShopifySyncReview() {
     }))
 
     // Reset all search filters
-    setProductSearches({})
+    setSearchTerm('')
     setShopifyVisibility({})
+  }
+
+  // Memoize the search handler to prevent unnecessary re-renders
+  const handleProductSearch = (productId: string, term: string) => {
+    // Update visibility of Shopify products based on search term
+    const newVisibility: Record<string, boolean> = {}
+    shopifyProducts.forEach(product => {
+      const searchTerm = term.toLowerCase()
+      const isVisible = 
+        product.title.toLowerCase().includes(searchTerm) ||
+        (product.sku || '').toLowerCase().includes(searchTerm)
+      newVisibility[product.id] = isVisible
+    })
+    setShopifyVisibility(newVisibility)
   }
 
   const handleSync = async () => {
@@ -355,22 +368,6 @@ export function ShopifySyncReview() {
       setLoading(false)
     }
   }
-
-  // Memoize the search handler to prevent unnecessary re-renders
-  const handleProductSearch = useCallback((productId: string, term: string) => {
-    setProductSearches(prev => ({ ...prev, [productId]: term }))
-
-    // Update visibility of Shopify products based on search term
-    const newVisibility: Record<string, boolean> = {}
-    shopifyProducts.forEach(product => {
-      const searchTerm = term.toLowerCase()
-      const isVisible = 
-        product.title.toLowerCase().includes(searchTerm) ||
-        (product.sku || '').toLowerCase().includes(searchTerm)
-      newVisibility[product.id] = isVisible
-    })
-    setShopifyVisibility(newVisibility)
-  }, [shopifyProducts])
 
   // Get matched product pairs
   const matchedPairs = Object.entries(matches).map(([shopifyId, mongoId]) => {

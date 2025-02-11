@@ -928,8 +928,13 @@ export function TransactionsList() {
                       <div className="text-sm text-gray-600">
                         <span className="mr-4">Total: ${totalAmount.toFixed(2)}</span>
                         <span className="mr-4">Purchases: ${totalPurchases.toFixed(2)}</span>
-                        <span>Tax: ${totalTax.toFixed(2)}</span>
-                        <span className="ml-4">
+                        <span className="mr-4">Tax: ${totalTax.toFixed(2)}</span>
+                        <span className="mr-4">
+                          Profit: ${includedTransactions
+                            .reduce((sum, t) => sum + (t.profitCalculation?.totalProfit ?? 0), 0)
+                            .toFixed(2)}
+                        </span>
+                        <span>
                           {includedTransactions.length} transaction{includedTransactions.length !== 1 ? 's' : ''}
                         </span>
                       </div>

@@ -63,7 +63,7 @@ export function ShopifyProductForm({ product, onSuccess }: ShopifyProductFormPro
         throw new Error('Failed to create Shopify product')
       }
 
-      const data = await response.json()
+
       setOpen(false)
       onSuccess?.()
     } catch (err) {

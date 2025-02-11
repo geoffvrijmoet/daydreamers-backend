@@ -1,9 +1,6 @@
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useCallback } from 'react'
+
 import { Transaction } from '@/types'
-import { startOfDay, endOfDay } from 'date-fns'
-import { logger } from '@/lib/utils/logger'
-import { fromEasternTime } from '@/lib/utils/dates'
 
 interface UseTransactionsOptions {
   startDate?: string;
@@ -22,9 +19,8 @@ export function useTransactions({ startDate, endDate }: UseTransactionsOptions =
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
 
-  const fetchTransactions = async () => {
+  const fetchTransactions = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -43,11 +39,11 @@ export function useTransactions({ startDate, endDate }: UseTransactionsOptions =
     } finally {
       setLoading(false);
     }
-  };
+  }, [startDate, endDate]);
 
   useEffect(() => {
     fetchTransactions();
-  }, [startDate, endDate]);
+  }, [fetchTransactions]);
 
   return {
     transactions,

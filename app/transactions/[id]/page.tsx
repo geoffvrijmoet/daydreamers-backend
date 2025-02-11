@@ -45,24 +45,20 @@ interface TransactionDetails {
 }
 
 interface LineItem {
-  name: string
-  quantity: number
-  price: number
-  grossSalesMoney: {
-    amount: number
-  }
-  variationName?: string
-  sku?: string
-  variant_id?: string
+  name: string;
+  quantity: number;
+  price: number;
+  variant_id?: string;
+  sku?: string;
+  variationName?: string;
+  grossSalesMoney?: { amount: number };
   mongoProduct?: {
-    _id: string
-    name: string
-    sku: string
-    retailPrice: number
-    currentStock: number
-    lastPurchasePrice: number
-    averageCost: number
-  }
+    _id: string;
+    name: string;
+    averageCost: number;
+    sku?: string;
+    currentStock?: number;
+  };
 }
 
 interface ProfitCalculation {
@@ -84,20 +80,18 @@ interface TransactionProfitDetails {
 }
 
 interface ManualProduct {
-  name: string
-  quantity: number
-  unitPrice: number
-  totalPrice: number
-  productId?: string
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  productId?: string;
   mongoProduct?: {
-    _id: string
-    name: string
-    sku: string
-    retailPrice: number
-    currentStock: number
-    lastPurchasePrice: number
-    averageCost: number
-  }
+    _id: string;
+    name: string;
+    averageCost: number;
+    sku?: string;
+    currentStock?: number;
+  };
 }
 
 export default function TransactionPage({ params }: { params: { id: string } }) {
@@ -113,6 +107,8 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
   const [customerName, setCustomerName] = useState('')
   const [isEditingTotal, setIsEditingTotal] = useState(false)
   const [editedTotal, setEditedTotal] = useState<number>(0)
+  const [isEditingFee, setIsEditingFee] = useState(false)
+  const [editedFee, setEditedFee] = useState<number>(0)
 
   // Move these calculations into the component scope
   const taxAmount = transaction?.taxAmount ?? 0;
@@ -496,12 +492,12 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     // Handle Shopify transactions
     if (transaction.source === 'shopify' && transaction.lineItems) {
       // Calculate what portion of the total each item represents
-      const itemRevenues = transaction.lineItems.map(item => ({
+      const itemRevenues = transaction.lineItems.map((item: LineItem) => ({
         itemId: item.variant_id,
         revenue: Number(item.price) * item.quantity
       }));
       
-      const totalItemRevenue = itemRevenues.reduce((sum, item) => sum + item.revenue, 0);
+      const totalItemRevenue = itemRevenues.reduce((sum: number, item: { revenue: number }) => sum + item.revenue, 0);
 
       transaction.lineItems.forEach((item: LineItem) => {
         console.log(`[Profit Calc] Processing item:`, {
@@ -587,7 +583,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
         creditCardFees
       });
 
-      const totalItemRevenue = transaction.lineItems.reduce((sum, item) => 
+      const totalItemRevenue = transaction.lineItems.reduce((sum: number, item: LineItem) => 
         sum + ((item.grossSalesMoney?.amount ?? item.price * 100) / 100) * item.quantity, 0);
 
       transaction.lineItems.forEach((item: LineItem) => {
@@ -647,8 +643,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     }
     // Handle manual transactions
     else if (transaction.source === 'manual' && transaction.products) {
-      const totalItemRevenue = transaction.products.reduce((sum, product) => 
-        sum + product.totalPrice, 0);
+      const totalItemRevenue = transaction.products.reduce((sum, product) => sum + product.totalPrice, 0);
 
       transaction.products.forEach((item: ManualProduct) => {
         console.log(`[Profit Calc] Processing manual product:`, {
@@ -697,9 +692,14 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     }
 
     // Update the final profit calculation
-    profitDetails.totalRevenue = preTaxAmount + (transaction.tip ?? 0); // Total revenue is pre-tax amount plus tip
-    profitDetails.totalProfit = profitDetails.totalRevenue - profitDetails.totalCost - calculatedTax - creditCardFees;
+    profitDetails.totalRevenue = transaction.amount; // Total revenue is the full amount including tax
     profitDetails.creditCardFees = creditCardFees;
+    
+    // Calculate total costs (cost of goods + tax + fees)
+    const totalCosts = profitDetails.totalCost + calculatedTax + creditCardFees;
+    
+    // Final profit = Total Revenue - All Costs
+    profitDetails.totalProfit = profitDetails.totalRevenue - totalCosts;
 
     // Update transaction with calculated tax
     setTransaction(prev => {
@@ -1015,10 +1015,89 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
     }
   };
 
+  const handleFindMongoProduct = async (item: LineItem) => {
+    if (!transaction || !item.variant_id) return;
+
+    try {
+      console.log(`[Product Fetch] Fetching MongoDB product for ${item.name} (Variant ID: ${item.variant_id})`);
+      const response = await fetch(`/api/products/shopify/find-by-variant?variantId=${item.variant_id}`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to find product');
+      }
+
+      const data = await response.json();
+      
+      if (!data.product) {
+        console.log(`[Product Fetch] No MongoDB product found for ${item.name}`);
+        return;
+      }
+
+      console.log(`[Product Fetch] Found MongoDB product:`, {
+        name: data.product.name,
+        sku: data.product.sku,
+        averageCost: data.product.averageCost
+      });
+
+      // Update the transaction's line items with the found MongoDB product
+      setTransaction(prev => {
+        if (!prev || !prev.lineItems) return prev;
+        return {
+          ...prev,
+          lineItems: prev.lineItems.map(lineItem => 
+            lineItem.variant_id === item.variant_id
+              ? { ...lineItem, mongoProduct: data.product }
+              : lineItem
+          )
+        };
+      });
+
+    } catch (err) {
+      console.error(`[Product Fetch] Error:`, err);
+    }
+  };
+
+  const handleFeeUpdate = async () => {
+    if (!transaction) return;
+    
+    try {
+      setSaving(true);
+      const response = await fetch(`/api/transactions/${transaction._id}/fees`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          processingFee: editedFee
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update fee');
+      }
+
+      const updatedTransaction = await response.json();
+      setTransaction(prev => prev ? {
+        ...prev,
+        shopifyProcessingFee: editedFee
+      } : null);
+      setIsEditingFee(false);
+      
+      // Recalculate profit with new fee
+      calculateProfit();
+    } catch (error) {
+      console.error('Failed to update fee:', error);
+      setError(error instanceof Error ? error.message : 'Failed to update fee');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   useEffect(() => {
     if (transaction) {
       setCustomerName(transaction.customer || '');
       setEditedTotal(transaction.amount);
+      setEditedFee(transaction.shopifyProcessingFee || 0);
     }
   }, [transaction]);
 
@@ -1084,18 +1163,31 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
       })));
 
       return transaction.lineItems.map(item => (
-        <div key={`${item.variant_id || item.name}-${item.quantity}-${item.price}`} className="flex items-center">
-          <span>{item.quantity}x</span>
-          <span className="ml-2">{item.name}</span>
-          {item.sku && <span className="ml-2 text-gray-500">({item.sku})</span>}
-          <span className="ml-2 text-gray-500">
-            (${(Number(item.price) * item.quantity).toFixed(2)})
-          </span>
-          {item.mongoProduct && (
-            <span className="ml-2 text-sm text-green-600">
-              → {item.mongoProduct.name} (Stock: {item.mongoProduct.currentStock})
+        <div key={`${item.variant_id || item.name}-${item.quantity}-${item.price}`} className="flex items-center justify-between">
+          <div className="flex items-center">
+            <span>{item.quantity}x</span>
+            <span className="ml-2">{item.name}</span>
+            {item.sku && <span className="ml-2 text-gray-500">({item.sku})</span>}
+            <span className="ml-2 text-gray-500">
+              (${(Number(item.price) * item.quantity).toFixed(2)})
             </span>
-          )}
+          </div>
+          <div>
+            {item.mongoProduct ? (
+              <span className="text-sm text-green-600">
+                → {item.mongoProduct.name} (Stock: {item.mongoProduct.currentStock})
+              </span>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleFindMongoProduct(item)}
+                className="text-xs text-blue-600 hover:text-blue-700"
+              >
+                Find Product
+              </Button>
+            )}
+          </div>
         </div>
       ));
     }
@@ -1375,8 +1467,45 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
                     </div>
                     {!isVenmoTransaction && (
                       <div className="flex justify-between text-gray-500 pl-4">
-                        <span>Credit Card Fees:</span>
-                        <span>-${creditCardFees.toFixed(2)}</span>
+                        <div className="flex items-center gap-2">
+                          <span>Credit Card Fees:</span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => {
+                              setEditedFee(creditCardFees);
+                              setIsEditingFee(true);
+                            }}
+                          >
+                            <Edit2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        {isEditingFee ? (
+                          <div className="flex items-center gap-2">
+                            <span>$</span>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={editedFee}
+                              onChange={(e) => setEditedFee(Number(e.target.value))}
+                              className="w-20 h-6 text-sm"
+                              autoFocus
+                              onBlur={handleFeeUpdate}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  handleFeeUpdate();
+                                } else if (e.key === 'Escape') {
+                                  setIsEditingFee(false);
+                                  setEditedFee(creditCardFees);
+                                }
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <span>-${creditCardFees.toFixed(2)}</span>
+                        )}
                       </div>
                     )}
                     <div className="flex justify-between text-gray-500 font-medium pt-1">

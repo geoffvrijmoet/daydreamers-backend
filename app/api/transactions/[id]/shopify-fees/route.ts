@@ -65,6 +65,18 @@ export async function POST(
       )
     }
 
+    // First get the order details to get the total amount including shipping
+    console.log('[API] Fetching order details from Shopify...');
+    const order = await shopifyClient.order.get(shopifyOrderId);
+    const totalAmount = Number(order.total_price);
+    console.log('[API] Order details:', {
+      orderId: order.id,
+      totalPrice: order.total_price,
+      subtotalPrice: order.subtotal_price,
+      totalShipping: order.total_shipping_price_set?.shop_money?.amount,
+      totalTax: order.total_tax
+    });
+
     // Get transaction fees from Shopify
     console.log('[API] Fetching transactions from Shopify...');
     let processingFee = 0;
@@ -98,14 +110,23 @@ export async function POST(
       // Try to get the fee from the transaction
       if (paymentTransaction.fee) {
         processingFee = Number(paymentTransaction.fee);
+        console.log(`[Fee Calculation] Using actual fee from Shopify: $${processingFee.toFixed(2)}`);
       } else {
         // If no fee field, use a default calculation (2.9% + $0.30)
-        const amount = Number(paymentTransaction.amount);
-        processingFee = (amount * 0.029) + 0.30;
+        // Use the total amount including shipping for fee calculation
+        const percentageFee = totalAmount * 0.029;
+        const flatFee = 0.30;
+        processingFee = percentageFee + flatFee;
+        
+        console.log(`[Fee Calculation] Calculating credit card fee:
+  Total Amount (including shipping): $${totalAmount.toFixed(2)}
+  Percentage Fee (2.9%): $${percentageFee.toFixed(2)}
+  Flat Fee: $${flatFee.toFixed(2)}
+  Total Fee: $${processingFee.toFixed(2)}`);
       }
       
       console.log(`[API] Processing fees calculation:`, {
-        amount: paymentTransaction.amount,
+        totalAmount,
         fee: paymentTransaction.fee,
         calculatedFee: processingFee,
         transactionType: paymentTransaction.kind,
