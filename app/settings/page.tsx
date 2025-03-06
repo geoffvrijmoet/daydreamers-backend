@@ -1,6 +1,8 @@
 'use client'
 
 import { GmailSettings } from '@/components/gmail-settings'
+import Link from 'next/link'
+import { Card } from '@/components/ui/card'
 
 export default function SettingsPage() {
   return (
@@ -17,6 +19,42 @@ export default function SettingsPage() {
 
         <div className="space-y-6">
           <GmailSettings />
+          
+          <Card className="p-6">
+            <div className="space-y-1.5 pb-4">
+              <h3 className="font-semibold text-lg leading-none">Data Management</h3>
+              <p className="text-sm text-gray-500">
+                Manage your data mappings and integrations
+              </p>
+            </div>
+            <div className="space-y-4">
+              <Link 
+                href="/settings/smart-mappings" 
+                className="flex items-center justify-between p-3 border rounded-md hover:bg-gray-50"
+              >
+                <div>
+                  <h4 className="font-medium">Smart Mappings</h4>
+                  <p className="text-sm text-gray-500">
+                    View and manage product and supplier mappings
+                  </p>
+                </div>
+                <svg 
+                  xmlns="http://www.w3.org/2000/svg" 
+                  width="24" 
+                  height="24" 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  className="text-gray-400"
+                >
+                  <path d="m9 18 6-6-6-6"/>
+                </svg>
+              </Link>
+            </div>
+          </Card>
           
           {/* Add more settings sections here */}
         </div>

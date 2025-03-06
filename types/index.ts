@@ -71,29 +71,37 @@ export type CostHistoryEntry = {
   notes?: string
 }
 
-export type Product = {
-  _id?: string  // MongoDB ID
-  id: string    // Frontend ID
+export interface Product {
+  _id?: string
+  id: string
   name: string
-  sku: string
   description?: string
-  lastPurchasePrice: number  // Most recent purchase price
-  averageCost: number       // Weighted average of all purchases
-  retailPrice: number       // Current selling price
-  wholesalePrice?: number
+  sku: string
   currentStock: number
   minimumStock: number
+  retailPrice: number
+  wholesalePrice: number
+  lastPurchasePrice: number
   supplier?: string
   category?: string
-  lastRestockDate?: string
+  active?: boolean
   squareId?: string
   squareParentId?: string
   shopifyId?: string
-  barcode?: string
-  active: boolean
-  costHistory: CostHistoryEntry[]
+  shopifyParentId?: string
+  shopifyVariantId?: string
   totalSpent: number
   totalPurchased: number
+  averageCost: number
+  costHistory: CostHistoryEntry[]
+  barcode?: string
+  lastRestockDate?: string
+  createdAt?: string
+  updatedAt?: string
+  // Add proxy-related fields
+  proxyOf?: string  // MongoDB _id of the product this is a proxy of
+  proxyRatio?: number  // How many of this product equals one of the proxy target
+  isProxied?: boolean  // Whether this product has other products that are proxies of it
 }
 
 export type SalesData = {

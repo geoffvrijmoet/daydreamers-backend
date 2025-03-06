@@ -2,6 +2,33 @@ import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 import { ObjectId } from 'mongodb'
 
+// Define types for profit calculation
+interface ProfitCalculationItem {
+  name: string;
+  quantity: number;
+  salePrice: number;
+  itemCost: number;
+  itemProfit: number;
+  hasCostData: boolean;
+}
+
+// Used for the request body
+interface ProfitRequest {
+  profitDetails: {
+    lineItemProfits?: ProfitCalculationItem[];
+    totalRevenue: number;
+    totalCost: number;
+    totalProfit: number;
+    itemsWithoutCost: number;
+    creditCardFees: number;
+  };
+  taxDetails: {
+    taxAmount: number;
+    preTaxAmount: number;
+  };
+  calculatedAt: string;
+}
+
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
@@ -10,7 +37,7 @@ export async function POST(
     console.log('[API] Received profit calculation save request for transaction:', params.id);
     
     const db = await getDb()
-    const { profitDetails, taxDetails, calculatedAt } = await request.json()
+    const { profitDetails, taxDetails, calculatedAt }: ProfitRequest = await request.json()
     
     console.log('[API] Profit calculation data:', {
       transactionId: params.id,
@@ -18,21 +45,38 @@ export async function POST(
       totalProfit: profitDetails.totalProfit,
       totalCost: profitDetails.totalCost,
       totalRevenue: profitDetails.totalRevenue,
-      itemCount: profitDetails.lineItemProfits.length,
+      itemCount: profitDetails.lineItemProfits?.length || 0,
       itemsWithoutCost: profitDetails.itemsWithoutCost,
+      creditCardFees: profitDetails.creditCardFees,
       taxAmount: taxDetails.taxAmount,
       preTaxAmount: taxDetails.preTaxAmount
     });
+
+    // Format the profit calculation to match our schema
+    const profitCalculation = {
+      hasCostData: profitDetails.lineItemProfits?.some((item: ProfitCalculationItem) => item.hasCostData) || false,
+      items: profitDetails.lineItemProfits?.map((item: ProfitCalculationItem) => ({
+        name: item.name,
+        quantity: item.quantity,
+        salesPrice: item.salePrice,
+        cost: item.itemCost,
+        profit: item.itemProfit,
+        profitMargin: item.itemProfit / (item.salePrice * item.quantity),
+      })),
+      totalRevenue: profitDetails.totalRevenue,
+      totalCost: profitDetails.totalCost,
+      totalProfit: profitDetails.totalProfit,
+      itemsWithoutCost: profitDetails.itemsWithoutCost,
+      creditCardFees: profitDetails.creditCardFees,
+      calculatedAt
+    };
 
     // Update the transaction with profit details and tax calculation
     const result = await db.collection('transactions').findOneAndUpdate(
       { _id: new ObjectId(params.id) },
       {
         $set: {
-          profitCalculation: {
-            ...profitDetails,
-            calculatedAt
-          },
+          profitCalculation,
           taxAmount: taxDetails.taxAmount,
           preTaxAmount: taxDetails.preTaxAmount,
           updatedAt: new Date().toISOString()
@@ -52,8 +96,9 @@ export async function POST(
     console.log('[API] Successfully saved profit calculation:', {
       transactionId: params.id,
       updatedAt: result.updatedAt,
-      taxAmount: result.taxAmount,
-      preTaxAmount: result.preTaxAmount
+      hasCostData: result.profitCalculation?.hasCostData,
+      totalProfit: result.profitCalculation?.totalProfit,
+      itemCount: result.profitCalculation?.items?.length || 0
     });
 
     return NextResponse.json(result)

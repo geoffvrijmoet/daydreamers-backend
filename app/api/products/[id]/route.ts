@@ -1,82 +1,146 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongodb'
 import { ObjectId } from 'mongodb'
-import { type Product, type CostHistoryEntry } from '@/types'
+import { type Product } from '@/types'
+
+export async function GET(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const { db } = await connectToDatabase()
+    const product = await db.collection<Product>('products').findOne({ 
+      _id: new ObjectId(params.id)
+    })
+
+    if (!product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    }
+
+    // Convert _id to id for frontend
+    const productWithId = {
+      ...product,
+      id: product._id.toString(),
+    }
+
+    return NextResponse.json(productWithId)
+  } catch (error) {
+    console.error('Error fetching product:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch product' },
+      { status: 500 }
+    )
+  }
+}
 
 export async function PATCH(
   request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = await getDb()
+    const { db } = await connectToDatabase()
     const updates = await request.json()
+    
+    // Get the current product
+    const currentProduct = await db.collection('products').findOne({
+      _id: new ObjectId(params.id)
+    })
 
-    // If updating lastPurchasePrice, add a cost history entry
-    if ('lastPurchasePrice' in updates) {
-      const costEntry: CostHistoryEntry = {
-        date: new Date().toISOString(),
-        quantity: 0, // No quantity change for manual price update
-        unitPrice: updates.lastPurchasePrice,
-        totalPrice: 0,
-        source: 'manual',
-        notes: 'Manual price update'
-      }
-
-      const result = await db.collection<Product>('products').findOneAndUpdate(
-        { _id: new ObjectId(params.id) },
-        {
-          $set: {
-            ...updates,
-            updatedAt: new Date().toISOString()
-          },
-          $push: {
-            costHistory: costEntry
-          }
-        },
-        { returnDocument: 'after' }
-      )
-
-      if (!result) {
-        return NextResponse.json(
-          { error: 'Product not found' },
-          { status: 404 }
-        )
-      }
-
-      return NextResponse.json({
-        success: true,
-        product: {
-          ...result,
-          id: result._id.toString()
-        }
-      })
-    }
-
-    // For other fields, just update them
-    const result = await db.collection<Product>('products').findOneAndUpdate(
-      { _id: new ObjectId(params.id) },
-      {
-        $set: {
-          ...updates,
-          updatedAt: new Date().toISOString()
-        }
-      },
-      { returnDocument: 'after' }
-    )
-
-    if (!result) {
+    if (!currentProduct) {
       return NextResponse.json(
         { error: 'Product not found' },
         { status: 404 }
       )
     }
 
-    return NextResponse.json({
-      success: true,
-      product: {
-        ...result,
-        id: result._id.toString()
+    // Handle proxy-related updates
+    if ('proxyOf' in updates || 'proxyRatio' in updates) {
+      // If removing proxy relationship
+      if (updates.proxyOf === null) {
+        await db.collection('products').updateOne(
+          { _id: new ObjectId(currentProduct.proxyOf) },
+          { $set: { isProxied: false } }
+        )
       }
+      // If setting new proxy relationship
+      else if (updates.proxyOf) {
+        // Verify target product exists
+        const targetProduct = await db.collection('products').findOne({
+          _id: new ObjectId(updates.proxyOf)
+        })
+        if (!targetProduct) {
+          return NextResponse.json(
+            { error: 'Proxy target product not found' },
+            { status: 404 }
+          )
+        }
+        // Mark target product as being proxied
+        await db.collection('products').updateOne(
+          { _id: new ObjectId(updates.proxyOf) },
+          { $set: { isProxied: true } }
+        )
+      }
+    }
+
+    // Handle inventory-related updates
+    if ('currentStock' in updates && currentProduct.proxyOf) {
+      const proxyTarget = await db.collection('products').findOne({
+        _id: new ObjectId(currentProduct.proxyOf)
+      })
+      if (proxyTarget) {
+        // Calculate the change in stock
+        const stockDiff = updates.currentStock - currentProduct.currentStock
+        // Update the proxy target's stock proportionally
+        await db.collection('products').updateOne(
+          { _id: new ObjectId(currentProduct.proxyOf) },
+          { 
+            $inc: { 
+              currentStock: stockDiff / (currentProduct.proxyRatio || 1)
+            }
+          }
+        )
+      }
+    }
+
+    // Handle cost-related updates
+    if ('lastPurchasePrice' in updates && currentProduct.proxyOf) {
+      const proxyTarget = await db.collection('products').findOne({
+        _id: new ObjectId(currentProduct.proxyOf)
+      })
+      if (proxyTarget) {
+        // Update the proxy target's cost proportionally
+        await db.collection('products').updateOne(
+          { _id: new ObjectId(currentProduct.proxyOf) },
+          { 
+            $set: { 
+              lastPurchasePrice: updates.lastPurchasePrice * (currentProduct.proxyRatio || 1)
+            }
+          }
+        )
+      }
+    }
+
+    // Update the product
+    const result = await db.collection('products').updateOne(
+      { _id: new ObjectId(params.id) },
+      { 
+        $set: { 
+          ...updates,
+          updatedAt: new Date().toISOString()
+        } 
+      }
+    )
+
+    if (result.matchedCount === 0) {
+      return NextResponse.json(
+        { error: 'Product not found' },
+        { status: 404 }
+      )
+    }
+
+    return NextResponse.json({ 
+      success: true,
+      message: 'Product updated successfully'
     })
   } catch (error) {
     console.error('Error updating product:', error)
@@ -92,7 +156,7 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = await getDb()
+    const { db } = await connectToDatabase()
 
     // First, get the product to check if it has Square/Shopify IDs
     const product = await db.collection('products').findOne({
@@ -148,30 +212,6 @@ export async function DELETE(
     console.error('Error deleting product:', error)
     return NextResponse.json(
       { error: 'Failed to delete product' },
-      { status: 500 }
-    )
-  }
-}
-
-export async function GET(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const db = await getDb()
-    const product = await db.collection<Product>('products').findOne({ 
-      _id: new ObjectId(params.id)
-    })
-
-    if (!product) {
-      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
-    }
-
-    return NextResponse.json(product)
-  } catch (error) {
-    console.error('Error fetching product:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch product' },
       { status: 500 }
     )
   }

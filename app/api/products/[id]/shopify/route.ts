@@ -3,6 +3,93 @@ import { shopifyClient } from '@/lib/shopify'
 import { getDb } from '@/lib/db'
 import { ObjectId } from 'mongodb'
 
+// Add these interfaces before the GET function
+interface ShopifyVariantNode {
+  id: string
+  title: string
+  price: string
+  compareAtPrice: string | null
+  barcode: string | null
+  sku: string | null
+  weight: number
+  weightUnit: string
+  requiresShipping: boolean
+  taxable: boolean
+  inventoryQuantity: number
+  selectedOptions: { name: string; value: string }[]
+}
+
+interface ShopifyMediaNode {
+  id: string
+  mediaContentType: string
+  image?: {
+    url: string
+    width: number
+    height: number
+    altText: string
+  }
+  preview?: {
+    image: {
+      url: string
+    }
+  }
+}
+
+interface ShopifyGraphQLResponse {
+  product: {
+    id: string
+    title: string
+    description: string
+    vendor: string
+    productType: string
+    tags: string[]
+    status: string
+    publishedAt: string
+    media: {
+      edges: Array<{ node: ShopifyMediaNode }>
+    }
+    variants: {
+      edges: Array<{ node: ShopifyVariantNode }>
+    }
+  }
+}
+
+interface ProductInput {
+  title: string
+  descriptionHtml: string
+  vendor: string
+  productType: string
+  status: string
+  options: Array<{
+    name: string
+    values: string[]
+  }>
+  variants: Array<{
+    options: string[]
+    price: string
+    compareAtPrice: string | null
+    barcode: string
+    sku: string
+    weight: number
+    weightUnit: "GRAMS" | "KILOGRAMS" | "OUNCES" | "POUNDS"
+    requiresShipping: boolean
+    taxable: boolean
+    inventoryManagement: "SHOPIFY"
+  }>
+  tags?: string[]
+}
+
+interface VariantInput {
+  price: string
+  compareAtPrice?: string
+  barcode?: string
+  sku: string
+  weight: number
+  weightUnit: "GRAMS" | "KILOGRAMS" | "OUNCES" | "POUNDS"
+  requiresShipping: boolean
+  taxable: boolean
+}
+
 // Helper to extract product ID from variant GID
 const extractProductIdFromVariantGid = async (variantId: string) => {
   try {
@@ -133,10 +220,10 @@ export async function GET(
       }
     `
     const variables = { id: productId }
-    const data = await shopifyClient.graphql(query, variables)
+    const data = await shopifyClient.graphql(query, variables) as { product: ShopifyGraphQLResponse['product'] }
 
     // Transform the GraphQL response to match our expected format
-    const variants = data.product.variants.edges.map(edge => ({
+    const variants = data.product.variants.edges.map((edge: { node: ShopifyVariantNode }) => ({
       id: edge.node.id,
       title: edge.node.title,
       price: edge.node.price || "0.00",
@@ -159,7 +246,7 @@ export async function GET(
       tags: data.product.tags,
       status: data.product.status,
       published_at: data.product.publishedAt,
-      images: data.product.media.edges.map(edge => ({
+      images: data.product.media.edges.map((edge: { node: ShopifyMediaNode }) => ({
         id: edge.node.id,
         url: edge.node.mediaContentType === 'IMAGE' 
           ? edge.node.image?.url 
@@ -167,7 +254,7 @@ export async function GET(
         width: edge.node.image?.width,
         height: edge.node.image?.height,
         altText: edge.node.image?.altText
-      })).filter(img => img.url),
+      })).filter((img: { url?: string }) => img.url),
       variants
     }
 
@@ -204,7 +291,8 @@ export async function POST(
       weightUnit,
       requiresShipping,
       taxable,
-      imageIds = []
+      imageIds = [],
+      variants
     } = body
 
     let shopifyProduct;
@@ -259,114 +347,117 @@ export async function POST(
       shopifyProduct = {
         variants: [{ id: response.productVariantCreate.productVariant.id }]
       }
-    } else {
-      // Create new product with GraphQL to support media attachment
-      const mutation = `
-        mutation productCreate($input: ProductInput!) {
-          productCreate(input: $input) {
-            product {
-              id
-              variants(first: 1) {
-                edges {
-                  node {
-                    id
+    } else if (mode === 'product') {
+      try {
+        // Ensure all required fields have valid values
+        const productInput: ProductInput = {
+          title: title || '',
+          descriptionHtml: description || '',
+          vendor: vendor || '',
+          productType: productType || 'Default',
+          status: 'ACTIVE',
+          options: [{
+            name: 'Title',
+            values: variants.map((v: { title: string }) => v.title)
+          }],
+          variants: variants.map((variant: any) => ({
+            options: [variant.title],
+            price: variant.price.toString(),
+            compareAtPrice: variant.compareAtPrice?.toString() || null,
+            barcode: variant.barcode || '',
+            sku: variant.sku || '',
+            weight: variant.weight || 0,
+            weightUnit: (variant.weightUnit === 'lb' ? 'POUNDS' :
+                      variant.weightUnit === 'oz' ? 'OUNCES' :
+                      variant.weightUnit === 'kg' ? 'KILOGRAMS' :
+                      'GRAMS'),
+            requiresShipping: variant.requiresShipping ?? true,
+            taxable: variant.taxable ?? true,
+            inventoryManagement: "SHOPIFY"
+          }))
+        };
+
+        if (tags) {
+          productInput.tags = tags.split(',').map((tag: string) => tag.trim()).filter(Boolean);
+        }
+
+        const { product } = await shopifyClient.graphql(`
+          mutation productCreate($input: ProductInput!) {
+            productCreate(input: $input) {
+              product {
+                id
+                variants(first: 10) {
+                  edges {
+                    node {
+                      id
+                    }
                   }
                 }
               }
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-      `
-
-      const variables = {
-        input: {
-          title,
-          descriptionHtml: description,
-          vendor,
-          productType,
-          tags: tags.split(',').map((tag: string) => tag.trim()).filter(Boolean),
-          variants: [{
-            price: price.toString(),
-            compareAtPrice: compareAtPrice?.toString(),
-            barcode,
-            sku,
-            weight,
-            weightUnit: weightUnit === 'lb' ? 'POUNDS' :
-                       weightUnit === 'oz' ? 'OUNCES' :
-                       weightUnit === 'kg' ? 'KILOGRAMS' :
-                       'GRAMS',
-            requiresShipping,
-            taxable,
-            inventoryItem: {
-              tracked: true,
-              cost: body.cost?.toString()
-            }
-          }]
-        }
-      }
-
-      const response = await shopifyClient.graphql(mutation, variables)
-      
-      if (response.productCreate.userErrors.length > 0) {
-        throw new Error(response.productCreate.userErrors[0].message)
-      }
-
-      const productId = response.productCreate.product.id
-      const variantId = response.productCreate.product.variants.edges[0].node.id
-
-      // If we have images, attach them to the product
-      if (imageIds.length > 0) {
-        const attachMediaMutation = `
-          mutation productAppendMedia($input: ProductAppendMediaInput!) {
-            productAppendMedia(input: $input) {
-              product {
-                id
-              }
-              mediaUserErrors {
+              userErrors {
                 field
                 message
               }
             }
           }
-        `
-
-        const mediaResponse = await shopifyClient.graphql(attachMediaMutation, {
-          input: {
-            productId,
-            mediaIds: imageIds
+        `, {
+          variables: {
+            input: productInput
           }
-        })
+        });
 
-        if (mediaResponse.productAppendMedia.mediaUserErrors.length > 0) {
-          throw new Error(mediaResponse.productAppendMedia.mediaUserErrors[0].message)
+        if (product.userErrors?.length > 0) {
+          console.error('Shopify product creation error:', product.userErrors);
+          return NextResponse.json(
+            { error: product.userErrors[0].message },
+            { status: 400 }
+          )
         }
-      }
 
-      shopifyProduct = {
-        variants: [{
-          id: variantId
-        }]
+        // Update MongoDB product with Shopify IDs
+        const shopifyId = product.id.split('/').pop() || '';
+        const variantIds = product.variants.edges.map((edge: { node: { id: string } }) => edge.node.id.split('/').pop() || '');
+
+        // Update the main product
+        const db = await getDb()
+        await db.collection('products').updateOne(
+          { _id: new ObjectId(params.id) },
+          { 
+            $set: { 
+              shopifyId,
+              shopifyVariantId: variantIds[0]
+            } 
+          }
+        )
+
+        // Update variant products with their Shopify IDs
+        for (let i = 1; i < variantIds.length; i++) {
+          const variantProduct = variants[i - 1]
+          if (variantProduct) {
+            await db.collection('products').updateOne(
+              { _id: new ObjectId(variantProduct.id) },
+              { 
+                $set: { 
+                  shopifyId,
+                  shopifyParentId: shopifyId,
+                  shopifyVariantId: variantIds[i]
+                } 
+              }
+            )
+          }
+        }
+
+        return NextResponse.json({ id: shopifyId })
+      } catch (error) {
+        console.error('Error creating Shopify product:', error)
+        return NextResponse.json(
+          { error: 'Failed to create Shopify product' },
+          { status: 500 }
+        )
       }
+    } else {
+      throw new Error('Invalid mode')
     }
-
-    // Update our database with the Shopify ID
-    const db = await getDb()
-    await db.collection('products').updateOne(
-      { _id: new ObjectId(params.id) },
-      { 
-        $set: { 
-          shopifyId: shopifyProduct.variants[0].id.toString(),
-          shopifyVariantId: shopifyProduct.variants[0].id.toString(),
-          updatedAt: new Date()
-        } 
-      }
-    )
-
-    return NextResponse.json(shopifyProduct)
   } catch (error) {
     console.error('Error creating Shopify product:', error)
     return NextResponse.json(

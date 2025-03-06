@@ -1,75 +1,87 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
+import { SmartMappingService } from '@/lib/services/smart-mapping-service'
+import { ObjectId } from 'mongodb'
 
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url)
-    const query = searchParams.get('query')
-
-    if (!query) {
-      return NextResponse.json({ products: [] })
-    }
-
-    const db = await getDb()
+    const url = new URL(request.url)
+    const term = url.searchParams.get('term')
     
-    // Create a case-insensitive regex for the search
-    const searchRegex = new RegExp(query, 'i')
-
-    // Search for products that:
-    // 1. Match the search query in name or SKU
-    // 2. Are active
-    const products = await db.collection('products')
-      .find({
-        active: { $ne: false },
-        $or: [
-          { name: searchRegex },
-          { sku: searchRegex }
-        ]
+    if (!term) {
+      return NextResponse.json({ error: 'Search term is required' }, { status: 400 })
+    }
+    
+    const db = await getDb()
+    const products = db.collection('products')
+    
+    // First, check for smart mapping suggestions
+    const suggestions = await SmartMappingService.suggestProductsForName(term)
+    
+    // Convert string IDs to ObjectIds
+    const suggestedProductIds = suggestions
+      .filter(s => s.confidence >= 60)
+      .map(s => {
+        try {
+          return new ObjectId(s.productId)
+        } catch {
+          return null
+        }
       })
-      .project({
-        _id: 1,
-        name: 1,
-        sku: 1,
-        retailPrice: 1,
-        lastPurchasePrice: 1
-      })
+      .filter((id): id is ObjectId => id !== null)
+    
+    // Build search query
+    const searchQuery = {
+      $or: [
+        // Include products from smart mapping suggestions
+        ...(suggestedProductIds.length > 0 ? [{ _id: { $in: suggestedProductIds } }] : []),
+        // Include products matching the search term
+        { name: { $regex: term, $options: 'i' } },
+        { sku: { $regex: term, $options: 'i' } }
+      ]
+    }
+    
+    // Get matching products
+    const matchingProducts = await products
+      .find(searchQuery)
+      .limit(20)
       .toArray()
-
-    // Sort products to prioritize:
-    // 1. Exact matches
-    // 2. Regular versions
-    // 3. Everything else
-    const sortedProducts = products.sort((a, b) => {
-      // First priority: exact matches
-      const aExactMatch = a.name.toLowerCase() === query.toLowerCase()
-      const bExactMatch = b.name.toLowerCase() === query.toLowerCase()
-      if (aExactMatch && !bExactMatch) return -1
-      if (!aExactMatch && bExactMatch) return 1
-
-      // Second priority: Regular vs Bulk
-      const aIsRegular = a.name.includes('Regular')
-      const bIsRegular = b.name.includes('Regular')
-      const aIsBulk = a.name.includes('Bulk')
-      const bIsBulk = b.name.includes('Bulk')
+    
+    // Sort products: smart mapping suggestions first, then by name
+    const sortedProducts = matchingProducts.sort((a, b) => {
+      const aIndex = suggestedProductIds.findIndex(id => id.equals(a._id))
+      const bIndex = suggestedProductIds.findIndex(id => id.equals(b._id))
       
-      if (aIsRegular && !bIsRegular) return -1
-      if (!aIsRegular && bIsRegular) return 1
-      if (aIsBulk && !bIsBulk) return 1
-      if (!aIsBulk && bIsBulk) return -1
-
-      // Default to alphabetical order
+      if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex
+      if (aIndex !== -1) return -1
+      if (bIndex !== -1) return 1
+      
       return a.name.localeCompare(b.name)
     })
-
-    // Limit to 10 results after sorting
-    const limitedProducts = sortedProducts.slice(0, 10)
-
-    return NextResponse.json({ products: limitedProducts })
-
+    
+    // Add confidence scores from smart mapping
+    const productsWithScores = sortedProducts.map(product => {
+      const suggestion = suggestions.find(s => {
+        try {
+          return new ObjectId(s.productId).equals(product._id)
+        } catch {
+          return false
+        }
+      })
+      return {
+        ...product,
+        confidence: suggestion?.confidence || 0
+      }
+    })
+    
+    return NextResponse.json({
+      success: true,
+      products: productsWithScores
+    })
   } catch (error) {
     console.error('Error searching products:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to search products' },
+      { error: 'Failed to search products' },
       { status: 500 }
     )
   }

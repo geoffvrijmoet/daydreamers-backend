@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card } from '@/components/ui/card'
 import { Product } from '@/types'
 
 type SelectedProduct = {
@@ -14,13 +13,21 @@ type SelectedProduct = {
   totalPrice: number
 }
 
-export function ManualTransactionForm() {
-  const [isOpen, setIsOpen] = useState(false)
+type ManualTransactionFormProps = {
+  isExpanded?: boolean
+  onSuccess?: () => void
+  onCancel?: () => void
+}
+
+export function ManualTransactionForm({ isExpanded = false, onSuccess, onCancel }: ManualTransactionFormProps) {
+  const [isOpen, setIsOpen] = useState(isExpanded)
   const [loading, setLoading] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [selectedProducts, setSelectedProducts] = useState<SelectedProduct[]>([])
   const [customer, setCustomer] = useState('')
-  const [paymentMethod, setPaymentMethod] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('Cash')
+  const [customerSuggestions, setCustomerSuggestions] = useState<string[]>([])
+  const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false)
   const [manualTotal, setManualTotal] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
@@ -29,6 +36,11 @@ export function ManualTransactionForm() {
     const now = new Date();
     return `${now.toISOString().split('.')[0]}`; // Format: "YYYY-MM-DDTHH:mm:ss"
   })
+
+  // Effect to sync isOpen with isExpanded prop
+  useEffect(() => {
+    setIsOpen(isExpanded);
+  }, [isExpanded]);
 
   // Fetch available products
   useEffect(() => {
@@ -44,6 +56,32 @@ export function ManualTransactionForm() {
     }
     fetchProducts()
   }, [])
+
+  // Fetch customer suggestions when typing
+  useEffect(() => {
+    async function fetchCustomers() {
+      if (customer.length < 2) {
+        setCustomerSuggestions([]);
+        return;
+      }
+      
+      try {
+        const response = await fetch(`/api/customers/search?query=${encodeURIComponent(customer)}`)
+        if (!response.ok) throw new Error('Failed to fetch customers')
+        const data = await response.json()
+        setCustomerSuggestions(data.customers.map((c: { name: string }) => c.name));
+      } catch (error) {
+        console.error('Error fetching customers:', error)
+        setCustomerSuggestions([]);
+      }
+    }
+    
+    const delayDebounceFn = setTimeout(() => {
+      fetchCustomers();
+    }, 300);
+    
+    return () => clearTimeout(delayDebounceFn);
+  }, [customer]);
 
   // Filter and group products based on search query
   const filteredAndGroupedProducts = useMemo(() => {
@@ -163,8 +201,11 @@ export function ManualTransactionForm() {
       setSelectedProducts([])
       setManualTotal(null)
       setCustomer('')
-      setPaymentMethod('')
+      setPaymentMethod('Cash')
       setShippingAmount(0)
+      
+      // Call onSuccess callback if provided
+      if (onSuccess) onSuccess()
 
     } catch (error) {
       console.error('Error creating transaction:', error)
@@ -187,15 +228,23 @@ export function ManualTransactionForm() {
   }
 
   return (
-    <Card className="p-4">
+    <div>
+      {/* Use a div instead of a Card since the card will be provided by the parent */}
       <div className="flex justify-between items-center mb-4">
-        <h3 className="font-medium">Add Manual Sale</h3>
-        <button
-          onClick={() => setIsOpen(false)}
-          className="text-gray-400 hover:text-gray-500"
-        >
-          Cancel
-        </button>
+        {!isExpanded && (
+          <h3 className="font-medium">Add Manual Sale</h3>
+        )}
+        {!isExpanded && (
+          <button
+            onClick={() => {
+              setIsOpen(false);
+              if (onCancel) onCancel();
+            }}
+            className="text-gray-400 hover:text-gray-500"
+          >
+            Cancel
+          </button>
+        )}
       </div>
 
       {/* Add date and time selector before product selection */}
@@ -207,6 +256,52 @@ export function ManualTransactionForm() {
           onChange={(e) => setDate(e.target.value)}
           className="w-full"
         />
+      </div>
+
+      {/* Customer input with autocomplete */}
+      <div className="mb-4 relative">
+        <label className="text-sm mb-1 block">Customer</label>
+        <Input
+          type="text"
+          value={customer}
+          onChange={(e) => {
+            setCustomer(e.target.value);
+            setShowCustomerSuggestions(true);
+          }}
+          onFocus={() => setShowCustomerSuggestions(true)}
+          placeholder="Enter customer name"
+          className="w-full"
+        />
+        {showCustomerSuggestions && customerSuggestions.length > 0 && (
+          <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded shadow-lg max-h-60 overflow-y-auto">
+            {customerSuggestions.map((suggestion, index) => (
+              <div
+                key={index}
+                onClick={() => {
+                  setCustomer(suggestion);
+                  setShowCustomerSuggestions(false);
+                }}
+                className="p-2 hover:bg-gray-100 cursor-pointer"
+              >
+                {suggestion}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Payment Method Dropdown */}
+      <div className="mb-4">
+        <label className="text-sm mb-1 block">Payment Method</label>
+        <select
+          value={paymentMethod}
+          onChange={(e) => setPaymentMethod(e.target.value)}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+        >
+          <option value="Cash">Cash</option>
+          <option value="Venmo">Venmo</option>
+          <option value="Cash App">Cash App</option>
+        </select>
       </div>
 
       {/* Product Selection */}
@@ -286,16 +381,6 @@ export function ManualTransactionForm() {
 
       {/* Additional Details */}
       <div className="space-y-2 mb-4">
-        <Input
-          placeholder="Customer name"
-          value={customer}
-          onChange={(e) => setCustomer(e.target.value)}
-        />
-        <Input
-          placeholder="Payment method"
-          value={paymentMethod}
-          onChange={(e) => setPaymentMethod(e.target.value)}
-        />
         <div>
           <label className="text-sm mb-1 block">Shipping Amount ($)</label>
           <Input
@@ -385,6 +470,6 @@ export function ManualTransactionForm() {
       >
         {loading ? 'Adding...' : 'Add Sale'}
       </Button>
-    </Card>
+    </div>
   )
 } 

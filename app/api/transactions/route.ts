@@ -31,4 +31,46 @@ export async function GET(request: Request) {
       { status: 500 }
     )
   }
+}
+
+export async function POST(request: Request) {
+  try {
+    const db = await getDb()
+    const data = await request.json()
+    
+    console.log('🔍 Received transaction data:', data);
+    
+    // Ensure products have correct data types
+    if (data.products && Array.isArray(data.products)) {
+      data.products = data.products.map(product => ({
+        ...product,
+        quantity: Number(product.quantity),
+        unitPrice: Number(product.unitPrice),
+        totalPrice: Number(product.totalPrice),
+      }));
+      
+      console.log('📦 Processed products:', data.products);
+    }
+    
+    const now = new Date().toISOString()
+    const transaction = {
+      ...data,
+      createdAt: now,
+      updatedAt: now
+    }
+
+    const result = await db.collection('transactions').insertOne(transaction)
+    
+    return NextResponse.json({ 
+      success: true, 
+      id: result.insertedId,
+      message: 'Transaction created successfully'
+    })
+  } catch (error) {
+    console.error('Error creating transaction:', error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to create transaction' },
+      { status: 500 }
+    )
+  }
 } 

@@ -280,6 +280,9 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
       <div className="space-y-2">
         {groupedProducts.map((group, groupIndex) => (
           <Card key={groupIndex} className="p-4">
+            {/* Parent Product Name */}
+            <h3 className="font-medium mb-4">{group[0].name.split(' - ')[0]}</h3>
+            
             {group.map((product, productIndex) => (
               <div 
                 key={product.id}
@@ -301,7 +304,9 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
                       )}
                     </button>
                     <div>
-                      <h3 className="font-medium">{product.name}</h3>
+                      <h3 className="font-medium">
+                        {product.name.split(' - ')[1] || 'Default'}
+                      </h3>
                       <p className="text-sm text-gray-500">SKU: {product.sku}</p>
                     </div>
                   </div>

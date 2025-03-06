@@ -293,7 +293,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
         // If it's a Shopify transaction, fetch MongoDB products for all line items
         else if (data.source === 'shopify' && data.lineItems?.length > 0) {
           console.log('[Transaction Load] Starting MongoDB product fetch for Shopify line items:', 
-            data.lineItems.map(item => ({ 
+            data.lineItems.map((item: LineItem) => ({ 
               name: item.name, 
               variantId: item.variant_id 
             }))
@@ -341,7 +341,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
         // If it's a Square transaction, fetch MongoDB products for all line items
         else if (data.source === 'square' && data.lineItems?.length > 0) {
           console.log('[Transaction Load] Starting MongoDB product fetch for Square line items:', 
-            data.lineItems.map(item => ({ 
+            data.lineItems.map((item: LineItem) => ({ 
               name: item.name, 
               sku: item.sku // This should be the Square catalogObjectId
             }))
@@ -1076,7 +1076,7 @@ export default function TransactionPage({ params }: { params: { id: string } }) 
         throw new Error('Failed to update fee');
       }
 
-      const updatedTransaction = await response.json();
+      await response.json(); // Just await the response without storing it
       setTransaction(prev => prev ? {
         ...prev,
         shopifyProcessingFee: editedFee

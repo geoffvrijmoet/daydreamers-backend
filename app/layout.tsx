@@ -9,6 +9,7 @@ import './globals.css'
 import type { Metadata } from 'next'
 import { Quicksand } from 'next/font/google'
 import { Header } from '@/components/header'
+import { Toaster } from 'sonner'
 
 const quicksand = Quicksand({ subsets: ['latin'] })
 
@@ -41,6 +42,7 @@ export default function RootLayout({
             <main className="flex-1">
               {children}
             </main>
+            <Toaster position="top-right" />
           </div>
         </body>
       </html>

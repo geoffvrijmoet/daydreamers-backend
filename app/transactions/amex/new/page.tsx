@@ -6,8 +6,27 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { type Product } from '@/types'
-import { Loader2, Mail, ArrowLeft, Check, Copy } from 'lucide-react'
+import { Loader2, Mail, ArrowLeft, Check, Copy, Plus, UserPlus } from 'lucide-react'
 import Link from 'next/link'
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription,
+  DialogFooter
+} from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+
+// Define interfaces for our data types
+interface Supplier {
+  _id: string
+  name: string
+  aliases: string[]
+  invoiceEmail: string
+  invoiceSubjectPattern: string
+  skuPrefix: string
+}
 
 export default function NewAmexTransaction({ searchParams }: { searchParams: { emailId?: string } }) {
   const router = useRouter()
@@ -22,6 +41,17 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
   const [copied, setCopied] = useState(false)
   const [emailSkip, setEmailSkip] = useState(0)
   const [isLastEmail, setIsLastEmail] = useState(false)
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [showNewSupplierDialog, setShowNewSupplierDialog] = useState(false)
+  const [showMatchSupplierDialog, setShowMatchSupplierDialog] = useState(false)
+  const [newSupplier, setNewSupplier] = useState({
+    name: '',
+    aliases: '',
+    invoiceEmail: '',
+    invoiceSubjectPattern: '',
+    skuPrefix: ''
+  })
+  const [selectedSupplier, setSelectedSupplier] = useState('')
 
   // Form state
   const [amount, setAmount] = useState(0)
@@ -280,6 +310,14 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
 
         setProducts(productsData.products)
 
+        // Fetch suppliers data
+        const suppliersResponse = await fetch('/api/suppliers')
+        const suppliersData = await suppliersResponse.json()
+        
+        if (suppliersResponse.ok) {
+          setSuppliers(suppliersData.suppliers)
+        }
+
         // If we have an emailId, fetch the email details
         if (searchParams.emailId) {
           handleFetchEmailDetails(0)
@@ -511,6 +549,150 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
     }
   }
 
+  const handleCreateSupplier = async () => {
+    try {
+      const response = await fetch('/api/suppliers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: newSupplier.name || supplier,
+          aliases: newSupplier.aliases ? newSupplier.aliases.split(',').map(a => a.trim()) : [],
+          invoiceEmail: newSupplier.invoiceEmail,
+          invoiceSubjectPattern: newSupplier.invoiceSubjectPattern,
+          skuPrefix: newSupplier.skuPrefix
+        }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to create supplier')
+      }
+
+      const data = await response.json()
+      
+      // Add the new supplier to our list
+      setSuppliers(prev => [...prev, data.supplier])
+      
+      // Close the dialog
+      setShowNewSupplierDialog(false)
+      
+      // Clear the error
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create supplier')
+    }
+  }
+
+  const handleMatchSupplier = () => {
+    if (selectedSupplier) {
+      const matchedSupplier = suppliers.find(s => s._id === selectedSupplier)
+      if (matchedSupplier) {
+        setSupplier(matchedSupplier.name)
+        setError(null)
+      }
+      setShowMatchSupplierDialog(false)
+    }
+  }
+
+  // New supplier dialog component
+  const NewSupplierDialog = () => (
+    <Dialog open={showNewSupplierDialog} onOpenChange={setShowNewSupplierDialog}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>Add New Supplier</DialogTitle>
+          <DialogDescription>
+            Create a new supplier for &quot;{supplier}&quot;.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          <div className="grid gap-2">
+            <Label htmlFor="name">Name</Label>
+            <Input
+              id="name"
+              value={newSupplier.name || supplier}
+              onChange={(e) => setNewSupplier({...newSupplier, name: e.target.value})}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="aliases">Aliases (comma separated)</Label>
+            <Input
+              id="aliases"
+              value={newSupplier.aliases}
+              onChange={(e) => setNewSupplier({...newSupplier, aliases: e.target.value})}
+              placeholder="Alias 1, Alias 2, etc."
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="invoiceEmail">Invoice Email Address</Label>
+            <Input
+              id="invoiceEmail"
+              type="email"
+              value={newSupplier.invoiceEmail}
+              onChange={(e) => setNewSupplier({...newSupplier, invoiceEmail: e.target.value})}
+              placeholder="invoices@example.com"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="invoiceSubjectPattern">Invoice Subject Pattern (regex)</Label>
+            <Input
+              id="invoiceSubjectPattern"
+              value={newSupplier.invoiceSubjectPattern}
+              onChange={(e) => setNewSupplier({...newSupplier, invoiceSubjectPattern: e.target.value})}
+              placeholder="Invoice|Order #\d+"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="skuPrefix">SKU Prefix</Label>
+            <Input
+              id="skuPrefix"
+              value={newSupplier.skuPrefix}
+              onChange={(e) => setNewSupplier({...newSupplier, skuPrefix: e.target.value})}
+              placeholder="SUPP-"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowNewSupplierDialog(false)}>Cancel</Button>
+          <Button onClick={handleCreateSupplier}>Create Supplier</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+
+  // Match supplier dialog component
+  const MatchSupplierDialog = () => (
+    <Dialog open={showMatchSupplierDialog} onOpenChange={setShowMatchSupplierDialog}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>Match with Existing Supplier</DialogTitle>
+          <DialogDescription>
+            Select an existing supplier to match with &quot;{supplier}&quot;.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-4">
+          <Label htmlFor="supplier-select">Select Supplier</Label>
+          <select
+            id="supplier-select"
+            className="w-full mt-1 p-2 border rounded"
+            value={selectedSupplier}
+            onChange={(e) => setSelectedSupplier(e.target.value)}
+          >
+            <option value="">Select a supplier...</option>
+            {suppliers.map(s => (
+              <option key={s._id} value={s._id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowMatchSupplierDialog(false)}>Cancel</Button>
+          <Button onClick={handleMatchSupplier} disabled={!selectedSupplier}>Match Supplier</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+
   if (loading) {
     return (
       <div className="max-w-2xl mx-auto py-8 px-4">
@@ -522,7 +704,39 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
   if (error) {
     return (
       <div className="max-w-2xl mx-auto py-8 px-4">
-        <div className="text-red-600">{error}</div>
+        <div className="text-red-600">
+          <div className="flex justify-between items-start">
+            <p>{error}</p>
+            {error === 'Supplier not found in database' && (
+              <div className="flex gap-2 ml-4">
+                <Button 
+                  onClick={() => {
+                    setNewSupplier({
+                      ...newSupplier,
+                      name: supplier
+                    })
+                    setShowNewSupplierDialog(true)
+                  }}
+                  variant="outline" 
+                  size="sm"
+                  className="whitespace-nowrap"
+                >
+                  <UserPlus className="w-4 h-4 mr-1" />
+                  Create Supplier
+                </Button>
+                <Button 
+                  onClick={() => setShowMatchSupplierDialog(true)}
+                  variant="outline" 
+                  size="sm"
+                  className="whitespace-nowrap"
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  Match Supplier
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     )
   }
@@ -538,12 +752,6 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
 
       <Card className="max-w-2xl mx-auto p-6">
         <h1 className="text-2xl font-bold mb-6">New AMEX Transaction</h1>
-
-        {error && (
-          <div className="bg-red-50 text-red-500 p-4 rounded-md mb-6">
-            {error}
-          </div>
-        )}
 
         <form onSubmit={handleSave} className="space-y-4">
           <div>
@@ -817,6 +1025,10 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
           </div>
         </form>
       </Card>
+
+      {/* Dialogs */}
+      <NewSupplierDialog />
+      <MatchSupplierDialog />
     </div>
   )
 } 

@@ -39,6 +39,10 @@ interface ShopifyPreviewResponse {
   totalUnmatched: number
 }
 
+interface ShopifySyncReviewProps {
+  onSuccess?: () => Promise<void> | void;
+}
+
 function MatchedProductPair({ mongoProduct, shopifyProduct }: {
   mongoProduct: Product
   shopifyProduct: ShopifyProduct
@@ -81,9 +85,12 @@ function ProductList({ products, matches, onSearch }: {
     // Only reset if there are actual changes to matches
     setSearchTerms({})
     setActiveSearchId(null)
-    products.forEach(product => {
-      onSearch(product._id || product.id, '')
-    })
+    
+    if (products && products.length > 0) {
+      products.forEach(product => {
+        onSearch(product._id || product.id, '')
+      })
+    }
   }, [matches, products, onSearch])
 
   // Sort products to move actively searched product to top
@@ -245,7 +252,7 @@ function sortByMostSimilar(mongoProducts: Product[], shopifyProducts: ShopifyPro
   });
 }
 
-export function ShopifySyncReview() {
+export function ShopifySyncReview({ onSuccess }: ShopifySyncReviewProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [shopifyProducts, setShopifyProducts] = useState<ShopifyProduct[]>([])
@@ -362,6 +369,10 @@ export function ShopifySyncReview() {
 
       // Refresh the products list
       await fetchProducts()
+
+      if (onSuccess) {
+        await onSuccess()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sync products')
     } finally {

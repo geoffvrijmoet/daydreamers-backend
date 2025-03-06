@@ -8,7 +8,7 @@ import { ProductList } from '@/components/product-list'
 import { PurchaseInvoiceForm } from '@/components/purchase-invoice-form'
 import { SquareSyncReview } from '@/components/square-sync-review'
 import { ShopifySyncReview } from '@/components/shopify-sync-review'
-import { useRouter } from 'next/navigation'
+
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
@@ -16,7 +16,7 @@ export default function ProductsPage() {
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'list' | 'new' | 'purchase' | 'sync'>('list')
 
-  const router = useRouter()
+
 
   useEffect(() => {
     fetchProducts()

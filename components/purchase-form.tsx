@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Card } from "@/components/ui/card"
 import { Product } from '@/types'
 
 type PurchaseProduct = {
@@ -26,10 +25,11 @@ type Purchase = {
 type PurchaseFormProps = {
   onSuccess?: () => void
   onCancel?: () => void
+  isExpanded?: boolean
 }
 
-export function PurchaseForm({ onSuccess, onCancel }: PurchaseFormProps) {
-  const [isOpen, setIsOpen] = useState(false)
+export function PurchaseForm({ onSuccess, onCancel, isExpanded = false }: PurchaseFormProps) {
+  const [isOpen, setIsOpen] = useState(isExpanded)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [products, setProducts] = useState<Product[]>([])
@@ -46,6 +46,11 @@ export function PurchaseForm({ onSuccess, onCancel }: PurchaseFormProps) {
     vendor: '',
     supplierOrderNumber: ''
   })
+
+  // Effect to sync isOpen with isExpanded prop
+  useEffect(() => {
+    setIsOpen(isExpanded);
+  }, [isExpanded]);
 
   // Fetch available products
   useEffect(() => {
@@ -200,21 +205,21 @@ export function PurchaseForm({ onSuccess, onCancel }: PurchaseFormProps) {
   }
 
   return (
-    <Card className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-lg font-medium text-gray-900 dark:text-white">
-          Add Purchase
-        </h2>
-        <button
-          onClick={() => {
-            setIsOpen(false)
-            if (onCancel) onCancel()
-          }}
-          className="text-gray-400 hover:text-gray-500"
-        >
-          Cancel
-        </button>
-      </div>
+    <div>
+      {!isExpanded && (
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-medium">Add Purchase</h3>
+          <button
+            onClick={() => {
+              setIsOpen(false)
+              if (onCancel) onCancel()
+            }}
+            className="text-gray-400 hover:text-gray-500"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
@@ -392,6 +397,6 @@ export function PurchaseForm({ onSuccess, onCancel }: PurchaseFormProps) {
           </button>
         </div>
       </form>
-    </Card>
+    </div>
   )
 } 
