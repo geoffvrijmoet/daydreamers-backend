@@ -12,7 +12,7 @@ export async function GET(
     
     // First get the product to find its Square/Shopify parent ID
     const product = await db.collection<Product>('products').findOne({ 
-      _id: new ObjectId(params.id)
+      _id: new ObjectId(params.id) as unknown as string
     })
 
     if (!product) {
@@ -23,7 +23,7 @@ export async function GET(
     }
 
     // Build query to find all related variants
-    let query: any = { $or: [] }
+    const query: { $or: Array<Record<string, string>> } = { $or: [] }
     
     if (product.squareId) {
       // This is a base product, find all products that reference it as parent

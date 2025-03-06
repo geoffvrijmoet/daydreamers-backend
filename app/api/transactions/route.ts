@@ -42,7 +42,13 @@ export async function POST(request: Request) {
     
     // Ensure products have correct data types
     if (data.products && Array.isArray(data.products)) {
-      data.products = data.products.map(product => ({
+      data.products = data.products.map((product: { 
+        name: string, 
+        quantity: number | string, 
+        unitPrice: number | string, 
+        totalPrice: number | string,
+        productId?: string 
+      }) => ({
         ...product,
         quantity: Number(product.quantity),
         unitPrice: Number(product.unitPrice),

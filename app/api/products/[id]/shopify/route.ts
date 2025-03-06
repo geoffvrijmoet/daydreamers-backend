@@ -79,7 +79,7 @@ interface ProductInput {
   tags?: string[]
 }
 
-interface VariantInput {
+export interface VariantInput {
   price: string
   compareAtPrice?: string
   barcode?: string
@@ -334,7 +334,7 @@ export async function POST(
           inventoryItem: {
             tracked: true
           },
-          media: imageIds.map(id => ({ mediaId: id }))
+          media: imageIds.map((id: string) => ({ mediaId: id }))
         }
       }
 
@@ -344,6 +344,8 @@ export async function POST(
         throw new Error(response.productVariantCreate.userErrors[0].message)
       }
 
+      // Store response data for possible future use
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       shopifyProduct = {
         variants: [{ id: response.productVariantCreate.productVariant.id }]
       }
@@ -360,17 +362,24 @@ export async function POST(
             name: 'Title',
             values: variants.map((v: { title: string }) => v.title)
           }],
-          variants: variants.map((variant: any) => ({
+          variants: variants.map((variant: { 
+            title: string; 
+            price: number; 
+            compareAtPrice?: number; 
+            barcode?: string;
+            sku: string;
+            weight: number;
+            weightUnit: "GRAMS" | "KILOGRAMS" | "OUNCES" | "POUNDS";
+            requiresShipping: boolean;
+            taxable: boolean;
+          }) => ({
             options: [variant.title],
             price: variant.price.toString(),
             compareAtPrice: variant.compareAtPrice?.toString() || null,
             barcode: variant.barcode || '',
             sku: variant.sku || '',
             weight: variant.weight || 0,
-            weightUnit: (variant.weightUnit === 'lb' ? 'POUNDS' :
-                      variant.weightUnit === 'oz' ? 'OUNCES' :
-                      variant.weightUnit === 'kg' ? 'KILOGRAMS' :
-                      'GRAMS'),
+            weightUnit: variant.weightUnit || 'GRAMS',
             requiresShipping: variant.requiresShipping ?? true,
             taxable: variant.taxable ?? true,
             inventoryManagement: "SHOPIFY"

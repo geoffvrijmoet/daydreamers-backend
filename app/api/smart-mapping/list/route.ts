@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     const source = url.searchParams.get('source');
     
     const db = await getDb();
-    const query: Record<string, any> = {};
+    const query: Record<string, string | { $regex: string, $options: string }> = {};
     
     // Filter by mapping type if provided
     if (mappingType) {
