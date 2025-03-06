@@ -10,7 +10,7 @@ export async function GET(
   try {
     const { db } = await connectToDatabase()
     const product = await db.collection<Product>('products').findOne({ 
-      _id: new ObjectId(params.id)
+      _id: new ObjectId(params.id) as unknown as string
     })
 
     if (!product) {
