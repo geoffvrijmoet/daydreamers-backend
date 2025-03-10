@@ -485,51 +485,68 @@ export default function SalesPage() {
         let mongoDocument = null
         
         if (row['Transaction ID']) {
-          // Check for exact match
+          // First and most important: Check if the Transaction ID matches any excelId field in MongoDB
+          // This should catch all Excel-imported transactions regardless of payment method or transaction type
           mongoDocument = existingTransactions.transactions.find(
-            (t: TransactionRecord) => t && t.id && t.id === row['Transaction ID']
+            (t: TransactionRecord) => t && t.excelId && t.excelId === row['Transaction ID']
           )
           
-          // Check for Square transaction format difference (MongoDB: "square_ABC123", Excel: "ABC123")
-          if (!mongoDocument) {
+          if (mongoDocument) {
+            console.log(`Found exact transaction match by excelId for: ${row['Transaction ID']}`)
+            matchType = 'exact'
+            exists = true
+          } else {
+            // If no excelId match, check for exact id match
             mongoDocument = existingTransactions.transactions.find(
-              (t: TransactionRecord) => {
-                // Skip if t or t.id is undefined
-                if (!t || !t.id) return false;
-                
-                // Check for either pattern
-                return t.id === `square_${row['Transaction ID']}` || 
-                       (t.id.startsWith('square_') && t.id.substring(7) === row['Transaction ID']);
-              }
+              (t: TransactionRecord) => t && t.id && t.id === row['Transaction ID']
             )
             
-            if (mongoDocument) {
+            // Check for Square transaction format difference (MongoDB: "square_ABC123", Excel: "ABC123")
+            if (!mongoDocument) {
+              mongoDocument = existingTransactions.transactions.find(
+                (t: TransactionRecord) => {
+                  // Skip if t or t.id is undefined
+                  if (!t || !t.id) return false;
+                  
+                  // Check for either pattern
+                  return t.id === `square_${row['Transaction ID']}` || 
+                         (t.id.startsWith('square_') && t.id.substring(7) === row['Transaction ID']);
+                }
+              )
+              
+              if (mongoDocument) {
+                matchType = 'exact'
+              }
+            } else {
+              console.log(`Found exact transaction match for ID: ${row['Transaction ID']}`)
               matchType = 'exact'
             }
-          } else {
-            console.log(`Found exact transaction match for ID: ${row['Transaction ID']}`)
-            matchType = 'exact'
-          }
-          
-          if (mongoDocument) {
-            exists = true
+            
+            if (mongoDocument) {
+              exists = true
+            }
           }
         }
         
-        // Check for Venmo, Cash App, and Cash transactions by comparing Transaction ID with excelId field in MongoDB
-        if (!exists && row['Transaction ID'] && row['Payment method']) {
-          const paymentMethod = row['Payment method']?.toString().toLowerCase();
-          if (['venmo', 'cash app', 'cash'].some(method => paymentMethod.includes(method))) {
-            // Look for a MongoDB document with matching excelId
-            const excelIdMatch = existingTransactions.transactions.find(
-              (t: TransactionRecord) => t && t.excelId && t.excelId === row['Transaction ID']
-            );
-            
-            if (excelIdMatch) {
-              mongoDocument = excelIdMatch;
-              matchType = 'exact';
-              exists = true;
+        // For purchases, also check by supplier and order number
+        if (!exists && row['Supplier'] && row['Supplier order #']) {
+          const expenseMatch = existingTransactions.transactions.find(
+            (t: TransactionRecord) => {
+              if (!t || t.type !== 'purchase') return false;
+              
+              const supplierMatches = t.supplier === row.Supplier;
+              const orderNumberMatches = t.supplierOrderNumber === row['Supplier order #'];
+              
+              // Consider it a match if both supplier and order number match
+              return supplierMatches && orderNumberMatches;
             }
+          );
+          
+          if (expenseMatch) {
+            mongoDocument = expenseMatch;
+            matchType = 'exact';
+            exists = true;
+            console.log(`Found purchase match by supplier and order number for: ${row.Supplier} / ${row['Supplier order #']}`);
           }
         }
         
