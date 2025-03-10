@@ -249,6 +249,13 @@ export default function SalesPage() {
     const lengthScore = 20 * (1 - (lengthDifference / Math.max(s1.length, s2.length)));
     score += lengthScore;
     
+    // 5. Penalty for "bulk" in MongoDB product name (str1)
+    // This will de-prioritize bulk products in matches
+    if (s1.includes('bulk')) {
+      // Apply a significant penalty to bulk products
+      score *= 0.5; // Reduce score by 50%
+    }
+    
     return score;
   };
   
