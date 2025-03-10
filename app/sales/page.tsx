@@ -629,7 +629,7 @@ export default function SalesPage() {
       
       // Convert selected transactions Set to array
       const selectedIndices = Array.from(selectedTransactions.entries())
-        .filter(([, selected]) => selected)
+        .filter(([, selected]) => selected === true)
         .map(([index]) => index);
       
       // Prepare each selected transaction
@@ -669,6 +669,109 @@ export default function SalesPage() {
       setSelectedTransactions(new Map());
       setSelectedFields({});
       refreshTransactions();
+    } catch (error) {
+      console.error('Error committing transactions:', error);
+      toast.error('Failed to commit transactions');
+    } finally {
+      setIsCommitting(false);
+    }
+  };
+  
+  // Function for direct bulk commit without field selection dialog
+  const handleDirectBulkCommit = async () => {
+    try {
+      const selectedCount = getSelectedCount();
+      if (selectedCount === 0) {
+        toast.error('Please select at least one transaction to import');
+        return;
+      }
+      
+      setIsCommitting(true);
+      
+      // Convert selected transactions Set to array
+      const selectedIndices = Array.from(selectedTransactions.entries())
+        .filter(([, selected]) => selected === true)
+        .map(([index]) => index);
+      
+      // Get only the transactions that aren't already committed
+      const uncommittedIndices = selectedIndices.filter(index => 
+        !processedTransactions[index].exists
+      );
+      
+      if (uncommittedIndices.length === 0) {
+        toast.info('All selected transactions have already been committed');
+        setIsCommitting(false);
+        return;
+      }
+      
+      toast.info(`Processing ${uncommittedIndices.length} transactions...`);
+      
+      // Use default fields for all transactions
+      const defaultFields = {
+        id: true,
+        source: true,
+        date: true,
+        amount: true,
+        taxAmount: true,
+        preTaxAmount: true,
+        customer: true,
+        paymentMethod: true,
+        description: true,
+        type: true,
+        notes: true,
+        status: true,
+        tip: true, 
+        discount: true,
+        products: true,
+        excelId: true,
+        supplier: true,
+        supplierOrderNumber: true
+      };
+      
+      // Prepare each selected transaction with default fields
+      const transactionsToCommit = await Promise.all(
+        uncommittedIndices.map(async (index) => {
+          const transaction = processedTransactions[index];
+          return prepareTransactionForImport(transaction, defaultFields);
+        })
+      );
+      
+      // Save transactions to MongoDB
+      const response = await fetch('/api/transactions/batch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ transactions: transactionsToCommit }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to commit transactions');
+      }
+      
+      const result = await response.json();
+      
+      // Handle results
+      if (result.success) {
+        toast.success(`Successfully imported ${result.importedCount} transactions`);
+        
+        // Update the status of committed transactions to show they now exist in MongoDB
+        const updatedTransactions = [...processedTransactions];
+        uncommittedIndices.forEach(index => {
+          updatedTransactions[index] = {
+            ...updatedTransactions[index],
+            exists: true,
+            matchType: 'exact' // Mark as exact match since it's now in MongoDB
+          };
+        });
+        setProcessedTransactions(updatedTransactions);
+        
+        // Clear selections and refresh
+        setSelectedTransactions(new Map());
+        refreshTransactions();
+      } else {
+        toast.error(`Failed to import transactions: ${result.error}`);
+      }
     } catch (error) {
       console.error('Error committing transactions:', error);
       toast.error('Failed to commit transactions');
@@ -1003,8 +1106,8 @@ export default function SalesPage() {
               }
               
               if (matchedProduct) {
-                // For sales, use regular retail price
-                const unitPrice = Number(matchedProduct.price) || 0;
+                // For sales, use retailPrice instead of price
+                const unitPrice = Number(matchedProduct.retailPrice) || 0;
                 
                 formattedProducts.push({
                   name: matchedProduct.name,
@@ -1476,6 +1579,7 @@ export default function SalesPage() {
                     numericQuantity = typeof detailedData.qty === 'string' ? parseFloat(detailedData.qty) : Number(detailedData.qty);
                     displayQuantity = detailedData.qty ? String(detailedData.qty) : "";
                   }
+                  // eslint-disable-next-line @typescript-eslint/no-unused-vars
                   productSpend = typeof detailedData.spend === 'string' ? parseFloat(detailedData.spend as string) : Number(detailedData.spend || 0);
                   // If there's a name in the detailed data, use that
                   if (detailedData.name) {
@@ -2344,673 +2448,691 @@ export default function SalesPage() {
     // First try to find by Transaction ID
     return txRef;
   };
-  
+
+  // Function to count selected transactions
+  const getSelectedCount = (): number => {
+    return Array.from(selectedTransactions.entries())
+      .filter(([, selected]) => selected === true)
+      .length;
+  };
+
   return (
-    <div className="container mx-auto py-6 space-y-8">
+    <div className="container mx-auto py-6 space-y-8 relative">
+      {/* Sticky Bulk Commit Panel */}
+      {getSelectedCount() > 0 && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 shadow-md py-2 px-4">
+          <div className="container mx-auto flex justify-between items-center">
+            <div className="text-sm font-medium">{getSelectedCount()} transactions selected</div>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setSelectedTransactions(new Map())}
+              >
+                Clear Selection
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleDirectBulkCommit}
+                disabled={isCommitting}
+              >
+                {isCommitting ? (
+                  <div className="flex items-center justify-center">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <span>Processing...</span>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4 mr-2" />
+                    <span>Import Selected ({selectedTransactions.size})</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold">Sales Transactions</h1>
           <div className="flex items-center space-x-4">
             {/* Show loading spinner when fetching products */}
-            {isLoadingProducts && (
-              <div className="flex items-center text-gray-500">
-                <div className="animate-spin h-5 w-5 mr-2">
-                  <Loader2 className="h-5 w-5" />
-                </div>
-                <span>Loading products...</span>
-              </div>
-            )}
-            
-            <Button 
-              onClick={fetchProducts}
-              variant="outline"
-              size="sm"
-              className="text-xs"
-              disabled={isLoadingProducts}
-            >
-              Refresh MongoDB Products
-            </Button>
+            {isLoadingProducts && <Loader2 className="animate-spin h-6 w-6" />}
           </div>
         </div>
-      </div>
-      
-      {/* Debug indicator */}
-      {process.env.NODE_ENV !== 'production' && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded p-2 mb-4 text-xs">
-          <div><strong>Debug:</strong> Processed Transactions: {processedTransactions.length}</div>
-          <div>Active Tab: {activeTab}</div>
-          <div>File: {file?.name || 'No file'}</div>
-          <button 
-            className="mt-1 bg-blue-100 px-2 py-0.5 rounded text-blue-800"
-            onClick={() => {
-              console.log("Current state:", {
-                processedTransactions,
-                activeTab,
-                file
-              });
-              forceRerender();
-            }}
-          >
-            Log State & Force Rerender
-          </button>
-        </div>
-      )}
-      
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-6">
-          <TabsTrigger value="upload">Upload Transactions</TabsTrigger>
-          <TabsTrigger value="review" disabled={processedTransactions.length === 0}>
-            Review ({processedTransactions.length})
-          </TabsTrigger>
-          <TabsTrigger value="list">Transaction List</TabsTrigger>
-        </TabsList>
-        
-        <TabsContent value="upload">
-          <Card className="p-6">
-            <h2 className="text-lg font-medium mb-4">Import Transactions from Excel</h2>
-            
-            <div className="mb-6">
-              <div 
-                className={cn(
-                  "border-2 border-dashed rounded-lg p-8 text-center relative",
-                  isUploading || file ? "border-primary-300 bg-primary-50" : "border-gray-300",
-                  isUploading && "opacity-80"
-                )}
-              >
-                <input
-                  type="file"
-                  id="file-upload"
-                  className="hidden"
-                  accept=".xlsx,.xls"
-                  onChange={handleFileChange}
-                  disabled={isUploading || isProcessing}
-                />
-                <label
-                  htmlFor="file-upload"
+
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="mb-6">
+            <TabsTrigger value="upload">Upload Transactions</TabsTrigger>
+            <TabsTrigger value="review" disabled={processedTransactions.length === 0}>
+              Review ({processedTransactions.length})
+            </TabsTrigger>
+            <TabsTrigger value="list">Transaction List</TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="upload">
+            <Card className="p-6">
+              <h2 className="text-lg font-medium mb-4">Import Transactions from Excel</h2>
+              
+              <div className="mb-6">
+                <div 
                   className={cn(
-                    "cursor-pointer flex flex-col items-center justify-center",
-                    (isUploading || isProcessing) && "pointer-events-none"
+                    "border-2 border-dashed rounded-lg p-8 text-center relative",
+                    isUploading || file ? "border-primary-300 bg-primary-50" : "border-gray-300",
+                    isUploading && "opacity-80"
                   )}
                 >
-                  {isUploading ? (
-                    <>
-                      <div className="h-12 w-12 rounded-full border-4 border-primary-200 border-t-primary-600 animate-spin mb-3" />
-                      <span className="text-sm font-medium text-primary-700">
-                        Uploading file...
-                      </span>
-                      <div className="w-full mt-2 bg-gray-200 rounded-full h-2.5">
-                        <div 
-                          className="bg-primary-600 h-2.5 rounded-full transition-all duration-300 ease-out"
-                          style={{ width: `${uploadProgress}%` }}
-                        ></div>
+                  <input
+                    type="file"
+                    id="file-upload"
+                    className="hidden"
+                    accept=".xlsx,.xls"
+                    onChange={handleFileChange}
+                    disabled={isUploading || isProcessing}
+                  />
+                  <label
+                    htmlFor="file-upload"
+                    className={cn(
+                      "cursor-pointer flex flex-col items-center justify-center",
+                      (isUploading || isProcessing) && "pointer-events-none"
+                    )}
+                  >
+                    {isUploading ? (
+                      <>
+                        <div className="h-12 w-12 rounded-full border-4 border-primary-200 border-t-primary-600 animate-spin mb-3" />
+                        <span className="text-sm font-medium text-primary-700">
+                          Uploading file...
+                        </span>
+                        <div className="w-full mt-2 bg-gray-200 rounded-full h-2.5">
+                          <div 
+                            className="bg-primary-600 h-2.5 rounded-full transition-all duration-300 ease-out"
+                            style={{ width: `${uploadProgress}%` }}
+                          ></div>
+                        </div>
+                      </>
+                    ) : isProcessing ? (
+                      <>
+                        <div className="h-12 w-12 rounded-full border-4 border-primary-200 border-t-primary-600 animate-spin mb-3" />
+                        <span className="text-sm font-medium text-primary-700">
+                          Processing transactions...
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <FileSpreadsheet className={cn(
+                          "h-12 w-12 mb-3",
+                          file ? "text-primary-600" : "text-gray-400"
+                        )} />
+                        <span className="text-sm font-medium text-gray-900">
+                          {file ? file.name : "Drag & drop or click to upload Excel file"}
+                        </span>
+                        <span className="text-xs text-gray-500 mt-1">
+                          .xlsx or .xls (max 10MB)
+                        </span>
+                      </>
+                    )}
+                  </label>
+                  
+                  {file && !isUploading && (
+                    <div className="mt-4">
+                      <div className="flex items-center justify-center text-xs text-green-600">
+                        <CheckCircle className="h-4 w-4 mr-1" />
+                        File ready for processing
                       </div>
-                    </>
-                  ) : isProcessing ? (
-                    <>
-                      <div className="h-12 w-12 rounded-full border-4 border-primary-200 border-t-primary-600 animate-spin mb-3" />
-                      <span className="text-sm font-medium text-primary-700">
-                        Processing transactions...
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <FileSpreadsheet className={cn(
-                        "h-12 w-12 mb-3",
-                        file ? "text-primary-600" : "text-gray-400"
-                      )} />
-                      <span className="text-sm font-medium text-gray-900">
-                        {file ? file.name : "Drag & drop or click to upload Excel file"}
-                      </span>
-                      <span className="text-xs text-gray-500 mt-1">
-                        .xlsx or .xls (max 10MB)
-                      </span>
-                    </>
-                  )}
-                </label>
-                
-                {file && !isUploading && (
-                  <div className="mt-4">
-                    <div className="flex items-center justify-center text-xs text-green-600">
-                      <CheckCircle className="h-4 w-4 mr-1" />
-                      File ready for processing
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
-            
-            <div className="flex justify-end">
-              <Button
-                onClick={() => {
-                  if (selectedTransactions.size > 0) {
-                    // Show a different dialog for bulk commit in future implementation
-                    alert('Bulk import is currently disabled. Please use individual commit buttons instead.');
-                  } else {
-                    alert('Please select at least one transaction to import')
-                  }
-                }}
-                disabled={selectedTransactions.size === 0}
-                className="flex items-center"
-              >
-                <Upload className="h-4 w-4 mr-2" />
-                Import Selected ({selectedTransactions.size})
-              </Button>
-            </div>
-          </Card>
-        </TabsContent>
-        
-        <TabsContent value="review">
-          <Card className="p-6">
-            <div className="flex justify-between mb-6 items-center">
-              <h2 className="text-lg font-medium">Review Transactions</h2>
-              <div 
-                id="transactions-count" 
-                data-count={processedTransactions.length}
-                className="mr-4 text-sm text-gray-600"
-              >
-                {processedTransactions.length} transactions found
-              </div>
-              <div className="flex gap-2">
-                <button
-                  className="bg-blue-100 text-blue-800 px-4 py-2 rounded hover:bg-blue-200 mr-2 text-xs"
-                  onClick={() => {
-                    setSelectedTransactions(new Map(
-                      processedTransactions
-                        .filter(t => !t.exists)
-                        .map((_, index) => [index, true])
-                    ));
-                  }}
-                >
-                  Select All New
-                </button>
-                <Button
-                  variant="outline"
-                  onClick={() => setSelectedTransactions(new Map())}
-                >
-                  Clear Selection
-                </Button>
+              
+              <div className="flex justify-end">
                 <Button
                   onClick={() => {
                     if (selectedTransactions.size > 0) {
-                      // Show a different dialog for bulk commit in future implementation
-                      alert('Bulk import is currently disabled. Please use individual commit buttons instead.');
+                      setFieldSelectionOpen(true);
                     } else {
-                      alert('Please select at least one transaction to import')
+                      toast.error('Please select at least one transaction to import')
                     }
                   }}
                   disabled={selectedTransactions.size === 0}
+                  className="flex items-center"
                 >
-                  Import Selected ({selectedTransactions.size})
+                  {isCommitting ? (
+                    <div className="flex items-center justify-center">
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <span>Processing...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4 mr-2" />
+                      Import Selected ({selectedTransactions.size})
+                    </>
+                  )}
                 </Button>
               </div>
-            </div>
-            
-            <div className="border rounded-lg overflow-x-auto max-w-full">
-              <table className="min-w-full divide-y divide-gray-200 table-fixed">
-                <thead className="bg-gray-50 sticky top-0 z-10">
-                  <tr>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-50 z-20 w-24">
-                      Select
-                    </th>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky top-0 bg-gray-50 z-10 w-24">
-                      Status
-                    </th>
-                    {tableFields.map((field: TableField) => (
-                      <th key={field.id} scope="col" className={`px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky top-0 bg-gray-50 z-10 ${field.id === 'description' ? 'w-72' : 'w-40'}`}>
-                        {field.label}
-                      </th>
-                    ))}
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky right-0 bg-gray-50 z-20 w-32">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {processedTransactions.map((transaction, index) => (
-                    <tr 
-                      key={index}
-                      className={cn(
-                        "hover:bg-gray-50",
-                        transaction.exists ? "bg-gray-50" : "",
-                        selectedTransactions.has(index) ? "bg-blue-50" : ""
-                      )}
-                    >
-                      <td className="px-4 py-3 whitespace-nowrap sticky left-0 bg-white z-10">
-                        <input
-                          type="checkbox"
-                          checked={selectedTransactions.has(index)}
-                          onChange={() => toggleTransactionSelection(index)}
-                          className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                          onClick={(e) => e.stopPropagation()} // Prevent row click
-                        />
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap" onClick={() => toggleTransactionSelection(index)}>
-                        {transaction.exists ? (
-                          <div className="flex items-center">
-                            {transaction.matchType === 'exact' ? (
-                              <CheckCircle className="h-5 w-5 text-green-500 mr-1" />
-                            ) : (
-                              <AlertCircle className="h-5 w-5 text-yellow-500 mr-1" />
-                            )}
-                            <span className={cn(
-                              "text-xs px-2 py-1 rounded-full",
-                              transaction.matchType === 'exact' 
-                                ? "bg-green-100 text-green-800" 
-                                : "bg-yellow-100 text-yellow-800"
-                            )}>
-                              {transaction.matchType === 'exact' ? 'Exists' : 'Probable Match'}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center">
-                            <XCircle className="h-5 w-5 text-blue-500 mr-1" />
-                            <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800">
-                              New
-                            </span>
-                          </div>
-                        )}
-                      </td>
-                      
-                      {/* Map through the tableFields to create selectable cells */}
-                      {tableFields.map((field: TableField) => {
-                        // Determine the appropriate value for each cell based on field type
-                        let cellValue: React.ReactNode = '-';
-                        
-                        if (field.id === "id") {
-                          const transactionIdValue = transaction[field.dataField as keyof ProcessedTransaction];
-                          const shopifyIdValue = field.shopifyField ? transaction[field.shopifyField] : null;
-                          cellValue = (transaction['Payment method'] === 'Shopify' && shopifyIdValue) 
-                            ? String(shopifyIdValue) 
-                            : String(transactionIdValue || '-');
-                        } else if (field.id === "date") {
-                          cellValue = transaction.Date ? new Date(transaction.Date).toLocaleDateString() : '-';
-                        } else if (field.id === "customer") {
-                          const mainValue = transaction[field.dataField as keyof ProcessedTransaction];
-                          const altValue = field.altField ? transaction[field.altField] : null;
-                          cellValue = String(mainValue || altValue || '-');
-                        } else if (field.id === "amount") {
-                          cellValue = `$${(Number(transaction.Revenue) || 0).toFixed(2)}`;
-                        } else {
-                          cellValue = String(transaction[field.dataField as keyof ProcessedTransaction] || '-');
-                        }
-                        
-                        // Create the cell with selection capability
-                        return (
-                          <td 
-                            key={`${index}-${field.id}`}
-                            className={cn(
-                              "px-4 py-3 whitespace-nowrap text-sm",
-                              field.id === "amount" ? "font-medium" : "",
-                              field.id === "description" ? "truncate max-w-xs" : "whitespace-nowrap"
-                            )}
-                          >
-                            {cellValue}
-                          </td>
-                        );
-                      })}
-                      
-                      <td className="px-4 py-3 whitespace-nowrap sticky right-0 bg-white z-10">
-                        <Button
-                          size="sm"
-                          variant={transaction.exists ? "outline" : "default"}
-                          disabled={transaction.exists || isCommitting}
-                          onClick={(e) => {
-                            e.stopPropagation(); // Prevent row click
-                            handleCommitSingle(index);
-                          }}
-                          className="w-24"
-                        >
-                          {isCommitting ? (
-                            <div className="flex items-center justify-center w-full">
-                              <div className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin mr-2"></div>
-                              <span>Saving</span>
-                            </div>
-                          ) : transaction.exists ? (
-                            <span>Committed</span>
-                          ) : (
-                            <span>Commit</span>
-                          )}
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                  {/* Show message when there are no transactions */}
-                  {processedTransactions.length === 0 && (
-                    <tr>
-                      <td colSpan={tableFields.length + 3} className="px-4 py-6 text-center text-sm text-gray-500">
-                        No transactions to review. Please upload an Excel file with transaction data.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        </TabsContent>
-        
-        <TabsContent value="list">
-          <TransactionsList />
-        </TabsContent>
-      </Tabs>
-      
-      {/* Modified Dialog for field preview with product matching */}
-      <Dialog open={fieldSelectionOpen} onOpenChange={setFieldSelectionOpen}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle>Confirm Selected Fields</DialogTitle>
-            <DialogDescription>
-              {transactionToCommit !== null ? (
-                <>
-                  The following fields will be saved to MongoDB. 
-                  {(() => {
-                    if (!transactionToCommit) return true;
-                    const transactionIndex = processedTransactions.findIndex(t => 
-                      t['Transaction ID'] === transactionToCommit['Transaction ID']
-                    );
-                    return selectedCells.filter(cell => cell.rowIndex === transactionIndex).length === 0;
-                  })() && " No fields were explicitly selected, so defaults are shown."}
-                </>
-              ) : (
-                "Choose which fields you want to include when committing transactions to MongoDB."
-              )}
-            </DialogDescription>
-          </DialogHeader>
+            </Card>
+          </TabsContent>
           
-          <div className="py-4 overflow-y-auto">
-            <div className="rounded-md border">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50 sticky top-0 z-10">
-                  <tr>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/3">
-                      Field
-                    </th>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/3">
-                      Value
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {getFieldsPreview(transactionToCommit !== null ? getTransactionByRef(transactionToCommit) : null).map((field: { id: string; label: string; value: React.ReactNode; originalData?: string }) => (
-                    <tr key={field.id}>
-                      <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">{field.label}</td>
-                      <td className="px-4 py-2 text-sm break-words" style={{ maxWidth: '20rem', wordBreak: 'break-word' }}>
-                        {field.id === "description" && field.originalData ? (
-                          <div className="space-y-2">
-                            {(() => {
-                              try {
-                                // Try to parse the Products JSON
-                                const productsObj = parseProductsJson(field.originalData as string);
-                                
-                                if (Object.keys(productsObj).length === 0) {
-                                  return <div className="text-gray-500">No product data found or invalid format</div>;
-                                }
-                                
-                                return Object.entries(productsObj).map(([productName, quantity], idx) => {
-                                  // Add explicit type annotations
-                                  let productNameStr = productName;
-                                  let quantityNum = Number(quantity);
-                                  let productSpend = 0;
-                                  let displayQuantity = "";
+          <TabsContent value="review">
+            <Card className="p-6">
+              <div className="flex justify-between mb-6 items-center">
+                <h2 className="text-lg font-medium">Review Transactions</h2>
+                <div 
+                  id="transactions-count" 
+                  data-count={processedTransactions.length}
+                  className="mr-4 text-sm text-gray-600"
+                >
+                  {processedTransactions.length} transactions found
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    className="bg-blue-100 text-blue-800 px-4 py-2 rounded hover:bg-blue-200 mr-2 text-xs"
+                    onClick={() => {
+                      const newMap = new Map();
+                      processedTransactions
+                        .forEach((t, index) => {
+                          if (!t.exists) {
+                            newMap.set(index, true);
+                          }
+                        });
+                      setSelectedTransactions(newMap);
+                    }}
+                  >
+                    Select All New
+                  </button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setSelectedTransactions(new Map())}
+                  >
+                    Clear Selection
+                  </Button>
+                  <Button
+                    onClick={handleDirectBulkCommit}
+                    disabled={selectedTransactions.size === 0 || isCommitting}
+                    className="flex items-center"
+                  >
+                    {isCommitting ? (
+                      <div className="flex items-center justify-center">
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        <span>Processing...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4 mr-2" />
+                        Import Selected ({selectedTransactions.size})
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="border rounded-lg overflow-x-auto max-w-full">
+                <table className="min-w-full divide-y divide-gray-200 table-fixed">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
+                    <tr>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-50 z-20 w-24">
+                        Select
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky top-0 bg-gray-50 z-10 w-24">
+                        Status
+                      </th>
+                      {tableFields.map((field: TableField) => (
+                        <th key={field.id} scope="col" className={`px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky top-0 bg-gray-50 z-10 ${field.id === 'description' ? 'w-72' : 'w-40'}`}>
+                          {field.label}
+                        </th>
+                      ))}
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky right-0 bg-gray-50 z-20 w-32">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {processedTransactions.map((transaction, index) => (
+                      <tr 
+                        key={index}
+                        className={cn(
+                          "hover:bg-gray-50",
+                          transaction.exists ? "bg-gray-50" : "",
+                          selectedTransactions.get(index) === true ? "bg-blue-50" : ""
+                        )}
+                      >
+                        <td className="px-4 py-3 whitespace-nowrap sticky left-0 bg-white z-10">
+                          <input
+                            type="checkbox"
+                            checked={selectedTransactions.get(index) === true}
+                            onChange={() => toggleTransactionSelection(index)}
+                            className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                            onClick={(e) => e.stopPropagation()} // Prevent row click
+                          />
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap" onClick={() => toggleTransactionSelection(index)}>
+                          {transaction.exists ? (
+                            <div className="flex items-center">
+                              {transaction.matchType === 'exact' ? (
+                                <CheckCircle className="h-5 w-5 text-green-500 mr-1" />
+                              ) : (
+                                <AlertCircle className="h-5 w-5 text-yellow-500 mr-1" />
+                              )}
+                              <span className={cn(
+                                "text-xs px-2 py-1 rounded-full",
+                                transaction.matchType === 'exact' 
+                                  ? "bg-green-100 text-green-800" 
+                                  : "bg-yellow-100 text-yellow-800"
+                              )}>
+                                {transaction.matchType === 'exact' ? 'Exists' : 'Probable Match'}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center">
+                              <XCircle className="h-5 w-5 text-blue-500 mr-1" />
+                              <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800">
+                                New
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                        
+                        {/* Map through the tableFields to create selectable cells */}
+                        {tableFields.map((field: TableField) => {
+                          // Determine the appropriate value for each cell based on field type
+                          let cellValue: React.ReactNode = '-';
+                          
+                          if (field.id === "id") {
+                            const transactionIdValue = transaction[field.dataField as keyof ProcessedTransaction];
+                            const shopifyIdValue = field.shopifyField ? transaction[field.shopifyField] : null;
+                            cellValue = (transaction['Payment method'] === 'Shopify' && shopifyIdValue) 
+                              ? String(shopifyIdValue) 
+                              : String(transactionIdValue || '-');
+                          } else if (field.id === "date") {
+                            cellValue = transaction.Date ? new Date(transaction.Date).toLocaleDateString() : '-';
+                          } else if (field.id === "customer") {
+                            const mainValue = transaction[field.dataField as keyof ProcessedTransaction];
+                            const altValue = field.altField ? transaction[field.altField] : null;
+                            cellValue = String(mainValue || altValue || '-');
+                          } else if (field.id === "amount") {
+                            cellValue = `$${(Number(transaction.Revenue) || 0).toFixed(2)}`;
+                          } else {
+                            cellValue = String(transaction[field.dataField as keyof ProcessedTransaction] || '-');
+                          }
+                          
+                          // Create the cell with selection capability
+                          return (
+                            <td 
+                              key={`${index}-${field.id}`}
+                              className={cn(
+                                "px-4 py-3 whitespace-nowrap text-sm",
+                                field.id === "amount" ? "font-medium" : "",
+                                field.id === "description" ? "truncate max-w-xs" : "whitespace-nowrap"
+                              )}
+                            >
+                              {cellValue}
+                            </td>
+                          );
+                        })}
+                        
+                        <td className="px-4 py-3 whitespace-nowrap sticky right-0 bg-white z-10">
+                          <Button
+                            size="sm"
+                            variant={transaction.exists ? "outline" : "default"}
+                            disabled={transaction.exists || isCommitting}
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent row click
+                              handleCommitSingle(index);
+                            }}
+                            className="w-24"
+                          >
+                            {isCommitting ? (
+                              <div className="flex items-center justify-center w-full">
+                                <div className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin mr-2"></div>
+                                <span>Saving</span>
+                              </div>
+                            ) : transaction.exists ? (
+                              <span>Committed</span>
+                            ) : (
+                              <span>Commit</span>
+                            )}
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                    {/* Show message when there are no transactions */}
+                    {processedTransactions.length === 0 && (
+                      <tr>
+                        <td colSpan={tableFields.length + 3} className="px-4 py-6 text-center text-sm text-gray-500">
+                          No transactions to review. Please upload an Excel file with transaction data.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </TabsContent>
+          
+          <TabsContent value="list">
+            <TransactionsList />
+          </TabsContent>
+        </Tabs>
+        
+        {/* Modified Dialog for field preview with product matching */}
+        <Dialog open={fieldSelectionOpen} onOpenChange={setFieldSelectionOpen}>
+          <DialogContent className="max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle>Confirm Selected Fields</DialogTitle>
+              <DialogDescription>
+                {transactionToCommit !== null ? (
+                  <>
+                    The following fields will be saved to MongoDB. 
+                    {(() => {
+                      if (!transactionToCommit) return true;
+                      const transactionIndex = processedTransactions.findIndex(t => 
+                        t['Transaction ID'] === transactionToCommit['Transaction ID']
+                      );
+                      return selectedCells.filter(cell => cell.rowIndex === transactionIndex).length === 0;
+                    })() && " No fields were explicitly selected, so defaults are shown."}
+                  </>
+                ) : (
+                  "Choose which fields you want to include when committing transactions to MongoDB."
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="py-4 overflow-y-auto">
+              <div className="rounded-md border">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
+                    <tr>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/3">
+                        Field
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/3">
+                        Value
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {getFieldsPreview(transactionToCommit !== null ? getTransactionByRef(transactionToCommit) : null).map((field: { id: string; label: string; value: React.ReactNode; originalData?: string }) => (
+                      <tr key={field.id}>
+                        <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">{field.label}</td>
+                        <td className="px-4 py-2 text-sm break-words" style={{ maxWidth: '20rem', wordBreak: 'break-word' }}>
+                          {field.id === "description" && field.originalData ? (
+                            <div className="space-y-2">
+                              {(() => {
+                                try {
+                                  // Try to parse the Products JSON
+                                  const productsObj = parseProductsJson(field.originalData as string);
                                   
-                                  // Handle both simple and detailed formats for products
-                                  if (typeof quantity === 'object' && quantity !== null && ('count' in quantity || 'qty' in quantity)) {
-                                    // For detailed format with name, count/qty, spend
-                                    const detailedData = quantity as {name?: string; count?: string | number; qty?: string | number; spend?: string | number};
+                                  if (Object.keys(productsObj).length === 0) {
+                                    return <div className="text-gray-500">No product data found or invalid format</div>;
+                                  }
+                                  
+                                  return Object.entries(productsObj).map(([productName, quantity], idx) => {
+                                    // Add explicit type annotations
+                                    let productNameStr = productName;
+                                    let quantityNum = Number(quantity);
+                                    let productSpend = 0;
+                                    let displayQuantity = "";
                                     
-                                    // Use count if available, otherwise try qty as fallback
-                                    if ('count' in detailedData) {
-                                      quantityNum = typeof detailedData.count === 'string' ? parseFloat(detailedData.count) : Number(detailedData.count);
-                                      displayQuantity = detailedData.count ? String(detailedData.count) : "";
-                                    } else if ('qty' in detailedData) {
-                                      quantityNum = typeof detailedData.qty === 'string' ? parseFloat(detailedData.qty) : Number(detailedData.qty);
-                                      displayQuantity = detailedData.qty ? String(detailedData.qty) : "";
-                                    }
-                                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                                    productSpend = typeof detailedData.spend === 'string' ? parseFloat(detailedData.spend as string) : Number(detailedData.spend || 0);
-                                    // If there's a name in the detailed data, use that
-                                    if (detailedData.name) {
-                                      productNameStr = detailedData.name;
-                                    }
-                                  } else {
-                                    // For simple format with just quantities
-                                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                                    quantityNum = typeof quantity === 'string' ? parseFloat(quantity) : Number(quantity);
-                                    displayQuantity = typeof quantity === 'string' ? quantity : String(quantity || '');
-                                  }
-                                  
-                                  // Check if we have a manual match or try to find an automatic match
-                                  const manualMatchId = manualMatches[productNameStr];
-                                  let matchedProduct: MongoProduct | null = null;
-                                  
-                                  // Find potential matches for the product
-                                  const potentialMatches = mongoProducts
-                                    .map(p => ({
-                                      product: p,
-                                      score: calculateSimilarityScore(p.name, productNameStr)
-                                    }))
-                                    .filter(item => item.score > 20) // Only consider products with a reasonable match score
-                                    .sort((a, b) => b.score - a.score); // Sort by score (highest first)
-                                  
-                                  if (manualMatchId && manualMatchId !== 'override') {
-                                    // Find the product in MongoDB products
-                                    matchedProduct = mongoProducts.find(p => p._id === manualMatchId || p.id === manualMatchId) ?? null;
-                                  } else if (manualMatchId !== 'override' && potentialMatches.length > 0 && potentialMatches[0].score >= 40) {
-                                    // If we have a good candidate (score >= 40), select it initially
-                                    matchedProduct = potentialMatches[0].product;
-                                  }
-                                  
-                                  return (
-                                    <div key={idx} className="p-3 border rounded-md bg-gray-50">
-                                      <div className="flex flex-col mb-2">
-                                        <span className="font-medium text-gray-700">
-                                          Excel Product: {productName}
-                                          {displayQuantity && <span className="text-gray-600 ml-1">(x{displayQuantity})</span>}
-                                        </span>
-                                      </div>
+                                    // Handle both simple and detailed formats for products
+                                    if (typeof quantity === 'object' && quantity !== null && ('count' in quantity || 'qty' in quantity)) {
+                                      // For detailed format with name, count/qty, spend
+                                      const detailedData = quantity as {name?: string; count?: string | number; qty?: string | number; spend?: string | number};
                                       
-                                      {/* Show currently matched product */}
-                                      {matchedProduct && (
-                                        <div className="p-2 bg-emerald-50 rounded mb-2 border border-emerald-200">
-                                          <div className="flex justify-between items-center">
-                                            <div className="font-medium text-gray-800">
-                                              <span className="text-emerald-600">✓</span> {matchedProduct.name}
-                                            </div>
-                                            
-                                            {/* Display price info for the product */}
-                                            <div className="text-sm flex items-center space-x-2">
-                                              <span className="text-gray-600">
-                                                Unit: {formatCurrency(matchedProduct?.price ? Number(matchedProduct.price) : 0)}
-                                              </span>
-                                              <span className="text-gray-600">
-                                                Total: {formatCurrency(Number(matchedProduct?.price || 0) * Number(displayQuantity || 0))}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      )}
-                                      
-                                      {/* Product matching controls */}
-                                      <div className="flex gap-2 justify-between items-center mb-2">
-                                        <div className="flex-1">
-                                          <input
-                                            type="text"
-                                            placeholder="Search for products..."
-                                            className="input input-sm w-full border rounded p-1 text-sm"
-                                            onChange={(e) => handleProductSearch(e.target.value)}
-                                          />
+                                      // Use count if available, otherwise try qty as fallback
+                                      if ('count' in detailedData) {
+                                        quantityNum = typeof detailedData.count === 'string' ? parseFloat(detailedData.count) : Number(detailedData.count);
+                                        displayQuantity = detailedData.count ? String(detailedData.count) : "";
+                                      } else if ('qty' in detailedData) {
+                                        quantityNum = typeof detailedData.qty === 'string' ? parseFloat(detailedData.qty) : Number(detailedData.qty);
+                                        displayQuantity = detailedData.qty ? String(detailedData.qty) : "";
+                                      }
+                                      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                                      productSpend = typeof detailedData.spend === 'string' ? parseFloat(detailedData.spend as string) : Number(detailedData.spend || 0);
+                                      // If there's a name in the detailed data, use that
+                                      if (detailedData.name) {
+                                        productNameStr = detailedData.name;
+                                      }
+                                    } else {
+                                      // For simple format with just quantities
+                                      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                                      quantityNum = typeof quantity === 'string' ? parseFloat(quantity) : Number(quantity);
+                                      displayQuantity = typeof quantity === 'string' ? quantity : String(quantity || '');
+                                    }
+                                    
+                                    // Check if we have a manual match or try to find an automatic match
+                                    const manualMatchId = manualMatches[productNameStr];
+                                    let matchedProduct: MongoProduct | null = null;
+                                    
+                                    // Find potential matches for the product
+                                    const potentialMatches = mongoProducts
+                                      .map(p => ({
+                                        product: p,
+                                        score: calculateSimilarityScore(p.name, productNameStr)
+                                      }))
+                                      .filter(item => item.score > 20) // Only consider products with a reasonable match score
+                                      .sort((a, b) => b.score - a.score); // Sort by score (highest first)
+                                    
+                                    if (manualMatchId && manualMatchId !== 'override') {
+                                      // Find the product in MongoDB products
+                                      matchedProduct = mongoProducts.find(p => p._id === manualMatchId || p.id === manualMatchId) ?? null;
+                                    } else if (manualMatchId !== 'override' && potentialMatches.length > 0 && potentialMatches[0].score >= 40) {
+                                      // If we have a good candidate (score >= 40), select it initially
+                                      matchedProduct = potentialMatches[0].product;
+                                    }
+                                    
+                                    return (
+                                      <div key={idx} className="p-3 border rounded-md bg-gray-50">
+                                        <div className="flex flex-col mb-2">
+                                          <span className="font-medium text-gray-700">
+                                            Excel Product: {productName}
+                                            {displayQuantity && <span className="text-gray-600 ml-1">(x{displayQuantity})</span>}
+                                          </span>
                                         </div>
                                         
-                                        <button
-                                          className="px-2 py-1 bg-gray-200 rounded text-xs"
-                                          onClick={() => setProductMatch(productName, 'override')}
-                                        >
-                                          No Match
-                                        </button>
-                                      </div>
-                                      
-                                      {/* Product search results */}
-                                      <div className="mb-2">
-                                        {isLoadingProducts ? (
-                                          <div className="text-center py-1">
-                                            <span className="text-xs text-gray-500">Loading...</span>
+                                        {/* Show currently matched product */}
+                                        {matchedProduct && (
+                                          <div className="p-2 bg-emerald-50 rounded mb-2 border border-emerald-200">
+                                            <div className="flex justify-between items-center">
+                                              <div className="font-medium text-gray-800">
+                                                <span className="text-emerald-600">✓</span> {matchedProduct.name}
+                                              </div>
+                                              
+                                              {/* Display price info for the product */}
+                                              <div className="text-sm flex items-center space-x-2">
+                                                <span className="text-gray-600">
+                                                  Unit: {formatCurrency(matchedProduct?.price ? Number(matchedProduct.price) : 0)}
+                                                </span>
+                                                <span className="text-gray-600">
+                                                  Total: {formatCurrency(Number(matchedProduct?.price || 0) * Number(displayQuantity || 0))}
+                                                </span>
+                                              </div>
+                                            </div>
                                           </div>
-                                        ) : (
-                                          <div className="flex flex-wrap gap-1">
-                                            {suggestedProducts.slice(0, 5).map((product) => (
-                                              <button
-                                                key={product._id}
-                                                className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded max-w-[150px] truncate"
-                                                onClick={() => setProductMatch(productName, product._id)}
-                                              >
-                                                {product.name}
-                                              </button>
-                                            ))}
+                                        )}
+                                        
+                                        {/* Product matching controls */}
+                                        <div className="flex gap-2 justify-between items-center mb-2">
+                                          <div className="flex-1">
+                                            <input
+                                              type="text"
+                                              placeholder="Search for products..."
+                                              className="input input-sm w-full border rounded p-1 text-sm"
+                                              onChange={(e) => handleProductSearch(e.target.value)}
+                                            />
+                                          </div>
+                                          
+                                          <button
+                                            className="px-2 py-1 bg-gray-200 rounded text-xs"
+                                            onClick={() => setProductMatch(productName, 'override')}
+                                          >
+                                            No Match
+                                          </button>
+                                        </div>
+                                        
+                                        {/* Product search results */}
+                                        <div className="mb-2">
+                                          {isLoadingProducts ? (
+                                            <div className="text-center py-1">
+                                              <span className="text-xs text-gray-500">Loading...</span>
+                                            </div>
+                                          ) : (
+                                            <div className="flex flex-wrap gap-1">
+                                              {suggestedProducts.slice(0, 5).map((product) => (
+                                                <button
+                                                  key={product._id}
+                                                  className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded max-w-[150px] truncate"
+                                                  onClick={() => setProductMatch(productName, product._id)}
+                                                >
+                                                  {product.name}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        {/* Alternative matches with previous styling */}
+                                        {potentialMatches.length > 0 && (
+                                          <div className="mt-2">
+                                            <div className="text-sm font-medium text-gray-700 mb-1">
+                                              {matchedProduct ? 'Alternative Matches:' : 'Potential Matches:'}
+                                            </div>
+                                            <div className="space-y-1">
+                                              {potentialMatches.map((match, mIdx) => (
+                                                <div 
+                                                  key={mIdx}
+                                                  className={`
+                                                    p-1.5 border rounded flex justify-between items-center cursor-pointer hover:bg-gray-100
+                                                    ${match.product._id === manualMatchId ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200'}
+                                                  `}
+                                                  onClick={() => setProductMatch(productName, match.product._id)}
+                                                >
+                                                  <div className="font-medium text-gray-800">{match.product.name}</div>
+                                                  <div className="flex items-center">
+                                                    <span className="text-xs bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">
+                                                      {match.score.toFixed(0)}%
+                                                    </span>
+                                                    <button
+                                                      className="ml-2 text-xs bg-blue-500 text-white px-2 py-0.5 rounded hover:bg-blue-600"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setProductMatch(productName, match.product._id);
+                                                      }}
+                                                    >
+                                                      Choose
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              ))}
+                                            </div>
                                           </div>
                                         )}
                                       </div>
-                                      
-                                      {/* Alternative matches with previous styling */}
-                                      {potentialMatches.length > 0 && (
-                                        <div className="mt-2">
-                                          <div className="text-sm font-medium text-gray-700 mb-1">
-                                            {matchedProduct ? 'Alternative Matches:' : 'Potential Matches:'}
-                                          </div>
-                                          <div className="space-y-1">
-                                            {potentialMatches.map((match, mIdx) => (
-                                              <div 
-                                                key={mIdx}
-                                                className={`
-                                                  p-1.5 border rounded flex justify-between items-center cursor-pointer hover:bg-gray-100
-                                                  ${match.product._id === manualMatchId ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200'}
-                                                `}
-                                                onClick={() => setProductMatch(productName, match.product._id)}
-                                              >
-                                                <div className="font-medium text-gray-800">{match.product.name}</div>
-                                                <div className="flex items-center">
-                                                  <span className="text-xs bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">
-                                                    {match.score.toFixed(0)}%
-                                                  </span>
-                                                  <button
-                                                    className="ml-2 text-xs bg-blue-500 text-white px-2 py-0.5 rounded hover:bg-blue-600"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setProductMatch(productName, match.product._id);
-                                                    }}
-                                                  >
-                                                    Choose
-                                                  </button>
-                                                </div>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                });
-                              } catch (e) {
-                                console.error("Error processing products data:", e);
-                                return <div className="text-red-500">Error processing product data</div>;
-                              }
-                            })()}
-                          </div>
-                        ) : (
-                          field.value
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {getFieldsPreview(transactionToCommit !== null ? getTransactionByRef(transactionToCommit) : null).length === 0 && (
-                    <tr>
-                      <td colSpan={2} className="px-4 py-4 text-center text-sm text-gray-500">
-                        No fields selected. Please select at least one field.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                                    );
+                                  });
+                                } catch (e) {
+                                  console.error("Error processing products data:", e);
+                                  return <div className="text-red-500">Error processing product data</div>;
+                                }
+                              })()}
+                            </div>
+                          ) : (
+                            field.value
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {getFieldsPreview(transactionToCommit !== null ? getTransactionByRef(transactionToCommit) : null).length === 0 && (
+                      <tr>
+                        <td colSpan={2} className="px-4 py-4 text-center text-sm text-gray-500">
+                          No fields selected. Please select at least one field.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              
+              <div className="mt-2 text-xs text-gray-500">
+                <p>Tip: Click on cells in the table to add or remove fields from this selection.</p>
+              </div>
             </div>
             
-            <div className="mt-2 text-xs text-gray-500">
-              <p>Tip: Click on cells in the table to add or remove fields from this selection.</p>
-            </div>
-          </div>
-          
-          <DialogFooter className="mt-2">
-            <Button variant="outline" onClick={() => setFieldSelectionOpen(false)}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleCommitWithSelectedFields}
-              className="ml-2"
-              disabled={getFieldsPreview(transactionToCommit !== null ? getTransactionByRef(transactionToCommit) : null).length === 0}
-            >
-              Commit to MongoDB
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      
-      {/* Commit Dialog */}
-      {showCommitDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">
-                {transactionToSubmit && 'type' in transactionToSubmit && transactionToSubmit.type === 'purchase' ? 
-                  'Commit Expense to MongoDB' : 
-                  'Commit Sale to MongoDB'}
-              </h2>
-              <button 
-                onClick={() => setShowCommitDialog(false)}
-                className="text-gray-500 hover:text-gray-700 transition-colors"
-                aria-label="Close dialog"
+            <DialogFooter className="mt-2">
+              <Button variant="outline" onClick={() => setFieldSelectionOpen(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleCommitWithSelectedFields}
+                className="ml-2"
+                disabled={getFieldsPreview(transactionToCommit !== null ? getTransactionByRef(transactionToCommit) : null).length === 0}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            
-            {transactionToCommit !== null && (
-              <div key={`transaction-preview-${forceUpdate}`}>
-                <div className="border border-gray-200 rounded-lg p-4 mb-4">
-                  <h3 className="text-sm font-medium text-gray-500 uppercase mb-2">
-                    Transaction Preview
-                  </h3>
-                  {/* Display fields preview with labels */}
-                  <div className="space-y-2">
-                    {/* Always regenerate the fields preview to ensure it has the latest data */}
-                    {transactionToCommit !== null && 
-                      getFieldsPreview(getTransactionByRef(transactionToCommit)).map((field) => (
-                        <div key={`${field.id}-${forceUpdate}`} className="flex flex-col">
-                          <span className="text-sm font-medium text-gray-700">{field.label}:</span>
-                          <div className="ml-2">{field.value}</div>
-                        </div>
-                      ))
-                    }
+                Commit to MongoDB
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        
+        {/* Commit Dialog */}
+        {showCommitDialog && (
+          <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">
+                  {transactionToSubmit && 'type' in transactionToSubmit && transactionToSubmit.type === 'purchase' ? 
+                    'Commit Expense to MongoDB' : 
+                    'Commit Sale to MongoDB'}
+                </h2>
+                <button 
+                  onClick={() => setShowCommitDialog(false)}
+                  className="text-gray-500 hover:text-gray-700 transition-colors"
+                  aria-label="Close dialog"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              {transactionToCommit !== null && (
+                <div key={`transaction-preview-${forceUpdate}`}>
+                  <div className="border border-gray-200 rounded-lg p-4 mb-4">
+                    <h3 className="text-sm font-medium text-gray-500 uppercase mb-2">
+                      Transaction Preview
+                    </h3>
+                    {/* Display fields preview with labels */}
+                    <div className="space-y-2">
+                      {/* Always regenerate the fields preview to ensure it has the latest data */}
+                      {transactionToCommit !== null && 
+                        getFieldsPreview(getTransactionByRef(transactionToCommit)).map((field) => (
+                          <div key={`${field.id}-${forceUpdate}`} className="flex flex-col">
+                            <span className="text-sm font-medium text-gray-700">{field.label}:</span>
+                            <div className="ml-2">{field.value}</div>
+                          </div>
+                        ))
+                      }
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-end space-x-2">
+                    <button
+                      onClick={() => setShowCommitDialog(false)}
+                      className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={finalizeTransactionCommit}
+                      className="px-4 py-2 bg-emerald-600 rounded-md text-sm font-medium text-white hover:bg-emerald-700"
+                    >
+                      Commit to MongoDB
+                    </button>
                   </div>
                 </div>
-                
-                <div className="flex justify-end space-x-2">
-                  <button
-                    onClick={() => setShowCommitDialog(false)}
-                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={finalizeTransactionCommit}
-                    className="px-4 py-2 bg-emerald-600 rounded-md text-sm font-medium text-white hover:bg-emerald-700"
-                  >
-                    Commit to MongoDB
-                  </button>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 } 
