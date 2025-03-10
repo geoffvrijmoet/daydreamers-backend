@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { TransactionsList } from "@/components/transactions-list"
 import { useTransactions } from "@/lib/hooks/useTransactions"
-import { Upload, FileSpreadsheet, CheckCircle, XCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { Upload, FileSpreadsheet, CheckCircle, XCircle, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { cn } from '@/lib/utils'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -19,6 +19,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table"
 
 // Type for our internal transaction representation
 interface InternalTransaction {
@@ -192,6 +195,11 @@ export default function SalesPage() {
   const [showCommitDialog, setShowCommitDialog] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+  
+  // Product validation tracking for bulk commit
+  const [transactionsWithUnmatchedProducts, setTransactionsWithUnmatchedProducts] = useState<Map<number, string[]>>(new Map());
+  const [showProductMatchDialog, setShowProductMatchDialog] = useState(false);
+  const [currentUnmatchedProduct, setCurrentUnmatchedProduct] = useState<{transactionIndex: number; productName: string} | null>(null);
   
   // List of selectable fields in the table with their display mapping
   const tableFields: TableField[] = [
@@ -586,9 +594,54 @@ export default function SalesPage() {
   
   const toggleTransactionSelection = (index: number) => {
     const newSelection = new Map(selectedTransactions)
-    newSelection.set(index, !newSelection.get(index))
+    const isSelected = !newSelection.get(index)
+    newSelection.set(index, isSelected)
     setSelectedTransactions(newSelection)
+    
+    // If the transaction is being selected (not deselected), check for unmatched products
+    if (isSelected && index >= 0 && index < processedTransactions.length) {
+      validateTransactionProducts(index);
+    } else if (!isSelected) {
+      // If deselected, remove from unmatched products tracking
+      const updatedUnmatched = new Map(transactionsWithUnmatchedProducts);
+      updatedUnmatched.delete(index);
+      setTransactionsWithUnmatchedProducts(updatedUnmatched);
+    }
   }
+  
+  // Function to validate products in a transaction and track unmatched ones
+  const validateTransactionProducts = async (index: number) => {
+    const transaction = processedTransactions[index];
+    if (!transaction) return;
+    
+    // Skip validation for transactions that already exist in MongoDB
+    if (transaction.exists) return;
+    
+    // Make sure products are loaded first
+    if (mongoProducts.length === 0) {
+      await fetchProducts();
+    }
+    
+    // Check if the transaction has products that need matching
+    const unmatchedProducts = await findUnmatchedProducts(transaction);
+    
+    if (unmatchedProducts.length > 0) {
+      // Update the map with unmatched products for this transaction
+      const updatedUnmatched = new Map(transactionsWithUnmatchedProducts);
+      updatedUnmatched.set(index, unmatchedProducts);
+      setTransactionsWithUnmatchedProducts(updatedUnmatched);
+      
+      // Show notification about unmatched products
+      toast.warning(`Transaction has ${unmatchedProducts.length} unmatched products that may need attention`);
+    } else {
+      // No unmatched products, remove from tracking if present
+      if (transactionsWithUnmatchedProducts.has(index)) {
+        const updatedUnmatched = new Map(transactionsWithUnmatchedProducts);
+        updatedUnmatched.delete(index);
+        setTransactionsWithUnmatchedProducts(updatedUnmatched);
+      }
+    }
+  };
   
   // Function to show the commit preview dialog
   const showCommitPreview = async (rowIndex: number) => {
@@ -683,6 +736,22 @@ export default function SalesPage() {
       const selectedCount = getSelectedCount();
       if (selectedCount === 0) {
         toast.error('Please select at least one transaction to import');
+        return;
+      }
+      
+      // Check if there are any unmatched products
+      if (transactionsWithUnmatchedProducts.size > 0) {
+        // Count total unmatched products
+        let totalUnmatched = 0;
+        transactionsWithUnmatchedProducts.forEach(products => {
+          totalUnmatched += products.length;
+        });
+        
+        // Show a warning and offer to match them
+        toast.warning(`${totalUnmatched} products need matching before committing. Click the "Match Products" button in the toolbar.`);
+        
+        // Start the product matching flow
+        processNextUnmatchedProduct();
         return;
       }
       
@@ -864,10 +933,18 @@ export default function SalesPage() {
         throw new Error('Failed to search products');
       }
       const data = await response.json();
-      setSuggestedProducts(data);
+      
+      // The API returns { success: true, products: [...] } structure
+      if (data.success && Array.isArray(data.products)) {
+        setSuggestedProducts(data.products);
+      } else {
+        setSuggestedProducts([]);
+        console.error('Unexpected response format:', data);
+      }
     } catch (error) {
       console.error('Error searching products:', error);
       toast.error('Failed to search products');
+      setSuggestedProducts([]);
     } finally {
       setIsLoadingProducts(false);
     }
@@ -2456,6 +2533,143 @@ export default function SalesPage() {
       .length;
   };
 
+  // Helper function to find unmatched products in a transaction
+  const findUnmatchedProducts = async (transaction: ProcessedTransaction): Promise<string[]> => {
+    const unmatchedProducts: string[] = [];
+    
+    try {
+      // For expenses, check both Products and Itemized wholesale spend
+      const isExpense = isExpenseTransaction(transaction);
+      
+      // First try to get products from Itemized wholesale spend for expenses
+      let productsObj = {};
+      if (isExpense && transaction['Itemized wholesale spend']) {
+        productsObj = parseProductsJson(transaction['Itemized wholesale spend']);
+      }
+      
+      // If no products found in Itemized wholesale spend or not an expense, try regular Products
+      if (Object.keys(productsObj).length === 0 && transaction.Products) {
+        productsObj = parseProductsJson(transaction.Products);
+      }
+      
+      // If we have products, check each one for a match
+      if (Object.keys(productsObj).length > 0) {
+        for (const [productKey, productValue] of Object.entries(productsObj)) {
+          // Get product name based on format
+          let productName = productKey;
+          
+          // Check if this is detailed format with name field
+          if (typeof productValue === 'object' && productValue !== null && 'name' in productValue) {
+            productName = (productValue as { name: string }).name || productKey;
+          }
+          
+          // First check for manual match
+          const manualMatchId = manualMatches[productName];
+          
+          // If we don't have a manual match, try to find a match
+          if (!manualMatchId) {
+            // Try exact match first
+            const exactMatch = mongoProducts.find(p => 
+              p.name.toLowerCase().trim() === productName.toLowerCase().trim()
+            );
+            
+            // If no exact match, try similarity scoring
+            if (!exactMatch) {
+              // Calculate similarity with all products
+              const scoredMatches = mongoProducts
+                .map(p => {
+                  const score = calculateSimilarityScore(p.name, productName);
+                  return { product: p, score };
+                })
+                .filter(item => item.score > 20)
+                .sort((a, b) => b.score - a.score);
+              
+              // If no good match (score < 40), add to unmatched list
+              if (scoredMatches.length === 0 || scoredMatches[0].score < 40) {
+                unmatchedProducts.push(productName);
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error checking for unmatched products:', error);
+    }
+    
+    return unmatchedProducts;
+  };
+
+  // Function to handle the product matching workflow
+  const processNextUnmatchedProduct = () => {
+    // Reset search term and results when opening a new product
+    setProductSearchTerm('');
+    setSuggestedProducts([]);
+    
+    // Find the first transaction with unmatched products
+    for (const [index, unmatchedProducts] of Array.from(transactionsWithUnmatchedProducts.entries())) {
+      if (unmatchedProducts.length > 0) {
+        // Set the current unmatched product for the dialog
+        setCurrentUnmatchedProduct({
+          transactionIndex: index,
+          productName: unmatchedProducts[0]
+        });
+        
+        // Show the dialog - this should happen immediately
+        setShowProductMatchDialog(true);
+        
+        // Pre-search with the product name to provide initial results
+        setTimeout(() => {
+          handleProductSearch(unmatchedProducts[0]);
+        }, 100);
+        
+        return;
+      }
+    }
+    
+    // If we get here, there are no more unmatched products
+    setShowProductMatchDialog(false);
+    setCurrentUnmatchedProduct(null);
+  };
+  
+  // Function to handle manual product matching
+  const handleProductMatch = (selectedProductId: string) => {
+    if (!currentUnmatchedProduct) return;
+    
+    // Save the manual match
+    setManualMatches(prev => ({
+      ...prev,
+      [currentUnmatchedProduct.productName]: selectedProductId
+    }));
+    
+    // Update the unmatched products list for this transaction
+    const { transactionIndex, productName } = currentUnmatchedProduct;
+    const unmatchedProducts = transactionsWithUnmatchedProducts.get(transactionIndex) || [];
+    const updatedUnmatched = unmatchedProducts.filter(p => p !== productName);
+    
+    // Update the map
+    const newMap = new Map(transactionsWithUnmatchedProducts);
+    
+    if (updatedUnmatched.length > 0) {
+      newMap.set(transactionIndex, updatedUnmatched);
+    } else {
+      // If no more unmatched products for this transaction, remove it from the map
+      newMap.delete(transactionIndex);
+      toast.success(`All products in transaction ${transactionIndex + 1} are now matched`);
+    }
+    
+    setTransactionsWithUnmatchedProducts(newMap);
+    
+    // Process next unmatched product if any
+    if (newMap.size > 0) {
+      processNextUnmatchedProduct();
+    } else {
+      // No more unmatched products
+      setShowProductMatchDialog(false);
+      setCurrentUnmatchedProduct(null);
+      toast.success('All products have been matched!');
+    }
+  };
+
   return (
     <div className="container mx-auto py-6 space-y-8 relative">
       {/* Sticky Bulk Commit Panel */}
@@ -2471,6 +2685,17 @@ export default function SalesPage() {
               >
                 Clear Selection
               </Button>
+              {transactionsWithUnmatchedProducts.size > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={processNextUnmatchedProduct}
+                  className="flex items-center"
+                >
+                  <AlertTriangle className="mr-2 h-4 w-4 text-amber-500" />
+                  Match Products ({Array.from(transactionsWithUnmatchedProducts.values()).reduce((sum, products) => sum + products.length, 0)})
+                </Button>
+              )}
               <Button
                 size="sm"
                 onClick={handleDirectBulkCommit}
@@ -3133,6 +3358,104 @@ export default function SalesPage() {
           </div>
         )}
       </div>
+      
+      {/* Product Match Dialog */}
+      <Dialog open={showProductMatchDialog} onOpenChange={setShowProductMatchDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Match Product</DialogTitle>
+            <DialogDescription>
+              {currentUnmatchedProduct ? 
+                `Select a matching product from the database for "${currentUnmatchedProduct.productName}"` : 
+                'Match products to database records'
+              }
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6 py-4">
+            {currentUnmatchedProduct && (
+              <>
+                <div className="flex items-center justify-between">
+                  <Label className="font-semibold">Product to Match:</Label>
+                  <span className="text-lg">{currentUnmatchedProduct.productName}</span>
+                </div>
+                
+                <div className="space-y-4">
+                  <Label>Search for matching product:</Label>
+                  <div className="flex gap-2">
+                    <Input 
+                      type="text" 
+                      placeholder="Type to search..." 
+                      value={_productSearchTerm}
+                      onChange={(e) => {
+                        const searchTerm = e.target.value;
+                        setProductSearchTerm(searchTerm);
+                        // If term is empty, clear results instead of searching
+                        if (!searchTerm || searchTerm.length < 2) {
+                          setSuggestedProducts([]);
+                        } else {
+                          handleProductSearch(searchTerm);
+                        }
+                      }}
+                      className="flex-1"
+                      autoFocus
+                    />
+                  </div>
+                  
+                  {isLoadingProducts && (
+                    <div className="flex justify-center p-4">
+                      <Loader2 className="h-6 w-6 animate-spin" />
+                    </div>
+                  )}
+                  
+                  <div className="border rounded-md overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Product Name</TableHead>
+                          <TableHead>Retail Price</TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {suggestedProducts.length > 0 ? (
+                          suggestedProducts.map((product) => (
+                            <TableRow key={product._id}>
+                              <TableCell>{product.name}</TableCell>
+                              <TableCell>{formatCurrency(product.retailPrice)}</TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleProductMatch(product._id)}
+                                >
+                                  Select
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={3} className="text-center py-4">
+                              No matching products found. Try a different search term.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowProductMatchDialog(false)}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
-  )
+  );
 } 
