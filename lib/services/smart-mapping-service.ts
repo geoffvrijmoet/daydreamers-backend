@@ -218,6 +218,42 @@ export class SmartMappingService {
   }
   
   /**
+   * Gets high-confidence product matches that can be used automatically without user confirmation
+   * Returns only mappings with a confidence level above the threshold and with multiple usages
+   */
+  static async getAutoConfirmedProductMappings(
+    confidenceThreshold = 85,
+    minUsageCount = 3
+  ): Promise<Record<string, { productId: string, productName: string, confidence: number }>> {
+    try {
+      const db = await getDb();
+      
+      // Find all high-confidence product mappings
+      const mappings = await db.collection(this.COLLECTION_NAME)
+        .find({
+          mappingType: MappingTypes.PRODUCT_NAMES,
+          confidence: { $gte: confidenceThreshold },
+          usageCount: { $gte: minUsageCount },
+          targetId: { $exists: true }
+        })
+        .toArray() as SmartMappingSchema[];
+      
+      // Convert to a lookup map with source as key
+      return mappings.reduce((result, mapping) => {
+        result[mapping.source] = {
+          productId: mapping.targetId as string,
+          productName: mapping.target,
+          confidence: mapping.confidence
+        };
+        return result;
+      }, {} as Record<string, { productId: string, productName: string, confidence: number }>);
+    } catch (error) {
+      console.error('Error getting auto-confirmed mappings:', error);
+      return {};
+    }
+  }
+  
+  /**
    * Record an email supplier mapping
    */
   static async recordEmailSupplierMapping(

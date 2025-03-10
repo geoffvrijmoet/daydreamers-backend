@@ -1304,10 +1304,35 @@ export default function SalesPage() {
     }
   };
   
-  // Call fetchProducts on component mount
+  // Add fetchProducts call during component initialization
   useEffect(() => {
+    // Load products when the component mounts
     fetchProducts();
   }, []);
+  
+  // Function to preload product data before showing the match dialog
+  const preloadForProductMatching = async () => {
+    // Set loading state
+    setIsCommitting(true);
+    
+    try {
+      // Make sure products are loaded
+      if (mongoProducts.length === 0) {
+        await fetchProducts();
+      }
+      
+      // Preload auto-confirmed mappings to make the process faster
+      await fetch('/api/smart-mapping/auto-confirmed');
+      
+      // Start the product matching workflow
+      processNextUnmatchedProduct();
+    } catch (error) {
+      console.error('Error preloading for product matching:', error);
+      toast.error('Error preparing product matching');
+    } finally {
+      setIsCommitting(false);
+    }
+  };
   
   // Function to prepare fields preview for transaction dialog
   const getFieldsPreview = (transaction: ProcessedTransaction | null = null) => {
@@ -2554,6 +2579,21 @@ export default function SalesPage() {
       
       // If we have products, check each one for a match
       if (Object.keys(productsObj).length > 0) {
+        // Fetch auto-confirmed mappings from the smart mapping service
+        let autoConfirmedMappings: Record<string, { productId: string, productName: string, confidence: number }> = {};
+        try {
+          const response = await fetch('/api/smart-mapping/auto-confirmed');
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.mappings) {
+              autoConfirmedMappings = data.mappings;
+              console.log(`Loaded ${Object.keys(autoConfirmedMappings).length} auto-confirmed product mappings`);
+            }
+          }
+        } catch (error) {
+          console.error('Error loading auto-confirmed mappings:', error);
+        }
+        
         for (const [productKey, productValue] of Object.entries(productsObj)) {
           // Get product name based on format
           let productName = productKey;
@@ -2566,8 +2606,26 @@ export default function SalesPage() {
           // First check for manual match
           const manualMatchId = manualMatches[productName];
           
-          // If we don't have a manual match, try to find a match
-          if (!manualMatchId) {
+          // Then check auto-confirmed mappings
+          const normalizedName = productName.toLowerCase().trim();
+          const autoConfirmedMatch = autoConfirmedMappings[normalizedName];
+          
+          // If we have an auto-confirmed match, apply it automatically
+          if (!manualMatchId && autoConfirmedMatch) {
+            console.log(`Using auto-confirmed match for "${productName}": ${autoConfirmedMatch.productName} (confidence: ${autoConfirmedMatch.confidence})`);
+            
+            // Save this as a manual match so it's used consistently
+            setManualMatches(prev => ({
+              ...prev,
+              [productName]: autoConfirmedMatch.productId
+            }));
+            
+            // Skip this product as we've handled it
+            continue;
+          }
+          
+          // If we don't have a manual or auto-confirmed match, try to find a match
+          if (!manualMatchId && !autoConfirmedMatch) {
             // Try exact match first
             const exactMatch = mongoProducts.find(p => 
               p.name.toLowerCase().trim() === productName.toLowerCase().trim()
@@ -2632,14 +2690,51 @@ export default function SalesPage() {
   };
   
   // Function to handle manual product matching
-  const handleProductMatch = (selectedProductId: string) => {
+  const handleProductMatch = async (selectedProductId: string) => {
     if (!currentUnmatchedProduct) return;
     
-    // Save the manual match
+    // Get the selected product details
+    const selectedProduct = suggestedProducts.find(p => p._id === selectedProductId);
+    if (!selectedProduct) {
+      toast.error('Could not find the selected product');
+      return;
+    }
+    
+    // Save the manual match in local state
     setManualMatches(prev => ({
       ...prev,
       [currentUnmatchedProduct.productName]: selectedProductId
     }));
+    
+    // Send this mapping to the SmartMappingService to improve future matches
+    try {
+      const response = await fetch('/api/smart-mapping', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mappingType: 'product_names',
+          source: currentUnmatchedProduct.productName,
+          target: selectedProduct.name,
+          targetId: selectedProduct._id,
+          // Add additional metadata
+          metadata: {
+            lastMatchedAt: new Date().toISOString(),
+            userConfirmed: true,
+            manuallyMatched: true
+          }
+        }),
+      });
+      
+      if (response.ok) {
+        console.log('Product mapping saved to SmartMappingService');
+      } else {
+        console.error('Failed to save product mapping');
+      }
+    } catch (error) {
+      console.error('Error recording product mapping:', error);
+    }
     
     // Update the unmatched products list for this transaction
     const { transactionIndex, productName } = currentUnmatchedProduct;
@@ -2651,6 +2746,7 @@ export default function SalesPage() {
     
     if (updatedUnmatched.length > 0) {
       newMap.set(transactionIndex, updatedUnmatched);
+      toast.success(`Product "${productName}" matched to "${selectedProduct.name}"`);
     } else {
       // If no more unmatched products for this transaction, remove it from the map
       newMap.delete(transactionIndex);
@@ -2689,7 +2785,7 @@ export default function SalesPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={processNextUnmatchedProduct}
+                  onClick={preloadForProductMatching}
                   className="flex items-center"
                 >
                   <AlertTriangle className="mr-2 h-4 w-4 text-amber-500" />
