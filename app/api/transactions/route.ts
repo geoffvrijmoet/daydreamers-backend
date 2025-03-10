@@ -58,6 +58,11 @@ export async function POST(request: Request) {
       console.log('📦 Processed products:', data.products);
     }
     
+    // Ensure supplierOrderNumber is always a string
+    if (data.supplierOrderNumber !== undefined && data.supplierOrderNumber !== null) {
+      data.supplierOrderNumber = String(data.supplierOrderNumber);
+    }
+    
     const now = new Date().toISOString()
     const transaction = {
       ...data,
