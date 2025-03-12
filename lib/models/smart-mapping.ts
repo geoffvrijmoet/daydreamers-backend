@@ -111,11 +111,15 @@ export function incrementMappingUsage(mapping: SmartMappingSchema): SmartMapping
   // Simple score calculation that increases with usage but caps at 100
   const newScore = Math.min(100, mapping.confidence + Math.min(20, mapping.usageCount / 5));
   
+  // Boost confidence to 85 if usage count is high enough
+  const newConfidence = mapping.usageCount >= 2 ? 85 : mapping.confidence;
+  
   return {
     ...mapping,
     usageCount: mapping.usageCount + 1,
     lastUsed: now,
     score: newScore,
+    confidence: newConfidence,
     updatedAt: now
   };
 }

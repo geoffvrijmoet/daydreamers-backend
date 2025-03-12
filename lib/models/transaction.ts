@@ -28,7 +28,7 @@ export interface TransactionSchema {
   /**
    * Transaction type
    */
-  type: 'sale' | 'purchase' | 'refund';
+  type: 'sale' | 'purchase' | 'refund' | 'training';
   
   /**
    * Transaction amount in dollars
@@ -241,6 +241,17 @@ export interface TransactionSchema {
   estimatedProfit?: number;
   estimatedProfitPercentage?: number;
   estimatedItemizedProfit?: string;
+  
+  /**
+   * Training service specific fields
+   */
+  trainer?: string;
+  clientName?: string;
+  trainingType?: string;
+  sessionDuration?: number;
+  sessionNumber?: number;
+  totalSessions?: number;
+  sessionNotes?: string;
   
   /**
    * Original Excel Transaction ID

@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 
-interface DateQuery {
+interface TransactionQuery {
   date?: {
     $gte?: string;
     $lte?: string;
   };
+  type?: string;
 }
 
 export async function GET(request: Request) {
@@ -14,15 +15,24 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('startDate')
     const endDate = searchParams.get('endDate')
+    const type = searchParams.get('type')
+    const limitParam = searchParams.get('limit')
+    const limit = limitParam ? parseInt(limitParam, 10) : undefined
 
-    const query: DateQuery = {}
+    const query: TransactionQuery = {}
     if (startDate) query.date = { $gte: startDate }
     if (endDate) query.date = { ...query.date, $lte: endDate }
+    if (type) query.type = type
 
-    const transactions = await db.collection('transactions')
+    let cursor = db.collection('transactions')
       .find(query)
       .sort({ date: -1 })
-      .toArray()
+      
+    if (limit) {
+      cursor = cursor.limit(limit)
+    }
+
+    const transactions = await cursor.toArray()
 
     return NextResponse.json({ transactions })
   } catch (error) {

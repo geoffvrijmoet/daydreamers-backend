@@ -71,11 +71,15 @@ export class SmartMappingService {
         // Update the existing mapping
         const updatedMapping = incrementMappingUsage(existingMapping);
         
-        // If target changed, update it and reset confidence
+        // If target changed, update it and adjust confidence
         if (existingMapping.target !== target) {
           updatedMapping.target = target;
           updatedMapping.targetId = targetId;
-          updatedMapping.confidence = Math.max(60, existingMapping.confidence - 10); // Reduce confidence when target changes
+          
+          // Only reduce confidence if usage count is low
+          if (updatedMapping.usageCount < 3) {
+            updatedMapping.confidence = Math.max(60, existingMapping.confidence - 10);
+          }
           
           if (metadata) {
             updatedMapping.metadata = {

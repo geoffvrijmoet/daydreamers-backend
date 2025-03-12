@@ -8,6 +8,7 @@ import { SyncButton } from '@/components/sync-button'
 import { Button } from "@/components/ui/button"
 import { Eye, EyeOff } from "lucide-react"
 import { useState } from 'react'
+import { TrainingCard } from "@/components/training-card";
 
 export default function Home() {
   const { metrics, loading } = useMetrics()
@@ -21,21 +22,16 @@ export default function Home() {
         {/* Top Section */}
         <div className="flex justify-between mb-8">
           {/* Quick Actions */}
-          <div className="flex flex-col gap-2">
-            <div className="flex gap-2 items-center">
-              <SyncButton />
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => setIsBlurred(!isBlurred)}
-                title={isBlurred ? "Show Numbers" : "Hide Numbers"}
-              >
-                {isBlurred ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-              </Button>
-            </div>
-            <button className="button">
-              Update Inventory
-            </button>
+          <div className="flex gap-2 items-center">
+            <SyncButton />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setIsBlurred(!isBlurred)}
+              title={isBlurred ? "Show Numbers" : "Hide Numbers"}
+            >
+              {isBlurred ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            </Button>
           </div>
 
           {/* Metrics */}
@@ -155,12 +151,15 @@ export default function Home() {
         </div>
 
         {/* Main Content Area */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2">
-            <TransactionsList />
-          </div>
-          <div>
-            <AmexTransactions />
+        <div className="grid grid-cols-1 gap-8 mt-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2">
+              <TransactionsList />
+            </div>
+            <div className="space-y-8">
+              <AmexTransactions />
+              <TrainingCard />
+            </div>
           </div>
         </div>
       </div>
