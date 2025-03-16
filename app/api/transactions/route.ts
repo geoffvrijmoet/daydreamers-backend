@@ -20,9 +20,31 @@ export async function GET(request: Request) {
     const limit = limitParam ? parseInt(limitParam, 10) : undefined
 
     const query: TransactionQuery = {}
-    if (startDate) query.date = { $gte: startDate }
-    if (endDate) query.date = { ...query.date, $lte: endDate }
+    
+    // Improved date range handling
+    if (startDate || endDate) {
+      query.date = {}
+      
+      if (startDate) {
+        // Create date from the startDate string
+        const start = new Date(startDate)
+        // Set time to beginning of day (00:00:00.000)
+        start.setUTCHours(0, 0, 0, 0)
+        query.date.$gte = start.toISOString()
+      }
+      
+      if (endDate) {
+        // Create date from the endDate string
+        const end = new Date(endDate)
+        // Set time to end of day (23:59:59.999)
+        end.setUTCHours(23, 59, 59, 999)
+        query.date.$lte = end.toISOString()
+      }
+    }
+    
     if (type) query.type = type
+
+    console.log('Fetching transactions with query:', JSON.stringify(query, null, 2))
 
     let cursor = db.collection('transactions')
       .find(query)
@@ -33,6 +55,11 @@ export async function GET(request: Request) {
     }
 
     const transactions = await cursor.toArray()
+    
+    console.log(`Returned ${transactions.length} transactions for date range:`, 
+      startDate ? new Date(startDate).toISOString() : 'any', 
+      'to', 
+      endDate ? new Date(endDate).toISOString() : 'any')
 
     return NextResponse.json({ transactions })
   } catch (error) {

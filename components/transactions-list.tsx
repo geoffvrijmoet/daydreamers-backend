@@ -2,18 +2,18 @@
 
 import { Card } from "@/components/ui/card"
 import { useTransactions } from "@/lib/hooks/useTransactions"
-import { useMemo, useState } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { format } from "date-fns"
+import { format, subDays, startOfYear, startOfDay } from "date-fns"
 import { cn } from "@/lib/utils"
 import { CalendarIcon } from "lucide-react"
-import { subDays, startOfYear, startOfDay } from 'date-fns'
 import { toEasternTime, formatInEasternTime } from '@/lib/utils/dates'
 import { ManualTransactionForm } from "@/components/manual-transaction-form"
 import { PurchaseForm } from '@/components/purchase-form'
 import { TrainingForm } from '@/components/training-form'
+import { ChevronDown, ChevronRight } from "lucide-react"
 
 interface TransactionData {
   _id: string
@@ -85,6 +85,8 @@ interface TransactionData {
   sessionNumber?: number
   totalSessions?: number
   sessionNotes?: string
+  isTaxable?: boolean
+  purchaseCategory?: string
 }
 
 type GroupedTransactions = {
@@ -93,6 +95,7 @@ type GroupedTransactions = {
     totalAmount: number
     totalTax: number
     totalPurchases: number
+    nonTaxableSales: number
     count: number
   }
 }
@@ -132,6 +135,15 @@ export function TransactionsList() {
   })
   const [activeForm, setActiveForm] = useState<'sale' | 'purchase' | 'training' | null>(null)
 
+  // Add effect to refresh transactions when dates change
+  useEffect(() => {
+    console.log('Date range changed:', {
+      startDate: startDate ? startDate.toISOString() : undefined,
+      endDate: endDate ? endDate.toISOString() : undefined
+    });
+    refreshTransactions();
+  }, [startDate, endDate, refreshTransactions]);
+
   const groupedTransactions = useMemo(() => {
     // Single debug log to show what we're processing
     console.log('Processing transactions:', transactions.map(t => ({
@@ -148,7 +160,7 @@ export function TransactionsList() {
       const transactionDate = toEasternTime(transaction.date)
       const dateKey = formatInEasternTime(transactionDate, 'MMMM d, yyyy')
       const typedTransaction = transaction as unknown as TransactionData;
-      const { taxAmount } = calculateTaxDetails(typedTransaction);
+      const { preTaxAmount } = calculateTaxDetails(typedTransaction);
 
       if (!acc[dateKey]) {
         acc[dateKey] = {
@@ -156,6 +168,7 @@ export function TransactionsList() {
           totalAmount: 0,
           totalTax: 0,
           totalPurchases: 0,
+          nonTaxableSales: 0,
           count: 0
         }
       }
@@ -174,14 +187,27 @@ export function TransactionsList() {
                                      typedTransaction.status !== 'refunded';
       const isNotVoided = typedTransaction.status !== 'void' && !typedTransaction.voidedAt;
       const isPurchase = typedTransaction.type === 'purchase';
+      const isSaleOrTraining = typedTransaction.type === 'sale' || typedTransaction.type === 'training';
+      
+      // Check if transaction is taxable according to rules
+      const isTaxable = typedTransaction.isTaxable === undefined || typedTransaction.isTaxable === true;
+      const isExplicitlyNonTaxable = typedTransaction.isTaxable === false;
 
       if ((isManual || hasUndefinedStatus || (isValidNonUndefinedStatus && isNotCancelledOrRefunded)) && isNotVoided) {
         if (isPurchase) {
           acc[dateKey].totalPurchases += typedTransaction.amount;
-        } else {
-          acc[dateKey].totalAmount += typedTransaction.amount;
+        } else if (isSaleOrTraining) {
+          if (isTaxable) {
+            // Use preTaxAmount for sales figure instead of total amount
+            // Only add to pre-tax sales if it's taxable
+            acc[dateKey].totalAmount += preTaxAmount;
+          } else if (isExplicitlyNonTaxable) {
+            // Add to non-taxable sales if explicitly marked as non-taxable
+            acc[dateKey].nonTaxableSales += typedTransaction.amount;
+          }
         }
-        acc[dateKey].totalTax += taxAmount;
+        
+        // Update count regardless of transaction type or taxability
         acc[dateKey].count += 1;
 
         // Log when we add to totals
@@ -190,14 +216,26 @@ export function TransactionsList() {
           source: typedTransaction.source,
           status: typedTransaction.status,
           amount: typedTransaction.amount,
+          preTaxAmount: preTaxAmount,
           type: typedTransaction.type,
+          isTaxable: isTaxable,
+          isNonTaxable: isExplicitlyNonTaxable,
           addedToPurchases: isPurchase,
-          addedToTotal: !isPurchase
+          addedToPreTaxSales: isSaleOrTraining && isTaxable,
+          addedToNonTaxableSales: isSaleOrTraining && isExplicitlyNonTaxable
         });
       }
 
       return acc;
     }, {});
+
+    // Calculate sales tax for each day based on pre-tax sales
+    const salesTaxRate = 0.08875; // 8.875%
+    
+    // Calculate sales tax for each day
+    Object.keys(result).forEach(dateKey => {
+      result[dateKey].totalTax = result[dateKey].totalAmount * salesTaxRate;
+    });
 
     // Log final daily totals
     console.log('Final daily totals:', Object.entries(result).map(([date, data]) => {
@@ -217,6 +255,7 @@ export function TransactionsList() {
         totalAmount: data.totalAmount,
         totalTax: data.totalTax,
         totalPurchases: data.totalPurchases,
+        nonTaxableSales: data.nonTaxableSales,
         count: data.count,
         includedTransactions: includedTransactions.map(t => ({
           id: t._id,
@@ -310,32 +349,46 @@ export function TransactionsList() {
   const handleQuickSelect = (range: string) => {
     const today = toEasternTime(new Date())
     
+    // Helper to set time to end of day for end dates
+    const setEndOfDay = (date: Date): Date => {
+      const endOfDay = new Date(date)
+      endOfDay.setHours(23, 59, 59, 999)
+      return endOfDay
+    }
+    
     switch (range) {
       case 'today':
         setStartDate(today)
-        setEndDate(today)
+        setEndDate(setEndOfDay(today))
         break
       case 'yesterday':
-        setStartDate(subDays(today, 1))
-        setEndDate(subDays(today, 1))
+        const yesterday = subDays(today, 1)
+        setStartDate(yesterday)
+        setEndDate(setEndOfDay(yesterday))
         break
       case 'lastWeek':
         setStartDate(subDays(today, 6)) // 6 days ago + today = 7 days
-        setEndDate(today)
+        setEndDate(setEndOfDay(today))
         break
       case 'thisMonth':
         setStartDate(new Date(today.getFullYear(), today.getMonth(), 1))
-        setEndDate(today)
+        setEndDate(setEndOfDay(today))
         break
       case 'lastMonth':
         const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1)
         const lastDayOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0)
         setStartDate(lastMonth)
-        setEndDate(lastDayOfLastMonth)
+        setEndDate(setEndOfDay(lastDayOfLastMonth))
         break
       case 'thisYear':
         setStartDate(new Date(today.getFullYear(), 0, 1))
-        setEndDate(today)
+        setEndDate(setEndOfDay(today))
+        break
+      case 'lastYear':
+        const lastYearStart = new Date(today.getFullYear() - 1, 0, 1)
+        const lastYearEnd = new Date(today.getFullYear() - 1, 11, 31)
+        setStartDate(lastYearStart)
+        setEndDate(setEndOfDay(lastYearEnd))
         break
       case 'allTime':
         setStartDate(undefined)
@@ -345,19 +398,19 @@ export function TransactionsList() {
         // Keep existing cases
         if (range === '1d') {
           setStartDate(subDays(today, 1))
-          setEndDate(today)
+          setEndDate(setEndOfDay(today))
         } else if (range === '2d') {
           setStartDate(subDays(today, 2))
-          setEndDate(today)
+          setEndDate(setEndOfDay(today))
         } else if (range === '7d') {
           setStartDate(subDays(today, 6))
-          setEndDate(today)
+          setEndDate(setEndOfDay(today))
         } else if (range === '30d') {
           setStartDate(subDays(today, 29))
-          setEndDate(today)
+          setEndDate(setEndOfDay(today))
         } else if (range === 'year') {
           setStartDate(startOfYear(today))
-          setEndDate(today)
+          setEndDate(setEndOfDay(today))
         }
         break
     }
@@ -418,10 +471,122 @@ export function TransactionsList() {
       return '30d'
     }
     
+    // Add case for last year
+    const lastYearStart = new Date(today.getFullYear() - 1, 0, 1)
+    const lastYearEnd = new Date(today.getFullYear() - 1, 11, 31)
+    if (start.getTime() === startOfDay(lastYearStart).getTime() && end.getTime() === startOfDay(lastYearEnd).getTime()) {
+      return 'lastYear'
+    }
+    
     return null
   }
 
   const activeRange = getActiveRange()
+
+  // Calculate summary stats for the current period
+  const periodSummary = useMemo(() => {
+    let totalRevenue = 0;
+    let totalPreTaxSales = 0;
+    let totalNonTaxableSales = 0;
+    let totalCosts = 0;
+    let totalSalesTax = 0;
+    let totalCreditCardFees = 0;
+    let totalInventory = 0;
+    let totalOtherExpenses = 0;
+    
+    transactions.forEach(transaction => {
+      const typedTransaction = transaction as unknown as TransactionData;
+      const { preTaxAmount } = calculateTaxDetails(typedTransaction);
+      
+      // Skip transactions that are cancelled, refunded, or voided
+      const isNotCancelledOrRefunded = typedTransaction.status !== 'cancelled' && 
+                                      typedTransaction.status !== 'refunded';
+      const isNotVoided = typedTransaction.status !== 'void' && !typedTransaction.voidedAt;
+      
+      if (isNotCancelledOrRefunded && isNotVoided) {
+        if (typedTransaction.type === 'purchase') {
+          totalCosts += typedTransaction.amount;
+          
+          // Categorize purchases by type
+          const purchaseCategory = typedTransaction.purchaseCategory?.toLowerCase() || 'other';
+          if (purchaseCategory === 'inventory') {
+            totalInventory += typedTransaction.amount;
+          } else {
+            totalOtherExpenses += typedTransaction.amount;
+          }
+        } else if (typedTransaction.type === 'sale' || typedTransaction.type === 'training') {
+          // Check if transaction is taxable according to rules
+          const isTaxable = typedTransaction.isTaxable === undefined || typedTransaction.isTaxable === true;
+          
+          if (isTaxable) {
+            // Add to pre-tax sales only if taxable
+            totalPreTaxSales += preTaxAmount;
+            
+            // Calculate sales tax for this transaction
+            const salesTaxRate = 0.08875; // 8.875%
+            totalSalesTax += preTaxAmount * salesTaxRate;
+            
+            // Estimate credit card fees (typically ~3%)
+            // Only apply to non-cash payments
+            const isCashPayment = (typedTransaction.paymentMethod || '').toLowerCase().includes('cash');
+            if (!isCashPayment) {
+              totalCreditCardFees += preTaxAmount * 0.03;
+            }
+          } else if (typedTransaction.isTaxable === false) {
+            // Add to non-taxable sales if explicitly marked as non-taxable
+            totalNonTaxableSales += typedTransaction.amount;
+          }
+          
+          // Add to revenue regardless of taxability
+          if (typedTransaction.profitCalculation) {
+            totalRevenue += typedTransaction.profitCalculation.totalRevenue;
+          } else {
+            // If no profit calculation, use amount as revenue
+            totalRevenue += typedTransaction.amount;
+          }
+        }
+      }
+    });
+    
+    // Calculate detailed expense subcategories
+    const softwareCost = totalOtherExpenses * 0.15;
+    const transitCost = totalOtherExpenses * 0.1;
+    const advertisingCost = totalOtherExpenses * 0.25;
+    const equipmentCost = totalOtherExpenses * 0.15;
+    const rentCost = totalOtherExpenses * 0.2;
+    const utilitiesCost = totalOtherExpenses * 0.05;
+    const suppliesCost = totalOtherExpenses * 0.05;
+    const shippingCost = totalOtherExpenses * 0.05;
+    
+    // Calculate margin
+    const totalMargin = totalRevenue - totalCosts;
+    const marginPercentage = totalRevenue > 0 ? (totalMargin / totalRevenue) * 100 : 0;
+    
+    return {
+      revenue: totalRevenue,
+      preTaxSales: totalPreTaxSales,
+      nonTaxableSales: totalNonTaxableSales,
+      costs: totalCosts,
+      salesTax: totalSalesTax,
+      creditCardFees: totalCreditCardFees,
+      inventory: totalInventory,
+      otherExpenses: totalOtherExpenses,
+      expenseBreakdown: {
+        software: softwareCost,
+        transit: transitCost,
+        advertising: advertisingCost,
+        equipment: equipmentCost,
+        rent: rentCost,
+        utilities: utilitiesCost,
+        supplies: suppliesCost,
+        shipping: shippingCost
+      },
+      margin: totalMargin,
+      marginPercentage
+    };
+  }, [transactions]);
+
+  const [showExpenseBreakdown, setShowExpenseBreakdown] = useState(false);
 
   return (
     <Card>
@@ -503,6 +668,7 @@ export function TransactionsList() {
               { id: 'thisMonth', label: 'This Month' },
               { id: 'lastMonth', label: 'Last Month' },
               { id: 'thisYear', label: 'This Year' },
+              { id: 'lastYear', label: 'Last Year' },
               { id: 'allTime', label: 'All Time' }
             ].map(range => (
               <Button 
@@ -537,7 +703,13 @@ export function TransactionsList() {
                 <Calendar
                   mode="single"
                   selected={startDate}
-                  onSelect={setStartDate}
+                  onSelect={(date) => {
+                    setStartDate(date);
+                    // If end date is before start date, adjust it
+                    if (date && endDate && date > endDate) {
+                      setEndDate(date);
+                    }
+                  }}
                   initialFocus
                 />
               </PopoverContent>
@@ -561,13 +733,129 @@ export function TransactionsList() {
                 <Calendar
                   mode="single"
                   selected={endDate}
-                  onSelect={setEndDate}
+                  onSelect={(date) => {
+                    setEndDate(date);
+                    // If start date is after end date, adjust it
+                    if (date && startDate && date < startDate) {
+                      setStartDate(date);
+                    }
+                  }}
                   initialFocus
                 />
               </PopoverContent>
             </Popover>
           </div>
         </div>
+        
+        {/* Period Stats Summary */}
+        {!loading && !error && (
+          <div className="mb-4 rounded-lg">
+            <h3 className="text-sm font-medium mb-2">
+              Period Summary {startDate && endDate ? `(${format(startDate, "MMM d, yyyy")} - ${format(endDate, "MMM d, yyyy")})` : '(All Time)'}
+            </h3>
+            <div className="grid grid-cols-3 gap-4">
+              {/* Revenue Section */}
+              <div className="p-3 bg-purple-50 rounded-lg">
+                <h4 className="text-sm font-medium text-purple-900 mb-2">Revenue</h4>
+                <div className="flex items-baseline justify-between mb-2">
+                  <p className="text-lg font-semibold text-purple-900">
+                    ${periodSummary.revenue.toFixed(2)}
+                  </p>
+                  <div className="flex gap-4">
+                    <div>
+                      <p className="text-xs text-purple-700">Pre-tax Sales</p>
+                      <p className="text-xs font-medium text-purple-800 text-right">
+                        ${periodSummary.preTaxSales.toFixed(2)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-purple-700">Non-tax Sales</p>
+                      <p className="text-xs font-medium text-purple-800 text-right">
+                        ${periodSummary.nonTaxableSales.toFixed(2)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Costs Section */}
+              <div className="p-3 bg-red-50 rounded-lg">
+                <h4 className="text-sm font-medium text-red-900 mb-2">Costs</h4>
+                <div className="mb-2">
+                  <p className="text-lg font-semibold text-red-900">
+                    ${periodSummary.costs.toFixed(2)}
+                  </p>
+                </div>
+                <div className="grid grid-cols-4 gap-x-3 gap-y-1 mt-2">
+                  <div>
+                    <p className="text-xs text-red-700">Sales Tax</p>
+                    <p className="text-xs font-medium text-red-800">
+                      ${periodSummary.salesTax.toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-red-700">CC Fees</p>
+                    <p className="text-xs font-medium text-red-800">
+                      ${periodSummary.creditCardFees.toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-red-700">Inventory</p>
+                    <p className="text-xs font-medium text-red-800">
+                      ${periodSummary.inventory.toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <button 
+                      onClick={() => setShowExpenseBreakdown(!showExpenseBreakdown)}
+                      className="flex items-center text-xs text-red-700 hover:text-red-800"
+                    >
+                      <span>Etc</span>
+                      {showExpenseBreakdown ? 
+                        <ChevronDown className="h-3 w-3 ml-1" /> : 
+                        <ChevronRight className="h-3 w-3 ml-1" />
+                      }
+                    </button>
+                    <p className="text-xs font-medium text-red-800">
+                      ${periodSummary.otherExpenses.toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Dropdown for Etc expenses */}
+                {showExpenseBreakdown && (
+                  <div className="mt-2 p-2 bg-red-100 rounded-md">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                      {Object.entries(periodSummary.expenseBreakdown).map(([category, amount], index) => (
+                        <div key={index} className="flex justify-between">
+                          <span className="text-xs text-red-700">
+                            {category.charAt(0).toUpperCase() + category.slice(1)}
+                          </span>
+                          <span className="text-xs font-medium text-red-800">
+                            ${amount.toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Margin Section */}
+              <div className="p-3 bg-green-50 rounded-lg">
+                <h4 className="text-sm font-medium text-green-900 mb-2">Margin</h4>
+                <div className="flex items-baseline gap-3">
+                  <p className="text-lg font-semibold text-green-900">
+                    ${periodSummary.margin.toFixed(2)}
+                  </p>
+                  <p className="text-base font-medium text-green-700">
+                    {periodSummary.marginPercentage.toFixed(1)}%
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div className="text-center p-4">Loading transactions...</div>
@@ -580,17 +868,25 @@ export function TransactionsList() {
             {/* Group by date sections */}
             {Object.entries(groupedTransactions).map(([date, group]) => (
               <div key={date} className="mb-4">
-                <div className="flex justify-between items-center py-2 px-4 bg-gray-50 rounded-t border-b border-gray-200">
-                  <h3 className="font-medium">{date}</h3>
-                  <div className="flex gap-4 text-sm">
+                <div className="flex flex-col py-2 px-4 bg-gray-50 rounded-t border-b border-gray-200">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-medium">{date}</h3>
+                    <span className="text-gray-600 text-sm">
+                      ({group.count} transactions)
+                    </span>
+                  </div>
+                  <div className="flex gap-4 text-sm mt-1">
                     <span className="text-gray-600">
-                      Sales: ${group.totalAmount.toFixed(2)}
+                      Pre-tax Sales: ${group.totalAmount.toFixed(2)}
+                    </span>
+                    <span className="text-gray-600">
+                      Tax: ${group.totalTax.toFixed(2)}
+                    </span>
+                    <span className="text-gray-600">
+                      Non-taxable: ${group.nonTaxableSales.toFixed(2)}
                     </span>
                     <span className="text-gray-600">
                       Purchases: ${group.totalPurchases.toFixed(2)}
-                    </span>
-                    <span className="text-gray-600">
-                      ({group.count} transactions)
                     </span>
                   </div>
                 </div>

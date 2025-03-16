@@ -208,12 +208,14 @@ export default function SalesPage() {
     { id: "date", label: "Date", dataField: "Date" },
     { id: "transactionType", label: "Type", dataField: "_computed" }, // Special computed field
     { id: "revenue", label: "Revenue", dataField: "Revenue" },
+    { id: "wholesaleCost", label: "Wholesale Cost", dataField: "Wholesale cost" },
+    { id: "supplierOrderNumber", label: "Supplier Order #", dataField: "Supplier order #" },
+    { id: "expenseTypeAmount", label: "Expense Type & Amount", dataField: "_computed" }, // Special computed field for expense
     { id: "description", label: "Products", dataField: "Products" },
     // Hidden fields - not displayed in the main table but available for filtering/reference
     { id: "paymentMethod", label: "Payment", dataField: "Payment method", isHidden: true },
     { id: "customer", label: "Customer", dataField: "Customer", altField: "Client", isHidden: true },
     { id: "client", label: "Client", dataField: "Client", isHidden: true },
-    { id: "supplierOrderNumber", label: "Supplier Order #", dataField: "Supplier order #", isHidden: true },
     { id: "taxAmount", label: "Sales Tax", dataField: "Sales tax", isHidden: true },
     { id: "tip", label: "Tip", dataField: "Tip", isHidden: true },
     { id: "preTaxAmount", label: "Sale", dataField: "Sale", isHidden: true },
@@ -962,11 +964,34 @@ export default function SalesPage() {
     // 2. "Wholesale cost" is a number and is greater than zero
     // 3. "Supplier order #" has a value
     // 4. "Supplier" has a value
+    // 5. Any expense field has a value greater than zero
     
     const hasZeroRevenue = !transaction.Revenue || Number(transaction.Revenue) === 0;
     const hasWholesaleCost = typeof transaction['Wholesale cost'] === 'number' && Number(transaction['Wholesale cost']) > 0;
     const hasSupplierOrderNumber = !!transaction['Supplier order #'];
     const hasSupplier = !!transaction.Supplier;
+    
+    // Check all potential expense fields
+    const expenseFields = [
+      'Software cost',
+      'Ads cost',
+      'Equipment cost',
+      'Miscellaneous expense',
+      'Print media expense',
+      'Shipping cost',
+      'Transit cost',
+      'Dry ice cost',
+      'Packaging cost',
+      'Space rental cost',
+      'Pawsability rent',
+      'Other cost'
+    ];
+    
+    // Check if any expense field has a value greater than zero
+    const hasAnyExpenseValue = expenseFields.some(field => {
+      const value = transaction[field];
+      return typeof value === 'number' && value > 0;
+    });
     
     // Log detection for debugging
     console.log('🔍 Expense detection:', {
@@ -975,12 +1000,18 @@ export default function SalesPage() {
       hasWholesaleCost,
       hasSupplierOrderNumber,
       hasSupplier,
-      // Mark as expense if most criteria are met
-      isExpense: hasZeroRevenue && (hasWholesaleCost || (hasSupplierOrderNumber && hasSupplier))
+      hasAnyExpenseValue,
+      // Mark as expense if criteria are met
+      isExpense: hasZeroRevenue && (hasWholesaleCost || (hasSupplierOrderNumber && hasSupplier) || hasAnyExpenseValue)
     });
     
-    // Consider it an expense if it has zero revenue AND either has wholesale cost OR both supplier info
-    return hasZeroRevenue && (hasWholesaleCost || (hasSupplierOrderNumber && hasSupplier));
+    // Consider it an expense if:
+    // 1. It has zero revenue AND
+    // 2. It either:
+    //    a. Has wholesale cost, OR
+    //    b. Has both supplier order number and supplier info, OR
+    //    c. Has any expense field with a value
+    return hasZeroRevenue && (hasWholesaleCost || (hasSupplierOrderNumber && hasSupplier) || hasAnyExpenseValue);
   };
   
   // Helper function to prepare transaction for import with selected fields only
@@ -1066,32 +1097,36 @@ export default function SalesPage() {
       
       // For expenses, look for an amount in order of priority
       if (fields.amount) {
-        // First try Wholesale cost
-        if (transaction['Wholesale cost'] !== undefined && transaction['Wholesale cost'] !== null && String(transaction['Wholesale cost']) !== '') {
-          prepared.amount = Number(transaction['Wholesale cost']);
-        } else {
-          // Check alternative expense columns if Wholesale cost is not available
-          const alternativeExpenseColumns = [
-            'Miscellaneous expense',
-            'Print media expense',
-            'Shipping cost',
-            'Transit cost',
-            'Dry ice cost',
-            'Packaging cost',
-            'Space rental cost'
-          ];
-          
-          // Find the first alternative column that has a value
-          for (const column of alternativeExpenseColumns) {
-            if (transaction[column] !== undefined && transaction[column] !== null && String(transaction[column]) !== '') {
-              prepared.amount = Number(transaction[column]);
-              
-              // Store the original expense type in the transaction
-              prepared.expenseType = column;
-              
-              console.log(`Using "${column}" as amount (${prepared.amount}) because Wholesale cost is empty`);
-              break;
-            }
+        // Use the same list of expense fields as in other parts of the code
+        const expenseFields = [
+          { field: 'Wholesale cost', label: 'Wholesale', category: 'inventory' },
+          { field: 'Software cost', label: 'Software', category: 'software' },
+          { field: 'Ads cost', label: 'Ads', category: 'advertising' },
+          { field: 'Equipment cost', label: 'Equipment', category: 'equipment' },
+          { field: 'Miscellaneous expense', label: 'Misc', category: 'other' },
+          { field: 'Print media expense', label: 'Print Media', category: 'advertising' },
+          { field: 'Shipping cost', label: 'Shipping', category: 'shipping' },
+          { field: 'Transit cost', label: 'Transit', category: 'transit' },
+          { field: 'Dry ice cost', label: 'Dry Ice', category: 'supplies' },
+          { field: 'Packaging cost', label: 'Packaging', category: 'supplies' },
+          { field: 'Space rental cost', label: 'Space Rental', category: 'rent' },
+          { field: 'Pawsability rent', label: 'Pawsability Rent', category: 'rent' },
+          { field: 'Other cost', label: 'Other', category: 'other' }
+        ];
+        
+        // Find the first expense field with a value
+        for (const expense of expenseFields) {
+          const value = transaction[expense.field as keyof ProcessedTransaction];
+          if (typeof value === 'number' && value > 0) {
+            prepared.amount = value;
+            
+            // Store the expense type and suggested category
+            prepared.expenseType = expense.field;
+            prepared.expenseLabel = expense.label;
+            prepared.purchaseCategory = expense.category;
+            
+            console.log(`Using "${expense.field}" as amount (${prepared.amount})`);
+            break;
           }
         }
         
@@ -1547,9 +1582,9 @@ export default function SalesPage() {
       fields.push({
         id: 'revenue',
         label: 'Revenue',
-        value: typeof targetTransaction.Revenue === 'number' ? 
-          new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(targetTransaction.Revenue) : 
-          'N/A'
+        value: typeof targetTransaction.Revenue === 'number' 
+          ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(targetTransaction.Revenue))
+          : '-',
       });
       
       if (targetTransaction['Sales tax'] !== undefined && targetTransaction['Sales tax'] !== null && String(targetTransaction['Sales tax']) !== '') {
@@ -1585,43 +1620,77 @@ export default function SalesPage() {
         value: targetTransaction['Supplier order #'] || 'N/A'
       });
       
-      // For expense transactions, check for wholesale cost or alternative expense columns
-      const alternativeExpenseColumns = [
-        'Wholesale cost',
-        'Miscellaneous expense',
-        'Print media expense',
-        'Shipping cost',
-        'Transit cost',
-        'Dry ice cost',
-        'Packaging cost',
-        'Space rental cost'
+      // For expense transactions, use the same expense fields as elsewhere in the code
+      const expenseFields = [
+        { field: 'Wholesale cost', label: 'Wholesale', category: 'inventory' },
+        { field: 'Software cost', label: 'Software', category: 'software' },
+        { field: 'Ads cost', label: 'Ads', category: 'advertising' },
+        { field: 'Equipment cost', label: 'Equipment', category: 'equipment' },
+        { field: 'Miscellaneous expense', label: 'Misc', category: 'other' },
+        { field: 'Print media expense', label: 'Print Media', category: 'advertising' },
+        { field: 'Shipping cost', label: 'Shipping', category: 'shipping' },
+        { field: 'Transit cost', label: 'Transit', category: 'transit' },
+        { field: 'Dry ice cost', label: 'Dry Ice', category: 'supplies' },
+        { field: 'Packaging cost', label: 'Packaging', category: 'supplies' },
+        { field: 'Space rental cost', label: 'Space Rental', category: 'rent' },
+        { field: 'Pawsability rent', label: 'Pawsability Rent', category: 'rent' },
+        { field: 'Other cost', label: 'Other', category: 'other' }
       ];
       
-      // Find the first column with a value and display it
-      let expenseFound = false;
-      for (const column of alternativeExpenseColumns) {
-        if (targetTransaction[column] !== undefined && 
-            targetTransaction[column] !== null && 
-            String(targetTransaction[column]) !== '') {
-          
-          fields.push({
-            id: 'amount',
-            label: column === 'Wholesale cost' ? 'Amount' : `Amount (${column})`,
-            value: new Intl.NumberFormat('en-US', { 
-              style: 'currency', 
-              currency: 'USD' 
-            }).format(Number(targetTransaction[column]))
-          });
-          
-          expenseFound = true;
-          break;
-        }
-      }
+      // Collect all expense fields with values
+      const expensesWithValues = expenseFields
+        .map(expense => {
+          const value = targetTransaction[expense.field as keyof ProcessedTransaction];
+          if (typeof value === 'number' && value > 0) {
+            return {
+              field: expense.field,
+              label: expense.label,
+              category: expense.category,
+              value,
+              formatted: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value)
+            };
+          }
+          return null;
+        })
+        .filter(expense => expense !== null);
       
-      // If no expense was found in any column, still show a placeholder
-      if (!expenseFound) {
+      // If we have expenses, show them
+      if (expensesWithValues.length > 0) {
+        // Show the first expense as the main amount
+        const primaryExpense = expensesWithValues[0]!;
         fields.push({
-          id: 'wholesaleCost',
+          id: 'amount',
+          label: 'Amount',
+          value: (
+            <div>
+              <div className="font-medium">{primaryExpense.formatted}</div>
+              <div className="text-sm text-gray-600">Type: {primaryExpense.label}</div>
+              <div className="text-sm text-gray-600">Category: {primaryExpense.category}</div>
+            </div>
+          )
+        });
+        
+        // If there are multiple expenses, show them all
+        if (expensesWithValues.length > 1) {
+          fields.push({
+            id: 'additionalExpenses',
+            label: 'Additional Expenses',
+            value: (
+              <div className="space-y-2">
+                {expensesWithValues.slice(1).map((expense, idx) => (
+                  <div key={idx} className="flex justify-between border-b pb-1">
+                    <span>{expense.label}:</span> 
+                    <span>{expense.formatted}</span>
+                  </div>
+                ))}
+              </div>
+            )
+          });
+        }
+      } else {
+        // If no expense was found in any column, still show a placeholder
+        fields.push({
+          id: 'amount',
           label: 'Amount',
           value: 'N/A (No expense amount found)'
         });
@@ -1647,16 +1716,16 @@ export default function SalesPage() {
       fields.push({
         id: 'revenue',
         label: 'Revenue',
-        value: typeof targetTransaction.Revenue === 'number' ? 
-          new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(targetTransaction.Revenue) : 
-          'N/A'
+        value: typeof targetTransaction.Revenue === 'number' 
+          ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(transaction.Revenue))
+          : '-',
       });
       
       if (targetTransaction.Tip) {
         fields.push({
           id: 'tip',
           label: 'Tip',
-          value: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(targetTransaction.Tip))
+          value: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(transaction.Tip))
         });
       }
       
@@ -1664,7 +1733,7 @@ export default function SalesPage() {
         fields.push({
           id: 'discount',
           label: 'Discount',
-          value: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(targetTransaction.Discount))
+          value: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(transaction.Discount))
         });
       }
       
@@ -1672,7 +1741,7 @@ export default function SalesPage() {
         fields.push({
           id: 'taxAmount',
           label: 'Tax Amount',
-          value: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(targetTransaction['Sales tax']))
+          value: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(transaction['Sales tax']))
         });
       }
       
@@ -2857,6 +2926,93 @@ export default function SalesPage() {
                             cellValue = typeof transaction.Revenue === 'number' && transaction.Revenue > 0
                               ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(transaction.Revenue))
                               : '-';
+                          } else if (field.id === "wholesaleCost") {
+                            cellValue = typeof transaction['Wholesale cost'] === 'number' && transaction['Wholesale cost'] > 0
+                              ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(transaction['Wholesale cost']))
+                              : '-';
+                          } else if (field.id === "expenseTypeAmount") {
+                            // Check all expense fields and collect all expenses with values
+                            const expenseFields = [
+                              { field: 'Wholesale cost', label: 'Wholesale', category: 'inventory' },
+                              { field: 'Software cost', label: 'Software', category: 'software' },
+                              { field: 'Ads cost', label: 'Ads', category: 'advertising' },
+                              { field: 'Equipment cost', label: 'Equipment', category: 'equipment' },
+                              { field: 'Miscellaneous expense', label: 'Misc', category: 'other' },
+                              { field: 'Print media expense', label: 'Print Media', category: 'advertising' },
+                              { field: 'Shipping cost', label: 'Shipping', category: 'shipping' },
+                              { field: 'Transit cost', label: 'Transit', category: 'transit' },
+                              { field: 'Dry ice cost', label: 'Dry Ice', category: 'supplies' },
+                              { field: 'Packaging cost', label: 'Packaging', category: 'supplies' },
+                              { field: 'Space rental cost', label: 'Space Rental', category: 'rent' },
+                              { field: 'Pawsability rent', label: 'Pawsability Rent', category: 'rent' },
+                              { field: 'Other cost', label: 'Other', category: 'other' }
+                            ];
+                            
+                            // Collect all expenses with values
+                            const validExpenses = expenseFields
+                              .map(expense => {
+                                const value = transaction[expense.field as keyof ProcessedTransaction];
+                                if (typeof value === 'number' && value > 0) {
+                                  return {
+                                    label: expense.label,
+                                    value,
+                                    formatted: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value)
+                                  };
+                                }
+                                return null;
+                              })
+                              .filter(expense => expense !== null);
+                            
+                            if (validExpenses.length === 0) {
+                              cellValue = '-';
+                            } else if (validExpenses.length === 1) {
+                              // Only one expense, display it directly
+                              const expense = validExpenses[0]!;
+                              cellValue = (
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-medium">{expense.label}</span>
+                                  <span className="text-xs">{expense.formatted}</span>
+                                </div>
+                              );
+                            } else {
+                              // Multiple expenses, show first one with a dropdown
+                              const firstExpense = validExpenses[0]!;
+                              
+                              cellValue = (
+                                <div className="relative group">
+                                  <div className="flex flex-col">
+                                    <span className="text-xs font-medium">{firstExpense.label}</span>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-xs">{firstExpense.formatted}</span>
+                                      <span className="text-xs text-blue-500 hover:text-blue-700 cursor-pointer">
+                                        +{validExpenses.length - 1} more
+                                      </span>
+                                    </div>
+                                  </div>
+                                  
+                                  {/* Dropdown for additional expenses */}
+                                  <div className="absolute left-0 mt-1 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 p-2 hidden group-hover:block z-20">
+                                    <div className="text-xs font-semibold mb-1 text-gray-700">All Expenses:</div>
+                                    {validExpenses.map((expense, expIndex) => (
+                                      <div key={expIndex} className="flex justify-between items-center py-1 text-xs">
+                                        <span className="font-medium">{expense.label}:</span>
+                                        <span>{expense.formatted}</span>
+                                      </div>
+                                    ))}
+                                    <div className="border-t border-gray-200 mt-1 pt-1">
+                                      <div className="flex justify-between items-center py-1 text-xs font-semibold">
+                                        <span>Total:</span>
+                                        <span>
+                                          {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
+                                            validExpenses.reduce((sum, exp) => sum + exp.value, 0)
+                                          )}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            }
                           } else {
                             cellValue = String(transaction[field.dataField as keyof ProcessedTransaction] || '-');
                           }
@@ -3221,6 +3377,46 @@ export default function SalesPage() {
                       }
                     </div>
                   </div>
+                  
+                  {/* Add purchase category selector for purchases */}
+                  {transactionToSubmit && 'type' in transactionToSubmit && transactionToSubmit.type === 'purchase' && (
+                    <div className="border border-gray-200 rounded-lg p-4 mb-4">
+                      <h3 className="text-sm font-medium text-gray-500 uppercase mb-2">
+                        Purchase Options
+                      </h3>
+                      <div className="space-y-4">
+                        <div className="flex flex-col">
+                          <label className="text-sm font-medium text-gray-700 mb-1">
+                            Purchase Category:
+                          </label>
+                          <select
+                            value={(transactionToSubmit.purchaseCategory as string) || 'inventory'}
+                            onChange={(e) => {
+                              // Update transactionToSubmit with the new purchase category
+                              setTransactionToSubmit(prev => ({
+                                ...prev,
+                                purchaseCategory: e.target.value.toLowerCase()
+                              }));
+                              // Force update to refresh UI
+                              forceRerender();
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                          >
+                            <option value="inventory">Inventory</option>
+                            <option value="supplies">Supplies</option>
+                            <option value="equipment">Equipment</option>
+                            <option value="software">Software</option>
+                            <option value="advertising">Advertising</option>
+                            <option value="shipping">Shipping</option>
+                            <option value="rent">Rent</option>
+                            <option value="utilities">Utilities</option>
+                            <option value="transit">Transit</option>
+                            <option value="other">Other</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   
                   <div className="flex justify-end space-x-2">
                     <button

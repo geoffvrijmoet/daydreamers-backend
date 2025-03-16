@@ -20,6 +20,7 @@ type Purchase = {
   paymentMethod: string
   vendor?: string
   supplierOrderNumber?: string
+  purchaseCategory?: string
 }
 
 type PurchaseFormProps = {
@@ -44,7 +45,8 @@ export function PurchaseForm({ onSuccess, onCancel, isExpanded = false }: Purcha
     type: 'purchase',
     paymentMethod: 'AMEX 01001',
     vendor: '',
-    supplierOrderNumber: ''
+    supplierOrderNumber: '',
+    purchaseCategory: 'inventory'
   })
 
   // Effect to sync isOpen with isExpanded prop
@@ -154,19 +156,20 @@ export function PurchaseForm({ onSuccess, onCancel, isExpanded = false }: Purcha
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (purchase.products.length === 0) {
-      setError('Please add at least one product')
-      return
-    }
-
     setLoading(true)
     setError(null)
 
     try {
+      // Prepare purchase data with lowercase category
+      const purchaseData = {
+        ...purchase,
+        purchaseCategory: purchase.purchaseCategory?.toLowerCase()
+      };
+
       const response = await fetch('/api/transactions/manual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(purchase)
+        body: JSON.stringify(purchaseData)
       })
 
       if (!response.ok) {
@@ -181,7 +184,8 @@ export function PurchaseForm({ onSuccess, onCancel, isExpanded = false }: Purcha
         type: 'purchase',
         paymentMethod: 'AMEX 01001',
         vendor: '',
-        supplierOrderNumber: ''
+        supplierOrderNumber: '',
+        purchaseCategory: 'inventory'
       })
 
       setIsOpen(false)
@@ -376,6 +380,28 @@ export function PurchaseForm({ onSuccess, onCancel, isExpanded = false }: Purcha
           </select>
         </div>
 
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Purchase Category
+          </label>
+          <select
+            value={purchase.purchaseCategory || 'inventory'}
+            onChange={e => setPurchase(prev => ({ ...prev, purchaseCategory: e.target.value }))}
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700"
+          >
+            <option value="inventory">Inventory</option>
+            <option value="supplies">Supplies</option>
+            <option value="equipment">Equipment</option>
+            <option value="software">Software</option>
+            <option value="advertising">Advertising</option>
+            <option value="shipping">Shipping</option>
+            <option value="rent">Rent</option>
+            <option value="utilities">Utilities</option>
+            <option value="transit">Transit</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+
         {error && (
           <p className="text-sm text-red-600">{error}</p>
         )}
@@ -383,14 +409,24 @@ export function PurchaseForm({ onSuccess, onCancel, isExpanded = false }: Purcha
         <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
           <div className="flex justify-between items-center text-lg font-medium">
             <span className="text-gray-700 dark:text-gray-300">Total:</span>
-            <span className="text-gray-900 dark:text-white">${purchase.amount.toFixed(2)}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-500 text-sm">$</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={purchase.amount}
+                onChange={e => setPurchase(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
+                className="w-24 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700 text-right"
+              />
+            </div>
           </div>
         </div>
 
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={loading || purchase.products.length === 0}
+            disabled={loading}
             className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
           >
             {loading ? 'Saving...' : 'Add Purchase'}
