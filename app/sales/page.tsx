@@ -118,6 +118,7 @@ interface TableField {
   dataField: string;
   shopifyField?: string;
   altField?: string;
+  isHidden?: boolean;
 }
 
 interface ExistingTransactions {
@@ -205,13 +206,17 @@ export default function SalesPage() {
   const tableFields: TableField[] = [
     { id: "id", label: "ID", dataField: "Transaction ID", shopifyField: "Shopify order #" },
     { id: "date", label: "Date", dataField: "Date" },
-    { id: "paymentMethod", label: "Payment", dataField: "Payment method" },
-    { id: "customer", label: "Customer", dataField: "Customer", altField: "Client" },
+    { id: "transactionType", label: "Type", dataField: "_computed" }, // Special computed field
+    { id: "revenue", label: "Revenue", dataField: "Revenue" },
     { id: "description", label: "Products", dataField: "Products" },
-    { id: "amount", label: "Amount", dataField: "Sale" },
-    { id: "taxAmount", label: "Sales Tax", dataField: "Sales tax" },
-    { id: "tip", label: "Tip", dataField: "Tip" },
-    { id: "preTaxAmount", label: "Sale", dataField: "Sale" },
+    // Hidden fields - not displayed in the main table but available for filtering/reference
+    { id: "paymentMethod", label: "Payment", dataField: "Payment method", isHidden: true },
+    { id: "customer", label: "Customer", dataField: "Customer", altField: "Client", isHidden: true },
+    { id: "client", label: "Client", dataField: "Client", isHidden: true },
+    { id: "supplierOrderNumber", label: "Supplier Order #", dataField: "Supplier order #", isHidden: true },
+    { id: "taxAmount", label: "Sales Tax", dataField: "Sales tax", isHidden: true },
+    { id: "tip", label: "Tip", dataField: "Tip", isHidden: true },
+    { id: "preTaxAmount", label: "Sale", dataField: "Sale", isHidden: true },
     // You can add more fields here as needed
   ];
   
@@ -996,20 +1001,105 @@ export default function SalesPage() {
     if (fields.excelId) prepared.excelId = transaction['Transaction ID'] || '';
     
     // Set transaction type based on isExpense flag
-    if (fields.type) prepared.type = isExpense ? 'purchase' : 'sale';
+    if (fields.type) {
+      // Check if this is a training transaction first (has Client field)
+      if (transaction.Client) {
+        prepared.type = 'training';
+        // Set training-specific fields
+        prepared.trainer = 'Madeline Pape'; // Default trainer
+        prepared.clientName = transaction.Client;
+        if (transaction["Dog's name"]) prepared.dogName = transaction["Dog's name"];
+        // Add Dog training agency field
+        if (transaction["Dog training agency"]) prepared.trainingAgency = transaction["Dog training agency"];
+        prepared.description = 'Dog training session';
+        
+        // Set payment method
+        if (fields.paymentMethod) {
+          prepared.paymentMethod = transaction['Payment method'] || 'Unknown';
+        }
+        
+        // Set amount and tax details
+        if (fields.amount) {
+          // Set revenue as the amount
+          if (transaction.Revenue !== undefined && transaction.Revenue !== null) {
+            prepared.amount = Number(transaction.Revenue);
+            prepared.revenue = Number(transaction.Revenue);
+          }
+        }
+        
+        // Handle tax calculations
+        if (fields.taxAmount && transaction['Sales tax']) {
+          prepared.taxAmount = Number(transaction['Sales tax']);
+          // Calculate pre-tax amount
+          if (prepared.amount) {
+            prepared.preTaxAmount = Number(prepared.amount) - Number(prepared.taxAmount);
+          }
+          prepared.isTaxable = Number(transaction['Sales tax']) > 0;
+        } else {
+          prepared.isTaxable = false;
+          // If we have amount but no tax, then preTaxAmount equals amount
+          if (prepared.amount) {
+            prepared.preTaxAmount = Number(prepared.amount);
+            prepared.taxAmount = 0;
+          }
+        }
+        
+        // Set status to completed by default
+        prepared.status = 'completed';
+        
+        // Set customer field for compatibility with existing model
+        prepared.customer = transaction.Client;
+      } else {
+        // Not a training transaction, use the expense detection
+        prepared.type = isExpense ? 'purchase' : 'sale';
+      }
+    }
     
     // Log the transaction for debugging
     console.log("Preparing transaction:", transaction);
     
     // For expense transactions, process supplier info and amount differently
-    if (isExpense) {
+    if (isExpense && prepared.type !== 'training') {
       // Handle expense-specific fields
       if (fields.supplier) prepared.supplier = transaction.Supplier || '';
       if (fields.supplierOrderNumber) prepared.supplierOrderNumber = transaction['Supplier order #'] || '';
       
-      // For expenses, amount should be the Wholesale cost
-      if (fields.amount && transaction['Wholesale cost']) {
-        prepared.amount = Number(transaction['Wholesale cost']);
+      // For expenses, look for an amount in order of priority
+      if (fields.amount) {
+        // First try Wholesale cost
+        if (transaction['Wholesale cost'] !== undefined && transaction['Wholesale cost'] !== null && String(transaction['Wholesale cost']) !== '') {
+          prepared.amount = Number(transaction['Wholesale cost']);
+        } else {
+          // Check alternative expense columns if Wholesale cost is not available
+          const alternativeExpenseColumns = [
+            'Miscellaneous expense',
+            'Print media expense',
+            'Shipping cost',
+            'Transit cost',
+            'Dry ice cost',
+            'Packaging cost',
+            'Space rental cost'
+          ];
+          
+          // Find the first alternative column that has a value
+          for (const column of alternativeExpenseColumns) {
+            if (transaction[column] !== undefined && transaction[column] !== null && String(transaction[column]) !== '') {
+              prepared.amount = Number(transaction[column]);
+              
+              // Store the original expense type in the transaction
+              prepared.expenseType = column;
+              
+              console.log(`Using "${column}" as amount (${prepared.amount}) because Wholesale cost is empty`);
+              break;
+            }
+          }
+        }
+        
+        // If no amount was found in any column, set to 0 or handle as needed
+        if (prepared.amount === undefined) {
+          console.warn('No cost found in any expense column, setting amount to 0');
+          prepared.amount = 0;
+        }
       }
       
       // Process products for expense if available
@@ -1115,7 +1205,7 @@ export default function SalesPage() {
       }
     }
     // For sales transactions, process customer info and revenue/tax differently
-    else {
+    else if (prepared.type !== 'training') {
       // Handle sale-specific fields
       if (fields.customer) prepared.customer = transaction.Customer || transaction.Client || '';
       if (fields.taxAmount && transaction['Sales tax']) prepared.taxAmount = Number(transaction['Sales tax']);
@@ -1212,6 +1302,36 @@ export default function SalesPage() {
           console.error("Error processing products for sale:", error);
         }
       }
+    }
+    // Special handling for training transactions
+    else {
+      // Training transaction specific fields
+      
+      // For training, amount should be the Revenue
+      if (fields.amount && transaction.Revenue) {
+        prepared.amount = Number(transaction.Revenue);
+      }
+      
+      // For Excel imports, use the Sale column for preTaxAmount
+      if (fields.preTaxAmount && transaction.Sale) {
+        prepared.preTaxAmount = Number(transaction.Sale);
+      }
+      
+      // Set tax amount if available
+      if (fields.taxAmount && transaction['Sales tax']) {
+        prepared.taxAmount = Number(transaction['Sales tax']);
+      }
+      
+      // Handle payment method
+      if (fields.paymentMethod) {
+        prepared.paymentMethod = transaction['Payment method'] || '';
+      }
+      
+      // Set status to completed by default
+      prepared.status = 'completed';
+      
+      // Use customer field for compatibility with existing transaction model
+      prepared.customer = transaction.Client;
     }
     
     return prepared;
@@ -1346,8 +1466,11 @@ export default function SalesPage() {
     
     if (!targetTransaction) return fields;
     
+    // Check if this is a training transaction (has Client field)
+    const isTraining = targetTransaction.Client !== undefined && targetTransaction.Client !== null && String(targetTransaction.Client) !== '';
+    
     // Check if this is an expense transaction
-    const isExpense = isExpenseTransaction(targetTransaction);
+    const isExpense = !isTraining && isExpenseTransaction(targetTransaction);
     
     // Include common transaction details
     fields.push({
@@ -1365,7 +1488,7 @@ export default function SalesPage() {
     fields.push({
       id: 'type',
       label: 'Type',
-      value: isExpense ? 'Purchase' : 'Sale'
+      value: isTraining ? 'Training' : (isExpense ? 'Purchase' : 'Sale')
     });
     
     // Add source field
@@ -1383,8 +1506,138 @@ export default function SalesPage() {
       value: paymentMethod || 'N/A'
     });
     
-    // For sales, display customer info and revenue
-    if (!isExpense) {
+    // Handle fields specific to transaction type
+    if (isTraining) {
+      // Add training-specific fields
+      fields.push({
+        id: 'trainer',
+        label: 'Trainer',
+        value: 'Madeline Pape' // Default trainer
+      });
+      
+      fields.push({
+        id: 'clientName',
+        label: 'Client Name',
+        value: targetTransaction.Client || 'N/A'
+      });
+      
+      if (targetTransaction["Dog's name"]) {
+        fields.push({
+          id: 'dogName',
+          label: 'Dog Name',
+          value: targetTransaction["Dog's name"]
+        });
+      }
+      
+      // Add Dog training agency to the preview if it exists
+      if (targetTransaction["Dog training agency"]) {
+        fields.push({
+          id: 'trainingAgency',
+          label: 'Training Agency',
+          value: targetTransaction["Dog training agency"]
+        });
+      }
+      
+      fields.push({
+        id: 'description',
+        label: 'Description',
+        value: 'Dog training session'
+      });
+      
+      fields.push({
+        id: 'revenue',
+        label: 'Revenue',
+        value: typeof targetTransaction.Revenue === 'number' ? 
+          new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(targetTransaction.Revenue) : 
+          'N/A'
+      });
+      
+      if (targetTransaction['Sales tax'] !== undefined && targetTransaction['Sales tax'] !== null && String(targetTransaction['Sales tax']) !== '') {
+        fields.push({
+          id: 'taxAmount',
+          label: 'Tax Amount',
+          value: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(targetTransaction['Sales tax']))
+        });
+        
+        fields.push({
+          id: 'isTaxable',
+          label: 'Is Taxable',
+          value: Number(targetTransaction['Sales tax']) > 0 ? 'Yes' : 'No'
+        });
+      }
+      
+      fields.push({
+        id: 'status',
+        label: 'Status',
+        value: 'Completed'
+      });
+    }
+    else if (isExpense) {
+      fields.push({
+        id: 'supplier',
+        label: 'Supplier',
+        value: targetTransaction.Supplier || 'N/A'
+      });
+      
+      fields.push({
+        id: 'supplierOrderNumber',
+        label: 'Supplier Order #',
+        value: targetTransaction['Supplier order #'] || 'N/A'
+      });
+      
+      // For expense transactions, check for wholesale cost or alternative expense columns
+      const alternativeExpenseColumns = [
+        'Wholesale cost',
+        'Miscellaneous expense',
+        'Print media expense',
+        'Shipping cost',
+        'Transit cost',
+        'Dry ice cost',
+        'Packaging cost',
+        'Space rental cost'
+      ];
+      
+      // Find the first column with a value and display it
+      let expenseFound = false;
+      for (const column of alternativeExpenseColumns) {
+        if (targetTransaction[column] !== undefined && 
+            targetTransaction[column] !== null && 
+            String(targetTransaction[column]) !== '') {
+          
+          fields.push({
+            id: 'amount',
+            label: column === 'Wholesale cost' ? 'Amount' : `Amount (${column})`,
+            value: new Intl.NumberFormat('en-US', { 
+              style: 'currency', 
+              currency: 'USD' 
+            }).format(Number(targetTransaction[column]))
+          });
+          
+          expenseFound = true;
+          break;
+        }
+      }
+      
+      // If no expense was found in any column, still show a placeholder
+      if (!expenseFound) {
+        fields.push({
+          id: 'wholesaleCost',
+          label: 'Amount',
+          value: 'N/A (No expense amount found)'
+        });
+      }
+      
+      // Include any notes
+      if (targetTransaction.Note) {
+        fields.push({
+          id: 'notes',
+          label: 'Notes',
+          value: targetTransaction.Note
+        });
+      }
+    }
+    // For sales (non-training, non-expense), display customer info and revenue
+    else {
       fields.push({
         id: 'customer',
         label: 'Customer',
@@ -1424,7 +1677,7 @@ export default function SalesPage() {
       }
       
       const isSquareTransaction = targetTransaction['Transaction ID']?.toString().startsWith('sq_') || 
-                                  paymentMethod?.toLowerCase().includes('square');
+                                 paymentMethod?.toLowerCase().includes('square');
       
       if (!isSquareTransaction) {
         fields.push({
@@ -1433,440 +1686,9 @@ export default function SalesPage() {
           value: targetTransaction['Transaction ID'] || 'N/A'
         });
       }
-      
-      // Format products display
-      const productsObj = parseProductsJson(targetTransaction.Products);
-      
-      if (productsObj && Object.keys(productsObj).length > 0) {
-        fields.push({
-          id: 'products',
-          label: 'Products',
-          value: (
-            <div className="text-sm space-y-3">
-              {Object.entries(productsObj).map(([productName, quantity], index) => {
-                // Check if we have a manual match or try to find an automatic match
-                const manualMatchId = manualMatches[productName];
-                let matchedProduct = null;
-                const potentialMatches: Array<{product: MongoProduct, score: number}> = [];
-                
-                // First check if we have a manual match
-                if (manualMatchId && manualMatchId !== 'override') {
-                  // Find the product in MongoDB products
-                  matchedProduct = mongoProducts.find(p => p._id === manualMatchId || p.id === manualMatchId) ?? null;
-                  
-                  // Still find potential matches for display (but don't use them since we have a manual match)
-                  potentialMatches.push(...mongoProducts
-                    .filter(p => p._id !== manualMatchId) // Exclude the already matched product
-                    .map(p => ({
-                      product: p,
-                      score: calculateSimilarityScore(p.name, productName)
-                    }))
-                    .filter(item => item.score > 20)
-                    .sort((a, b) => b.score - a.score)
-                    .slice(0, 3)); // Get top 3 alternatives
-                } else {
-                  // Try to find potential matches with similarity scoring
-                  const scoredMatches = mongoProducts
-                    .map(p => ({
-                      product: p,
-                      score: calculateSimilarityScore(p.name, productName)
-                    }))
-                    .filter(item => item.score > 20) // Only consider products with a reasonable match score
-                    .sort((a, b) => b.score - a.score); // Sort by score (highest first)
-                  
-                  // If we have a good candidate (score >= 40), select it initially
-                  if (scoredMatches.length > 0 && scoredMatches[0].score >= 40) {
-                    matchedProduct = scoredMatches[0].product;
-                  }
-                  
-                  // Limit to top 4 matches for display
-                  potentialMatches.push(...scoredMatches.slice(0, 4));
-                }
-                
-                // Ensure quantity is treated as a string or number for React
-                const displayQuantity = typeof quantity === 'string' ? quantity : String(quantity);
-                
-                return (
-                  <div key={index} className="p-3 border rounded-md bg-gray-50">
-                    <div className="flex flex-col mb-2">
-                      <span className="font-medium text-gray-700">
-                        Excel Product: {productName}
-                        {displayQuantity && <span className="text-gray-600 ml-1">(x{displayQuantity})</span>}
-                      </span>
-                    </div>
-                    
-                    {/* Show currently matched product */}
-                    {matchedProduct && (
-                      <div className="p-2 bg-emerald-50 rounded mb-2 border border-emerald-200">
-                        <div className="flex justify-between items-center">
-                          <div className="font-medium text-gray-800">
-                            <span className="text-emerald-600">✓</span> {matchedProduct.name}
-                          </div>
-                          
-                          {/* Display price info for the product */}
-                          <div className="text-sm flex items-center space-x-2">
-                            <span className="text-gray-600">
-                              Unit: {formatCurrency(matchedProduct?.price ? Number(matchedProduct.price) : 0)}
-                            </span>
-                            <span className="text-gray-600">
-                              Total: {formatCurrency(Number(matchedProduct?.price || 0) * Number(displayQuantity || 0))}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Product matching controls */}
-                    <div className="flex gap-2 justify-between items-center mb-2">
-                      <div className="flex-1">
-                        <input
-                          type="text"
-                          placeholder="Search for products..."
-                          className="input input-sm w-full border rounded p-1 text-sm"
-                          onChange={(e) => handleProductSearch(e.target.value)}
-                        />
-                      </div>
-                      
-                      <button
-                        className="px-2 py-1 bg-gray-200 rounded text-xs"
-                        onClick={() => setProductMatch(productName, 'override')}
-                      >
-                        No Match
-                      </button>
-                    </div>
-                    
-                    {/* Product search results */}
-                    <div className="mb-2">
-                      {isLoadingProducts ? (
-                        <div className="text-center py-1">
-                          <span className="text-xs text-gray-500">Loading...</span>
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap gap-1">
-                          {suggestedProducts.slice(0, 5).map((product) => (
-                            <button
-                              key={product._id}
-                              className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded max-w-[150px] truncate"
-                              onClick={() => setProductMatch(productName, product._id)}
-                            >
-                              {product.name}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Alternative matches with previous styling */}
-                    {potentialMatches.length > 0 && (
-                      <div className="mt-2">
-                        <div className="text-sm font-medium text-gray-700 mb-1">
-                          {matchedProduct ? 'Alternative Matches:' : 'Potential Matches:'}
-                        </div>
-                        <div className="space-y-1">
-                          {potentialMatches.map((match, mIdx) => (
-                            <div 
-                              key={mIdx}
-                              className={`
-                                p-1.5 border rounded flex justify-between items-center cursor-pointer hover:bg-gray-100
-                                ${match.product._id === manualMatchId ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200'}
-                              `}
-                              onClick={() => setProductMatch(productName, match.product._id)}
-                            >
-                              <div className="font-medium text-gray-800">{match.product.name}</div>
-                              <div className="flex items-center">
-                                <span className="text-xs bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">
-                                  {match.score.toFixed(0)}%
-                                </span>
-                                <button
-                                  className="ml-2 text-xs bg-blue-500 text-white px-2 py-0.5 rounded hover:bg-blue-600"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setProductMatch(productName, match.product._id);
-                                  }}
-                                >
-                                  Choose
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ),
-          originalData: JSON.stringify(productsObj)
-        });
-      }
-    } 
-    // For expenses, display supplier info and costs
-    else {
-      fields.push({
-        id: 'supplier',
-        label: 'Supplier',
-        value: targetTransaction.Supplier || 'N/A'
-      });
-      
-      fields.push({
-        id: 'supplierOrderNumber',
-        label: 'Supplier Order #',
-        value: targetTransaction['Supplier order #'] || 'N/A'
-      });
-      
-      fields.push({
-        id: 'wholesaleCost',
-        label: 'Amount',
-        value: typeof targetTransaction['Wholesale cost'] === 'number' ? 
-          new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(targetTransaction['Wholesale cost']) : 
-          'N/A'
-      });
-      
-      // Add payment method for expenses
-      fields.push({
-        id: 'paymentMethod',
-        label: 'Payment Method',
-        value: targetTransaction['Payment method'] || 'N/A'
-      });
-      
-      // Include any notes
-      if (targetTransaction.Note) {
-        fields.push({
-          id: 'notes',
-          label: 'Notes',
-          value: targetTransaction.Note
-        });
-      }
-      
-      // Display products for expense transactions too
-      // First check if we have detailed itemized wholesale spend
-      let productsObj = {};
-      let isDetailedFormat = false;
-      
-      if (targetTransaction['Itemized wholesale spend']) {
-        productsObj = parseProductsJson(targetTransaction['Itemized wholesale spend']);
-        isDetailedFormat = Object.values(productsObj).some(value => 
-          typeof value === 'object' && value !== null && 'name' in (value as object)
-        );
-      }
-      
-      // If no detailed format, use regular Products field
-      if (!isDetailedFormat && targetTransaction.Products) {
-        productsObj = parseProductsJson(targetTransaction.Products);
-      }
-      
-      if (productsObj && Object.keys(productsObj).length > 0) {
-        fields.push({
-          id: 'products',
-          label: 'Products/Items',
-          value: (
-            <div className="text-sm space-y-3">
-              {Object.entries(productsObj).map(([productKey, productValue], index) => {
-                // Handle both simple and detailed formats
-                let productName = productKey;
-                let displayQuantity = "";
-                let productSpend = 0;
-                let numericQuantity = 0;
-                
-                if (isDetailedFormat && typeof productValue === 'object' && productValue !== null) {
-                  // Detailed format with name, count/qty, spend
-                  const detailedData = productValue as {name?: string; count?: string | number; qty?: string | number; spend?: string | number};
-                  productName = detailedData.name || productKey;
-                  // Use count if available, otherwise try qty as fallback
-                  if ('count' in detailedData) {
-                    numericQuantity = typeof detailedData.count === 'string' ? parseFloat(detailedData.count) : Number(detailedData.count);
-                    displayQuantity = detailedData.count ? String(detailedData.count) : "";
-                  } else if ('qty' in detailedData) {
-                    numericQuantity = typeof detailedData.qty === 'string' ? parseFloat(detailedData.qty) : Number(detailedData.qty);
-                    displayQuantity = detailedData.qty ? String(detailedData.qty) : "";
-                  }
-                  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                  productSpend = typeof detailedData.spend === 'string' ? parseFloat(detailedData.spend as string) : Number(detailedData.spend || 0);
-                  // If there's a name in the detailed data, use that
-                  if (detailedData.name) {
-                    productName = detailedData.name;
-                  }
-                } else {
-                  // For simple format with just quantities
-                  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                  numericQuantity = typeof productValue === 'string' ? parseFloat(productValue) : Number(productValue);
-                  displayQuantity = typeof productValue === 'string' ? productValue as string : String(productValue || '');
-                }
-                
-                // Check if we have a manual match or try to find an automatic match
-                const manualMatchId = manualMatches[productName];
-                let matchedProduct = null;
-                const potentialMatches: Array<{product: MongoProduct, score: number}> = [];
-                
-                // First check if we have a manual match
-                if (manualMatchId && manualMatchId !== 'override') {
-                  // Find the product in MongoDB products
-                  matchedProduct = mongoProducts.find(p => p._id === manualMatchId || p.id === manualMatchId) ?? null;
-                  
-                  // Still find potential matches for display (but don't use them since we have a manual match)
-                  potentialMatches.push(...mongoProducts
-                    .filter(p => p._id !== manualMatchId) // Exclude the already matched product
-                    .map(p => ({
-                      product: p,
-                      score: calculateSimilarityScore(p.name, productName)
-                    }))
-                    .filter(item => item.score > 20) // Only consider products with a reasonable match score
-                    .sort((a, b) => b.score - a.score)
-                    .slice(0, 3)); // Get top 3 alternatives
-                } else {
-                  // Try to find potential matches with similarity scoring
-                  const scoredMatches = mongoProducts
-                    .map(p => ({
-                      product: p,
-                      score: calculateSimilarityScore(p.name, productName)
-                    }))
-                    .filter(item => item.score > 20) // Only consider products with a reasonable match score
-                    .sort((a, b) => b.score - a.score); // Sort by score (highest first)
-                  
-                  // If we have a good candidate (score >= 40), select it initially
-                  if (scoredMatches.length > 0 && scoredMatches[0].score >= 40) {
-                    matchedProduct = scoredMatches[0].product;
-                  }
-                  
-                  // Limit to top 4 matches for display
-                  potentialMatches.push(...scoredMatches.slice(0, 4));
-                }
-                
-                // Use the already declared numericQuantity instead of redeclaring it
-                // const numericQuantity = parseFloat(displayQuantity);
-                
-                return (
-                  <div key={index} className="p-3 border rounded-md bg-gray-50">
-                    <div className="flex flex-col mb-2">
-                      <span className="font-medium text-gray-700">
-                        Excel Product: {productName}
-                        <span className="text-gray-600 ml-1 font-bold">Quantity: {displayQuantity}</span>
-                      </span>
-                      
-                      {/* Show spend data if available in detailed format */}
-                      {productSpend > 0 && (
-                        <span className="text-sm text-gray-600">
-                          Spend: {formatCurrency(productSpend)}
-                          {numericQuantity > 0 && (
-                            <span className="ml-2">
-                              (Unit Cost: {formatCurrency(productSpend / numericQuantity)})
-                            </span>
-                          )}
-                        </span>
-                      )}
-                    </div>
-                    
-                    {/* Show currently matched product */}
-                    {matchedProduct && (
-                      <div className="p-2 bg-emerald-50 rounded mb-2 border border-emerald-200">
-                        <div className="flex justify-between items-center">
-                          <div className="font-medium text-gray-800">
-                            <span className="text-emerald-600">✓</span> {matchedProduct.name}
-                          </div>
-                          
-                          {/* Display price info for the purchase */}
-                          <div className="text-sm flex flex-col">
-                            <span className="text-gray-600">
-                              Unit Cost: {formatCurrency(matchedProduct.lastPurchasePrice || 0)}
-                            </span>
-                            <span className="text-gray-600">
-                              Total: {formatCurrency(productSpend > 0 ? 
-                                productSpend : 
-                                (matchedProduct.lastPurchasePrice || 0) * numericQuantity)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Product matching controls */}
-                    <div className="flex gap-2 justify-between items-center mb-2">
-                      <div className="flex-1">
-                        <input
-                          type="text"
-                          placeholder="Search for products..."
-                          className="input input-sm w-full border rounded p-1 text-sm"
-                          onChange={(e) => handleProductSearch(e.target.value)}
-                        />
-                      </div>
-                      
-                      <button
-                        className="px-2 py-1 bg-gray-200 rounded text-xs"
-                        onClick={() => setProductMatch(productName, 'override')}
-                      >
-                        No Match
-                      </button>
-                    </div>
-                    
-                    {/* Product search results */}
-                    <div className="mb-2">
-                      {isLoadingProducts ? (
-                        <div className="text-center py-1">
-                          <span className="text-xs text-gray-500">Loading...</span>
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap gap-1">
-                          {suggestedProducts.slice(0, 5).map((product) => (
-                            <button
-                              key={product._id}
-                              className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded max-w-[150px] truncate"
-                              onClick={() => setProductMatch(productName, product._id)}
-                            >
-                              {product.name}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Alternative matches with previous styling */}
-                    {potentialMatches.length > 0 && (
-                      <div className="mt-2">
-                        <div className="text-sm font-medium text-gray-700 mb-1">
-                          {matchedProduct ? 'Alternative Matches:' : 'Potential Matches:'}
-                        </div>
-                        <div className="space-y-1">
-                          {potentialMatches.map((match, mIdx) => (
-                            <div 
-                              key={mIdx}
-                              className={`
-                                p-1.5 border rounded flex justify-between items-center cursor-pointer hover:bg-gray-100
-                                ${match.product._id === manualMatchId ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200'}
-                              `}
-                              onClick={() => setProductMatch(productName, match.product._id)}
-                            >
-                              <div className="font-medium text-gray-800">{match.product.name}</div>
-                              <div className="flex items-center">
-                                <span className="text-xs bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">
-                                  {match.score.toFixed(0)}%
-                                </span>
-                                <button
-                                  className="ml-2 text-xs bg-blue-500 text-white px-2 py-0.5 rounded hover:bg-blue-600"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setProductMatch(productName, match.product._id);
-                                  }}
-                                >
-                                  Choose
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ),
-          originalData: JSON.stringify(productsObj)
-        });
-      }
     }
     
-    // Always include excelId field for all Excel transactions (both sales and purchases)
+    // Always include excelId field for all Excel transactions if not already added
     if (!fields.some(f => f.id === 'excelId')) {
       fields.push({
         id: 'excelId',
@@ -1882,9 +1704,6 @@ export default function SalesPage() {
     if (productsStr) {
       // Try to parse the Products JSON
       const productsObj = parseProductsJson(productsStr);
-      const isDetailedFormat = Object.values(productsObj).some(value => 
-        typeof value === 'object' && value !== null && 'name' in (value as object)
-      );
       
       if (productsObj && Object.keys(productsObj).length > 0) {
         fields.push({
@@ -1896,108 +1715,36 @@ export default function SalesPage() {
                 // Handle both simple and detailed formats
                 let productName = productKey;
                 let displayQuantity = "";
-                let productSpend = 0;
-                let numericQuantity = 0;
                 
-                if (isDetailedFormat && typeof productValue === 'object' && productValue !== null) {
+                if (typeof productValue === 'object' && productValue !== null) {
                   // Detailed format with name, count/qty, spend
                   const detailedData = productValue as {name?: string; count?: string | number; qty?: string | number; spend?: string | number};
                   productName = detailedData.name || productKey;
                   // Use count if available, otherwise try qty as fallback
                   if ('count' in detailedData) {
-                    numericQuantity = typeof detailedData.count === 'string' ? parseFloat(detailedData.count) : Number(detailedData.count);
                     displayQuantity = detailedData.count ? String(detailedData.count) : "";
                   } else if ('qty' in detailedData) {
-                    numericQuantity = typeof detailedData.qty === 'string' ? parseFloat(detailedData.qty) : Number(detailedData.qty);
                     displayQuantity = detailedData.qty ? String(detailedData.qty) : "";
-                  }
-                  productSpend = typeof detailedData.spend === 'string' ? parseFloat(detailedData.spend as string) : Number(detailedData.spend || 0);
-                  // If there's a name in the detailed data, use that
-                  if (detailedData.name) {
-                    productName = detailedData.name;
                   }
                 } else {
                   // Simple format with just quantities
-                  numericQuantity = typeof productValue === 'string' ? parseFloat(productValue) : Number(productValue);
                   displayQuantity = typeof productValue === 'string' ? productValue as string : String(productValue || '');
                 }
                 
-                // Check if we have a manual match or try to find an automatic match
-                const manualMatchId = manualMatches[productName];
-                let matchedProduct = null;
-                
-                if (manualMatchId && manualMatchId !== 'override') {
-                  // Find the product in MongoDB products
-                  matchedProduct = mongoProducts.find(p => p._id === manualMatchId || p.id === manualMatchId) ?? null;
-                } else if (manualMatchId !== 'override') {
-                  // Try to find a potential match based on similarity
-                  const potentialMatches = mongoProducts
-                    .map(p => ({
-                      product: p,
-                      score: calculateSimilarityScore(p.name, productName)
-                    }))
-                    .filter(item => item.score > 40) // Only consider products with a reasonable match score
-                    .sort((a, b) => b.score - a.score); // Sort by score (highest first)
-                  
-                  if (potentialMatches.length > 0) {
-                    matchedProduct = potentialMatches[0].product;
-                  }
-                }
-                
                 return (
-                  <div key={index} className="p-3 border rounded-md bg-gray-50">
-                    <div className="flex flex-col mb-2">
+                  <div key={index} className="p-2 border rounded-md bg-gray-50">
+                    <div className="flex flex-col">
                       <span className="font-medium text-gray-700">
-                        Excel Product: {productName}
-                        <span className="text-gray-600 ml-1 font-bold">(x{displayQuantity})</span>
+                        {productName}
+                        {displayQuantity && <span className="text-gray-600 ml-1">(x{displayQuantity})</span>}
                       </span>
-                      
-                      {/* Show spend data if available in detailed format */}
-                      {productSpend > 0 && (
-                        <span className="text-sm text-gray-600">
-                          Spend: {formatCurrency(productSpend)}
-                          {numericQuantity > 0 && (
-                            <span className="ml-2">
-                              (Unit Cost: {formatCurrency(productSpend / numericQuantity)})
-                            </span>
-                          )}
-                        </span>
-                      )}
                     </div>
-                    
-                    {/* Show currently matched product */}
-                    {matchedProduct && (
-                      <div className="p-2 bg-emerald-50 rounded mb-2 border border-emerald-200">
-                        <div className="flex justify-between items-center">
-                          <div className="font-medium text-gray-800">
-                            <span className="text-emerald-600">✓</span> {matchedProduct.name}
-                            <span className="text-gray-600 ml-1 font-medium">(Quantity: {numericQuantity})</span>
-                          </div>
-                          
-                          {/* Display price info for the product */}
-                          <div className="text-sm flex items-center space-x-2">
-                            <span className="text-gray-600">
-                              Unit: {formatCurrency(isExpense ? 
-                                (matchedProduct.lastPurchasePrice ? Number(matchedProduct.lastPurchasePrice) : 0) :
-                                (matchedProduct.retailPrice ? Number(matchedProduct.retailPrice) : 0))}
-                            </span>
-                            <span className="text-gray-600">
-                              Total: {formatCurrency((isExpense ? 
-                                Number(matchedProduct.lastPurchasePrice || 0) : 
-                                Number(matchedProduct.retailPrice || 0)) * numericQuantity)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* ... existing product matching controls ... */}
                   </div>
                 );
               })}
             </div>
           ),
-          originalData: productsStr
+          originalData: JSON.stringify(productsObj)
         });
       }
     }
@@ -2997,7 +2744,7 @@ export default function SalesPage() {
                       <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky top-0 bg-gray-50 z-10 w-24">
                         Status
                       </th>
-                      {tableFields.map((field: TableField) => (
+                      {tableFields.filter(field => !field.isHidden).map((field: TableField) => (
                         <th key={field.id} scope="col" className={`px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky top-0 bg-gray-50 z-10 ${field.id === 'description' ? 'w-72' : 'w-40'}`}>
                           {field.label}
                         </th>
@@ -3054,7 +2801,7 @@ export default function SalesPage() {
                         </td>
                         
                         {/* Map through the tableFields to create selectable cells */}
-                        {tableFields.map((field: TableField) => {
+                        {tableFields.filter(field => !field.isHidden).map((field: TableField) => {
                           // Determine the appropriate value for each cell based on field type
                           let cellValue: React.ReactNode = '-';
                           
@@ -3066,12 +2813,50 @@ export default function SalesPage() {
                               : String(transactionIdValue || '-');
                           } else if (field.id === "date") {
                             cellValue = transaction.Date ? new Date(transaction.Date).toLocaleDateString() : '-';
+                          } else if (field.id === "transactionType") {
+                            // Determine transaction type based on the criteria provided
+                            if (transaction.Client) {
+                              // Training sessions always have a value in the "Client" column
+                              cellValue = (
+                                <span className="px-2 py-1 text-xs font-medium rounded-md bg-purple-100 text-purple-800 border border-purple-200">
+                                  Training
+                                </span>
+                              );
+                            } else if (
+                              // Check if any expense column has a value
+                              (transaction['Wholesale cost'] && Number(transaction['Wholesale cost']) > 0) ||
+                              (transaction['Software cost'] && Number(transaction['Software cost']) > 0) ||
+                              (transaction['Ads cost'] && Number(transaction['Ads cost']) > 0) ||
+                              (transaction['Equipment cost'] && Number(transaction['Equipment cost']) > 0) ||
+                              (transaction['Miscellaneous expense'] && Number(transaction['Miscellaneous expense']) > 0) ||
+                              (transaction['Print media expense'] && Number(transaction['Print media expense']) > 0) ||
+                              (transaction['Space rental cost'] && Number(transaction['Space rental cost']) > 0) ||
+                              (transaction['Pawsability rent'] && Number(transaction['Pawsability rent']) > 0)
+                            ) {
+                              cellValue = (
+                                <span className="px-2 py-1 text-xs font-medium rounded-md bg-amber-100 text-amber-800 border border-amber-200">
+                                  Purchase
+                                </span>
+                              );
+                            } else {
+                              cellValue = (
+                                <span className="px-2 py-1 text-xs font-medium rounded-md bg-sky-100 text-sky-800 border border-sky-200">
+                                  Sale
+                                </span>
+                              );
+                            }
                           } else if (field.id === "customer") {
                             const mainValue = transaction[field.dataField as keyof ProcessedTransaction];
                             const altValue = field.altField ? transaction[field.altField] : null;
                             cellValue = String(mainValue || altValue || '-');
-                          } else if (field.id === "amount") {
-                            cellValue = `$${(Number(transaction.Revenue) || 0).toFixed(2)}`;
+                          } else if (field.id === "client") {
+                            cellValue = String(transaction.Client || '-');
+                          } else if (field.id === "supplierOrderNumber") {
+                            cellValue = String(transaction['Supplier order #'] || '-');
+                          } else if (field.id === "revenue") {
+                            cellValue = typeof transaction.Revenue === 'number' && transaction.Revenue > 0
+                              ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(transaction.Revenue))
+                              : '-';
                           } else {
                             cellValue = String(transaction[field.dataField as keyof ProcessedTransaction] || '-');
                           }
@@ -3082,7 +2867,7 @@ export default function SalesPage() {
                               key={`${index}-${field.id}`}
                               className={cn(
                                 "px-4 py-3 whitespace-nowrap text-sm",
-                                field.id === "amount" ? "font-medium" : "",
+                                field.id === "revenue" ? "font-medium" : "",
                                 field.id === "description" ? "truncate max-w-xs" : "whitespace-nowrap"
                               )}
                             >
@@ -3119,7 +2904,7 @@ export default function SalesPage() {
                     {/* Show message when there are no transactions */}
                     {processedTransactions.length === 0 && (
                       <tr>
-                        <td colSpan={tableFields.length + 3} className="px-4 py-6 text-center text-sm text-gray-500">
+                        <td colSpan={tableFields.filter(field => !field.isHidden).length + 3} className="px-4 py-6 text-center text-sm text-gray-500">
                           No transactions to review. Please upload an Excel file with transaction data.
                         </td>
                       </tr>
@@ -3399,9 +3184,12 @@ export default function SalesPage() {
             <div className="bg-white rounded-lg p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold">
-                  {transactionToSubmit && 'type' in transactionToSubmit && transactionToSubmit.type === 'purchase' ? 
+                  {transactionToSubmit && 'type' in transactionToSubmit && 
+                   (transactionToSubmit.type === 'purchase' ? 
                     'Commit Expense to MongoDB' : 
-                    'Commit Sale to MongoDB'}
+                    (transactionToSubmit.type === 'training' ? 
+                     'Commit Training Transaction to MongoDB' : 
+                     'Commit Sale to MongoDB'))}
                 </h2>
                 <button 
                   onClick={() => setShowCommitDialog(false)}
