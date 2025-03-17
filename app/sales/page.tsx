@@ -2582,6 +2582,57 @@ export default function SalesPage() {
     }
   };
 
+  // Determine transaction row background color based on type
+  const getTransactionRowBackground = (transaction: ProcessedTransaction): string => {
+    if (transaction.Client) {
+      // Training transaction (pastel green)
+      return "bg-green-50";
+    } else if (isExpenseTransaction(transaction)) {
+      // Purchase transaction (pastel red)
+      return "bg-red-50";
+    } else {
+      // Sale transaction (pastel green)
+      return "bg-green-50";
+    }
+  };
+
+  // Function to edit transaction amount
+  const [editingAmount, setEditingAmount] = useState<{index: number, field: string, value: string} | null>(null);
+
+  const handleEditAmount = (index: number, field: string, currentValue: number | string) => {
+    setEditingAmount({
+      index, 
+      field, 
+      value: currentValue ? String(currentValue) : ''
+    });
+  };
+
+  const saveEditedAmount = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && editingAmount) {
+      const { index, field, value } = editingAmount;
+      
+      // Update the transaction with the new amount
+      const updatedTransactions = [...processedTransactions];
+      const numericValue = parseFloat(value);
+      
+      if (!isNaN(numericValue)) {
+        updatedTransactions[index] = {
+          ...updatedTransactions[index],
+          [field]: numericValue
+        };
+        
+        setProcessedTransactions(updatedTransactions);
+        toast.success(`Updated ${field} to ${numericValue}`);
+      } else {
+        toast.error("Please enter a valid number");
+      }
+      
+      setEditingAmount(null);
+    } else if (e.key === 'Escape') {
+      setEditingAmount(null);
+    }
+  };
+
   return (
     <div className="container mx-auto py-6 space-y-8 relative">
       {/* Sticky Bulk Commit Panel */}
@@ -2829,7 +2880,8 @@ export default function SalesPage() {
                         key={index}
                         className={cn(
                           "hover:bg-gray-50",
-                          transaction.exists ? "bg-gray-50" : "",
+                          getTransactionRowBackground(transaction),
+                          transaction.exists ? "bg-opacity-70" : "",
                           selectedTransactions.get(index) === true ? "bg-blue-50" : ""
                         )}
                       >
@@ -2887,9 +2939,14 @@ export default function SalesPage() {
                             if (transaction.Client) {
                               // Training sessions always have a value in the "Client" column
                               cellValue = (
-                                <span className="px-2 py-1 text-xs font-medium rounded-md bg-purple-100 text-purple-800 border border-purple-200">
-                                  Training
-                                </span>
+                                <div className="flex items-center gap-1">
+                                  <span className="px-2 py-1 text-xs font-medium rounded-md bg-green-100 text-green-800 border border-green-200">
+                                    Sale
+                                  </span>
+                                  <span className="px-2 py-1 text-xs font-medium rounded-md bg-purple-100 text-purple-800 border border-purple-200">
+                                    Training
+                                  </span>
+                                </div>
                               );
                             } else if (
                               // Check if any expense column has a value
@@ -2903,13 +2960,13 @@ export default function SalesPage() {
                               (transaction['Pawsability rent'] && Number(transaction['Pawsability rent']) > 0)
                             ) {
                               cellValue = (
-                                <span className="px-2 py-1 text-xs font-medium rounded-md bg-amber-100 text-amber-800 border border-amber-200">
+                                <span className="px-2 py-1 text-xs font-medium rounded-md bg-red-100 text-red-800 border border-red-200">
                                   Purchase
                                 </span>
                               );
                             } else {
                               cellValue = (
-                                <span className="px-2 py-1 text-xs font-medium rounded-md bg-sky-100 text-sky-800 border border-sky-200">
+                                <span className="px-2 py-1 text-xs font-medium rounded-md bg-green-100 text-green-800 border border-green-200">
                                   Sale
                                 </span>
                               );
@@ -2923,13 +2980,57 @@ export default function SalesPage() {
                           } else if (field.id === "supplierOrderNumber") {
                             cellValue = String(transaction['Supplier order #'] || '-');
                           } else if (field.id === "revenue") {
-                            cellValue = typeof transaction.Revenue === 'number' && transaction.Revenue > 0
-                              ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(transaction.Revenue))
-                              : '-';
+                            const value = typeof transaction.Revenue === 'number' && transaction.Revenue > 0
+                              ? Number(transaction.Revenue)
+                              : 0;
+                            
+                            if (editingAmount && editingAmount.index === index && editingAmount.field === 'Revenue') {
+                              cellValue = (
+                                <input
+                                  type="text"
+                                  value={editingAmount.value}
+                                  onChange={(e) => setEditingAmount({...editingAmount, value: e.target.value})}
+                                  onKeyDown={saveEditedAmount}
+                                  className="w-full border border-blue-300 rounded px-2 py-1"
+                                  autoFocus
+                                />
+                              );
+                            } else {
+                              cellValue = (
+                                <div 
+                                  className="cursor-pointer hover:bg-blue-50 px-2 py-1 rounded" 
+                                  onClick={() => handleEditAmount(index, 'Revenue', value)}
+                                >
+                                  {value ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value) : '-'}
+                                </div>
+                              );
+                            }
                           } else if (field.id === "wholesaleCost") {
-                            cellValue = typeof transaction['Wholesale cost'] === 'number' && transaction['Wholesale cost'] > 0
-                              ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(transaction['Wholesale cost']))
-                              : '-';
+                            const value = typeof transaction['Wholesale cost'] === 'number' && transaction['Wholesale cost'] > 0
+                              ? Number(transaction['Wholesale cost'])
+                              : 0;
+                            
+                            if (editingAmount && editingAmount.index === index && editingAmount.field === 'Wholesale cost') {
+                              cellValue = (
+                                <input
+                                  type="text"
+                                  value={editingAmount.value}
+                                  onChange={(e) => setEditingAmount({...editingAmount, value: e.target.value})}
+                                  onKeyDown={saveEditedAmount}
+                                  className="w-full border border-blue-300 rounded px-2 py-1"
+                                  autoFocus
+                                />
+                              );
+                            } else {
+                              cellValue = (
+                                <div 
+                                  className="cursor-pointer hover:bg-blue-50 px-2 py-1 rounded" 
+                                  onClick={() => handleEditAmount(index, 'Wholesale cost', value)}
+                                >
+                                  {value ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value) : '-'}
+                                </div>
+                              );
+                            }
                           } else if (field.id === "expenseTypeAmount") {
                             // Check all expense fields and collect all expenses with values
                             const expenseFields = [
@@ -3026,6 +3127,7 @@ export default function SalesPage() {
                                 field.id === "revenue" ? "font-medium" : "",
                                 field.id === "description" ? "truncate max-w-xs" : "whitespace-nowrap"
                               )}
+                              onClick={() => field.id !== "revenue" && field.id !== "wholesaleCost" && toggleTransactionSelection(index)}
                             >
                               {cellValue}
                             </td>

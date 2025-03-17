@@ -9,7 +9,7 @@ import './globals.css'
 import type { Metadata } from 'next'
 import { Quicksand } from 'next/font/google'
 import { Header } from '@/components/header'
-import { Toaster } from 'sonner'
+import { Toaster } from '@/components/ui/toaster'
 
 const quicksand = Quicksand({ subsets: ['latin'] })
 
@@ -26,7 +26,10 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en">
-        <body className={quicksand.className}>
+        <head>
+          {/* ... existing head content ... */}
+        </head>
+        <body className={`${quicksand.className} flex flex-col min-h-screen`}>
           <div className="min-h-screen flex flex-col">
             <div className="flex justify-end p-4">
               <SignedOut>
@@ -42,7 +45,7 @@ export default function RootLayout({
             <main className="flex-1">
               {children}
             </main>
-            <Toaster position="top-right" />
+            <Toaster />
           </div>
         </body>
       </html>

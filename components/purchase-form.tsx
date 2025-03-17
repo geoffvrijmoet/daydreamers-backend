@@ -398,6 +398,7 @@ export function PurchaseForm({ onSuccess, onCancel, isExpanded = false }: Purcha
             <option value="rent">Rent</option>
             <option value="utilities">Utilities</option>
             <option value="transit">Transit</option>
+            <option value="interest">Interest</option>
             <option value="other">Other</option>
           </select>
         </div>

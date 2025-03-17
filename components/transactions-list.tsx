@@ -14,6 +14,8 @@ import { ManualTransactionForm } from "@/components/manual-transaction-form"
 import { PurchaseForm } from '@/components/purchase-form'
 import { TrainingForm } from '@/components/training-form'
 import { ChevronDown, ChevronRight } from "lucide-react"
+import { formatNumberWithCommas } from "@/lib/utils"
+import { toast } from "sonner"
 
 interface TransactionData {
   _id: string
@@ -134,6 +136,8 @@ export function TransactionsList() {
     endDate: endDate?.toISOString()
   })
   const [activeForm, setActiveForm] = useState<'sale' | 'purchase' | 'training' | null>(null)
+  const [editingTransaction, setEditingTransaction] = useState<{id: string, amount: string} | null>(null)
+  const [isUpdating, setIsUpdating] = useState(false)
 
   // Add effect to refresh transactions when dates change
   useEffect(() => {
@@ -291,17 +295,71 @@ export function TransactionsList() {
       : formatInEasternTime(parsedDate, 'MMM d, yyyy');
   }
 
+  const handleEditAmount = (transaction: TransactionData) => {
+    setEditingTransaction({
+      id: transaction._id,
+      amount: transaction.amount.toString()
+    });
+  };
+
+  const saveEditedAmount = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && editingTransaction) {
+      e.preventDefault();
+      setIsUpdating(true);
+      
+      try {
+        const numericAmount = parseFloat(editingTransaction.amount);
+        
+        if (isNaN(numericAmount)) {
+          toast.error("Please enter a valid number");
+          return;
+        }
+        
+        const response = await fetch(`/api/transactions/${editingTransaction.id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ amount: numericAmount }),
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to update transaction');
+        }
+        
+        toast.success("Transaction amount updated");
+        refreshTransactions();
+        setEditingTransaction(null);
+      } catch (error) {
+        console.error('Error updating transaction:', error);
+        toast.error("Failed to update transaction");
+      } finally {
+        setIsUpdating(false);
+      }
+    } else if (e.key === 'Escape') {
+      setEditingTransaction(null);
+    }
+  };
+
   const renderTransactionRow = (transaction: TransactionData) => {
     const { statusClasses, statusText } = getStatusDisplay(transaction);
     const formattedDate = formatTransactionDate(transaction.date, true);
     
-    // Define the icon based on transaction type
-    let typeIcon = '💰';
+    // Define background color and badges based on transaction type
+    let rowBgClass = '';
+    let typeBadge = null;
     
     if (transaction.type === 'purchase') {
-      typeIcon = '🛒';
+      rowBgClass = 'bg-red-50'; // Pastel red for purchases
     } else if (transaction.type === 'training') {
-      typeIcon = '🐕';
+      rowBgClass = 'bg-green-50'; // Pastel green for training
+      typeBadge = (
+        <span className="ml-2 px-2 py-0.5 text-xs font-medium rounded-md bg-purple-100 text-purple-800 border border-purple-200">
+          Training
+        </span>
+      );
+    } else {
+      rowBgClass = 'bg-green-50'; // Pastel green for sales
     }
     
     // Generate the description based on transaction type
@@ -324,19 +382,46 @@ export function TransactionsList() {
       }
     }
     
+    // Render the amount field - either as an input or as display text
+    const amountDisplay = editingTransaction && editingTransaction.id === transaction._id ? (
+      <div className="flex items-center">
+        <input
+          type="text"
+          value={editingTransaction.amount}
+          onChange={(e) => setEditingTransaction({...editingTransaction, amount: e.target.value})}
+          onKeyDown={saveEditedAmount}
+          className="w-24 px-2 py-1 text-right border border-blue-300 rounded"
+          autoFocus
+          disabled={isUpdating}
+        />
+        {isUpdating && <span className="ml-1 animate-spin">⟳</span>}
+      </div>
+    ) : (
+      <div 
+        className="cursor-pointer hover:bg-blue-50 px-2 py-1 rounded" 
+        onClick={() => handleEditAmount(transaction)}
+      >
+        ${formatNumberWithCommas(transaction.amount)}
+      </div>
+    );
+    
     // Return the row JSX
     return (
-      <div className="p-3 hover:bg-gray-50">
+      <div className={`p-3 hover:bg-gray-100 ${rowBgClass}`}>
         <div className="flex justify-between">
           <div className="flex gap-2 items-center">
-            <span className="text-lg">{typeIcon}</span>
             <div>
-              <div className="font-medium">{transaction.customer || transaction.clientName || transaction.supplier || 'Unknown'}</div>
+              <div className="font-medium flex items-center">
+                {transaction.customer || transaction.clientName || transaction.supplier || 'Unknown'}
+                {typeBadge}
+              </div>
               <div className="text-sm text-gray-500">{formattedDate} - {displayDescription}</div>
             </div>
           </div>
           <div className="flex flex-col items-end">
-            <div className="font-semibold">${transaction.amount.toFixed(2)}</div>
+            <div className="font-semibold">
+              {amountDisplay}
+            </div>
             <div className="text-xs">
               <span className={statusClasses}>{statusText}</span>
             </div>
@@ -526,11 +611,16 @@ export function TransactionsList() {
             const salesTaxRate = 0.08875; // 8.875%
             totalSalesTax += preTaxAmount * salesTaxRate;
             
-            // Estimate credit card fees (typically ~3%)
-            // Only apply to non-cash payments
-            const isCashPayment = (typedTransaction.paymentMethod || '').toLowerCase().includes('cash');
-            if (!isCashPayment) {
-              totalCreditCardFees += preTaxAmount * 0.03;
+            // Calculate credit card fees based on new rules
+            if (typedTransaction.type === 'sale') {
+              if (typedTransaction.source === 'square') {
+                // Square: 2.6% of amount + $0.10
+                totalCreditCardFees += (typedTransaction.amount * 0.026) + 0.10;
+              } else if (typedTransaction.source === 'shopify') {
+                // Shopify: 2.9% of amount + $0.30
+                totalCreditCardFees += (typedTransaction.amount * 0.029) + 0.30;
+              }
+              // For all other sources, no fee is added (stays at $0)
             }
           } else if (typedTransaction.isTaxable === false) {
             // Add to non-taxable sales if explicitly marked as non-taxable
@@ -759,19 +849,19 @@ export function TransactionsList() {
                 <h4 className="text-sm font-medium text-purple-900 mb-2">Revenue</h4>
                 <div className="flex items-baseline justify-between mb-2">
                   <p className="text-lg font-semibold text-purple-900">
-                    ${periodSummary.revenue.toFixed(2)}
+                    ${formatNumberWithCommas(periodSummary.revenue)}
                   </p>
                   <div className="flex gap-4">
                     <div>
                       <p className="text-xs text-purple-700">Pre-tax Sales</p>
                       <p className="text-xs font-medium text-purple-800 text-right">
-                        ${periodSummary.preTaxSales.toFixed(2)}
+                        ${formatNumberWithCommas(periodSummary.preTaxSales)}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-purple-700">Non-tax Sales</p>
                       <p className="text-xs font-medium text-purple-800 text-right">
-                        ${periodSummary.nonTaxableSales.toFixed(2)}
+                        ${formatNumberWithCommas(periodSummary.nonTaxableSales)}
                       </p>
                     </div>
                   </div>
@@ -783,26 +873,26 @@ export function TransactionsList() {
                 <h4 className="text-sm font-medium text-red-900 mb-2">Costs</h4>
                 <div className="mb-2">
                   <p className="text-lg font-semibold text-red-900">
-                    ${periodSummary.costs.toFixed(2)}
+                    ${formatNumberWithCommas(periodSummary.costs)}
                   </p>
                 </div>
                 <div className="grid grid-cols-4 gap-x-3 gap-y-1 mt-2">
                   <div>
                     <p className="text-xs text-red-700">Sales Tax</p>
                     <p className="text-xs font-medium text-red-800">
-                      ${periodSummary.salesTax.toFixed(2)}
+                      ${formatNumberWithCommas(periodSummary.salesTax)}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-red-700">CC Fees</p>
                     <p className="text-xs font-medium text-red-800">
-                      ${periodSummary.creditCardFees.toFixed(2)}
+                      ${formatNumberWithCommas(periodSummary.creditCardFees)}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-red-700">Inventory</p>
                     <p className="text-xs font-medium text-red-800">
-                      ${periodSummary.inventory.toFixed(2)}
+                      ${formatNumberWithCommas(periodSummary.inventory)}
                     </p>
                   </div>
                   <div>
@@ -817,7 +907,7 @@ export function TransactionsList() {
                       }
                     </button>
                     <p className="text-xs font-medium text-red-800">
-                      ${periodSummary.otherExpenses.toFixed(2)}
+                      ${formatNumberWithCommas(periodSummary.otherExpenses)}
                     </p>
                   </div>
                 </div>
@@ -832,7 +922,7 @@ export function TransactionsList() {
                             {category.charAt(0).toUpperCase() + category.slice(1)}
                           </span>
                           <span className="text-xs font-medium text-red-800">
-                            ${amount.toFixed(2)}
+                            ${formatNumberWithCommas(amount)}
                           </span>
                         </div>
                       ))}
@@ -846,7 +936,7 @@ export function TransactionsList() {
                 <h4 className="text-sm font-medium text-green-900 mb-2">Margin</h4>
                 <div className="flex items-baseline gap-3">
                   <p className="text-lg font-semibold text-green-900">
-                    ${periodSummary.margin.toFixed(2)}
+                    ${formatNumberWithCommas(periodSummary.margin)}
                   </p>
                   <p className="text-base font-medium text-green-700">
                     {periodSummary.marginPercentage.toFixed(1)}%
@@ -877,16 +967,16 @@ export function TransactionsList() {
                   </div>
                   <div className="flex gap-4 text-sm mt-1">
                     <span className="text-gray-600">
-                      Pre-tax Sales: ${group.totalAmount.toFixed(2)}
+                      Pre-tax Sales: ${formatNumberWithCommas(group.totalAmount)}
                     </span>
                     <span className="text-gray-600">
-                      Tax: ${group.totalTax.toFixed(2)}
+                      Tax: ${formatNumberWithCommas(group.totalTax)}
                     </span>
                     <span className="text-gray-600">
-                      Non-taxable: ${group.nonTaxableSales.toFixed(2)}
+                      Non-taxable: ${formatNumberWithCommas(group.nonTaxableSales)}
                     </span>
                     <span className="text-gray-600">
-                      Purchases: ${group.totalPurchases.toFixed(2)}
+                      Purchases: ${formatNumberWithCommas(group.totalPurchases)}
                     </span>
                   </div>
                 </div>

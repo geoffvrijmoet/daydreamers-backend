@@ -5,6 +5,7 @@ import { type EmailTransaction } from '@/types'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Loader2 } from 'lucide-react'
+import { formatNumberWithCommas } from "@/lib/utils"
 
 export function AmexTransactions() {
   const [transactions, setTransactions] = useState<EmailTransaction[]>([]);
@@ -138,7 +139,7 @@ export function AmexTransactions() {
                   <div>
                     <div className="font-medium">{transaction.supplier || 'No supplier'}</div>
                     <div className="text-sm text-gray-600">{transaction.description}</div>
-                    <div className="text-sm">Amount: ${transaction.amount.toFixed(2)}</div>
+                    <div className="text-sm">Amount: ${formatNumberWithCommas(transaction.amount)}</div>
                     <div className="text-xs text-gray-500">Card ending in {transaction.cardLast4}</div>
                   </div>
                   <div className={`text-xs px-2 py-1 rounded-full ${

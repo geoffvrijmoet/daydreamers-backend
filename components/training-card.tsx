@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { toEasternTime, formatInEasternTime } from '@/lib/utils/dates'
+import { formatNumberWithCommas } from "@/lib/utils"
 
 interface TrainingData {
   _id: string
@@ -122,7 +123,7 @@ export function TrainingCard() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant="outline">{session.trainingType && session.trainingType !== 'none' ? session.trainingType : "Training"}</Badge>
-                  <span className="font-semibold">${session.amount.toFixed(2)}</span>
+                  <span className="font-semibold">${formatNumberWithCommas(session.amount)}</span>
                 </div>
               </div>
               
@@ -142,9 +143,9 @@ export function TrainingCard() {
                     </div>
                     <div>
                       <p><span className="font-medium">Payment:</span> {session.paymentMethod || "Not specified"}</p>
-                      <p><span className="font-medium">Total:</span> ${session.amount.toFixed(2)}</p>
-                      <p><span className="font-medium">Pre-tax:</span> ${session.preTaxAmount.toFixed(2)}</p>
-                      <p><span className="font-medium">Tax:</span> ${session.taxAmount.toFixed(2)}</p>
+                      <p><span className="font-medium">Total:</span> ${formatNumberWithCommas(session.amount)}</p>
+                      <p><span className="font-medium">Pre-tax:</span> ${formatNumberWithCommas(session.preTaxAmount)}</p>
+                      <p><span className="font-medium">Tax:</span> ${formatNumberWithCommas(session.taxAmount)}</p>
                     </div>
                   </div>
                   
