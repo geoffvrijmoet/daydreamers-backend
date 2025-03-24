@@ -1,20 +1,64 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { getDb } from '@/lib/mongodb'
 import { ObjectId } from 'mongodb'
+import { type IProduct } from '@/lib/models/Product'
 
 export async function GET() {
   try {
-    
     const db = await getDb()
     
     console.log('Fetching products from MongoDB...')
-    const products = await db.collection('products').find({}).toArray()
+    const products = await db.collection<IProduct>('products').find({}).toArray()
     console.log(`Found ${products.length} products`)
 
-    // Map _id to id for frontend consumption
+    // Map _id to id and transform the data for frontend consumption
     const mappedProducts = products.map(product => ({
-      ...product,
-      id: product._id.toString()
+      id: (product._id as ObjectId).toString(),
+      name: product.name,
+      description: product.description,
+      category: product.category,
+      retailPrice: product.retailPrice,
+      currentStock: product.currentStock,
+      minimumStock: product.minimumStock,
+      lastPurchasePrice: product.lastPurchasePrice,
+      averageCost: product.averageCost,
+      supplier: product.supplier,
+      isProxied: product.isProxied,
+      proxyOf: product.proxyOf,
+      proxyRatio: product.proxyRatio,
+      costHistory: product.costHistory.map(entry => ({
+        ...entry,
+        date: entry.date.toISOString()
+      })),
+      totalSpent: product.totalSpent,
+      totalPurchased: product.totalPurchased,
+      lastRestockDate: product.lastRestockDate?.toISOString(),
+      active: product.active,
+      variants: product.variants.map(variant => ({
+        name: variant.name,
+        sku: variant.sku,
+        barcode: variant.barcode,
+        price: variant.price,
+        stock: variant.stock,
+        platformMetadata: variant.platformMetadata.map(meta => ({
+          ...meta,
+          lastSyncedAt: meta.lastSyncedAt.toISOString()
+        }))
+      })),
+      platformMetadata: product.platformMetadata.map(meta => ({
+        ...meta,
+        lastSyncedAt: meta.lastSyncedAt.toISOString()
+      })),
+      syncStatus: {
+        lastSyncAttempt: product.syncStatus.lastSyncAttempt.toISOString(),
+        lastSuccessfulSync: product.syncStatus.lastSuccessfulSync.toISOString(),
+        errors: product.syncStatus.errors.map(error => ({
+          ...error,
+          date: error.date.toISOString()
+        }))
+      },
+      createdAt: product.createdAt.toISOString(),
+      updatedAt: product.updatedAt.toISOString()
     }))
 
     console.log('First product as example:', mappedProducts[0])
@@ -32,23 +76,49 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const db = await getDb()
-    const product = await request.json()
+    const productData = await request.json()
 
-    // Initialize cost tracking fields
-    const newProduct = {
-      ...product,
+    // Create the new product with default values
+    const newProduct: Partial<IProduct> = {
+      name: productData.name,
+      description: productData.description || '',
+      category: productData.category || '',
+      retailPrice: productData.retailPrice,
+      currentStock: productData.currentStock || 0,
+      minimumStock: productData.minimumStock || 5,
+      lastPurchasePrice: productData.lastPurchasePrice || 0,
+      averageCost: productData.averageCost || 0,
+      supplier: productData.supplier || '',
+      isProxied: productData.isProxied || false,
+      proxyOf: productData.proxyOf,
+      proxyRatio: productData.proxyRatio,
       costHistory: [],
       totalSpent: 0,
       totalPurchased: 0,
-      averageCost: product.lastPurchasePrice,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      active: productData.active ?? true,
+      variants: [{
+        name: 'Default',
+        sku: productData.sku,
+        barcode: productData.barcode,
+        price: productData.retailPrice,
+        stock: productData.currentStock || 0,
+        platformMetadata: []
+      }],
+      platformMetadata: [],
+      syncStatus: {
+        lastSyncAttempt: new Date(),
+        lastSuccessfulSync: new Date(),
+        errors: []
+      },
+      createdAt: new Date(),
+      updatedAt: new Date()
     }
 
-    const result = await db.collection('products').insertOne(newProduct)
+    const result = await db.collection<IProduct>('products').insertOne(newProduct as IProduct)
     
+    // Return the created product with the new _id
     return NextResponse.json({ 
-      id: result.insertedId.toString(),
+      id: (result.insertedId as ObjectId).toString(),
       ...newProduct
     })
   } catch (error) {

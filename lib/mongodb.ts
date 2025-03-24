@@ -1,7 +1,16 @@
-import { MongoClient } from 'mongodb'
+import { MongoClient, Db } from 'mongodb'
+import { config } from 'dotenv'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+// Load environment variables from .env.local
+config({ path: path.resolve(__dirname, '../.env.local') })
 
 if (!process.env.MONGODB_URI) {
-  throw new Error('Please add your Mongo URI to .env.local')
+  throw new Error('Please define the MONGODB_URI environment variable inside .env.local')
 }
 
 const uri = process.env.MONGODB_URI
@@ -28,8 +37,42 @@ if (process.env.NODE_ENV === 'development') {
   clientPromise = client.connect()
 }
 
-export async function connectToDatabase() {
+/**
+ * Get a database instance
+ * @returns Promise<Db> The database instance
+ */
+export async function getDb(): Promise<Db> {
   const client = await clientPromise
-  const db = client.db()
-  return { client, db }
-} 
+  const dbName = process.env.MONGODB_DB
+  
+  if (!dbName) {
+    throw new Error('MONGODB_DB environment variable is not defined')
+  }
+  
+  return client.db(dbName)
+}
+
+/**
+ * Get both client and database instances
+ * @returns Promise<{ client: MongoClient, db: Db }> The client and database instances
+ */
+export async function connectToDatabase() {
+  try {
+    const client = await clientPromise
+    const dbName = process.env.MONGODB_DB
+    
+    if (!dbName) {
+      throw new Error('MONGODB_DB environment variable is not defined')
+    }
+    
+    const db = client.db(dbName)
+    return { client, db }
+  } catch (error) {
+    console.error('Error connecting to the database:', error)
+    throw error
+  }
+}
+
+// Export a module-scoped MongoClient promise. By doing this in a
+// separate module, the client can be shared across functions.
+export default clientPromise 

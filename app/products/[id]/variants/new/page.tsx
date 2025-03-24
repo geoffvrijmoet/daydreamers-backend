@@ -51,7 +51,9 @@ export default function NewVariant({ params }: { params: { id: string } }) {
   // Create a product with all required fields from the Product interface
   const initialData = {
     id: 'new-variant-temp-id', // Temporary ID that will be replaced
-    name: parentProduct.name + ' - Variant',
+    baseProductName: parentProduct.name.split(' - ')[0], // Extract base product name
+    variantName: 'New Variant', // Default variant name
+    name: parentProduct.name.split(' - ')[0] + ' - New Variant',
     description: parentProduct.description || '',
     sku: '',
     currentStock: 0,
@@ -65,15 +67,11 @@ export default function NewVariant({ params }: { params: { id: string } }) {
     totalPurchased: 0,
     averageCost: 0,
     costHistory: [],
-    // Set parent relationship using existing fields in the Product interface
     active: true,
+    // Keep platform-specific IDs for external sync
     squareParentId: parentProduct.squareParentId,
     shopifyParentId: parentProduct.shopifyId?.split('/').pop()?.split('_')[0],
-    // Store parent product ID in a metadata field - this will be handled by server code
-    metadata: { 
-      isVariant: true,
-      parentProductId: params.id
-    }
+    platformMetadata: []
   } as unknown as Product; // Use unknown to bypass type checking
 
   return (

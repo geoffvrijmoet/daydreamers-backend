@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongodb'
+import TransactionModel from '@/lib/models/transaction'
 
 interface TransactionQuery {
   date?: {
@@ -72,52 +74,19 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const db = await getDb()
-    const data = await request.json()
+    const body = await request.json()
     
-    console.log('🔍 Received transaction data:', data);
-    
-    // Ensure products have correct data types
-    if (data.products && Array.isArray(data.products)) {
-      data.products = data.products.map((product: { 
-        name: string, 
-        quantity: number | string, 
-        unitPrice: number | string, 
-        totalPrice: number | string,
-        productId?: string 
-      }) => ({
-        ...product,
-        quantity: Number(product.quantity),
-        unitPrice: Number(product.unitPrice),
-        totalPrice: Number(product.totalPrice),
-      }));
-      
-      console.log('📦 Processed products:', data.products);
-    }
-    
-    // Ensure supplierOrderNumber is always a string
-    if (data.supplierOrderNumber !== undefined && data.supplierOrderNumber !== null) {
-      data.supplierOrderNumber = String(data.supplierOrderNumber);
-    }
-    
-    const now = new Date().toISOString()
-    const transaction = {
-      ...data,
-      createdAt: now,
-      updatedAt: now
-    }
+    // Connect to database
+    await connectToDatabase()
 
-    const result = await db.collection('transactions').insertOne(transaction)
-    
-    return NextResponse.json({ 
-      success: true, 
-      id: result.insertedId,
-      message: 'Transaction created successfully'
-    })
+    // Create new transaction
+    const transaction = await TransactionModel.create(body)
+
+    return NextResponse.json(transaction, { status: 201 })
   } catch (error) {
     console.error('Error creating transaction:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to create transaction' },
+      { error: 'Failed to create transaction' },
       { status: 500 }
     )
   }

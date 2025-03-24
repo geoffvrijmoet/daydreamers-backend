@@ -1,4 +1,5 @@
-import { ObjectId } from 'mongodb';
+import mongoose, { Schema, Document, Types } from 'mongoose';
+import ProductModel, { IProduct } from './Product';
 
 /**
  * MongoDB Transaction Schema
@@ -8,257 +9,164 @@ import { ObjectId } from 'mongodb';
  * but provides more detailed documentation and validation rules.
  */
 
-export interface TransactionSchema {
-  /**
-   * MongoDB document ID
-   */
-  _id: ObjectId;
-  
-  /**
-   * Unique transaction ID, typically includes source prefix
-   * Examples: "square_AbC123", "shopify_1234", "manual_20230101_1"
-   */
-  id: string;
-  
-  /**
-   * Transaction date in YYYY-MM-DD format
-   */
-  date: string;
-  
-  /**
-   * Transaction type
-   */
-  type: 'sale' | 'purchase' | 'refund' | 'training';
-  
-  /**
-   * Transaction amount in dollars
-   */
+// Common interfaces for shared fields
+interface IBaseTransaction extends Document {
+  date: Date;
   amount: number;
-  
-  /**
-   * Transaction description
-   */
-  description: string;
-  
-  /**
-   * Source of the transaction
-   * - 'square': Imported from Square
-   * - 'shopify': Imported from Shopify
-   * - 'gmail': Extracted from email
-   * - 'manual': Manually entered or imported from Excel
-   */
-  source: 'square' | 'shopify' | 'gmail' | 'manual';
-  
-  /**
-   * Customer name
-   */
-  customer?: string;
-  
-  /**
-   * Payment method used
-   * Common values: "Cash", "Credit Card", "Square", "Shopify", "Venmo", "Zelle", "Cash App"
-   */
+  type: 'sale' | 'expense' | 'training';
+  source: 'manual' | 'shopify' | 'square' | 'amex';
   paymentMethod?: string;
-  
-  /**
-   * Line items from point of sale system
-   */
-  lineItems?: Array<{
-    name: string;
-    quantity: number;
-    price: number;
-    sku?: string;
-    variant_id?: string;
-  }>;
-  
-  /**
-   * Products associated with this transaction
-   */
-  products?: Array<{
-    name: string;
-    quantity: number;
-    unitPrice: number;
-    totalPrice: number;
-    productId?: string;
-  }>;
-  
-  /**
-   * Total of all products
-   */
-  productsTotal?: number;
-  
-  /**
-   * Tax amount in dollars
-   */
-  taxAmount?: number;
-  
-  /**
-   * Amount before tax
-   */
-  preTaxAmount?: number;
-  
-  /**
-   * Tip amount in dollars
-   */
-  tip?: number;
-  
-  /**
-   * Discount amount in dollars
-   */
-  discount?: number;
-  
-  /**
-   * Transaction status
-   */
-  status: 'completed' | 'cancelled' | 'refunded';
-  
-  /**
-   * Refund information if applicable
-   */
-  refundAmount?: number;
-  refundDate?: string;
-  
-  /**
-   * Void information if applicable
-   */
-  voidReason?: string;
-  voidedAt?: string;
-  
-  /**
-   * Supplier information for purchases
-   */
-  supplier?: string;
-  supplierOrderNumber?: string;
-  
-  /**
-   * Additional notes
-   */
   notes?: string;
-  
-  /**
-   * Timestamps
-   */
-  createdAt: string;
-  updatedAt: string;
-  
-  /**
-   * Profit calculation data
-   */
-  profitCalculation?: {
-    /**
-     * Whether cost data is available for this transaction
-     */
-    hasCostData: boolean;
-    
-    /**
-     * Item-by-item cost and profit breakdown
-     */
-    items?: Array<{
-      name: string;
-      quantity: number;
-      salesPrice: number;
-      cost: number;
-      profit: number;
-      profitMargin?: number;
-    }>;
-    
-    /**
-     * Total revenue from this transaction
-     */
-    totalRevenue: number;
-    
-    /**
-     * Total cost of all items in this transaction
-     */
-    totalCost: number;
-    
-    /**
-     * Total profit (totalRevenue - totalCost - creditCardFees)
-     */
-    totalProfit: number;
-    
-    /**
-     * Number of items without cost data
-     */
-    itemsWithoutCost: number;
-    
-    /**
-     * Credit card processing fees
-     */
-    creditCardFees: number;
-    
-    /**
-     * When the profit calculation was performed
-     */
-    calculatedAt: string;
-  };
-  
-  /**
-   * Shopify-specific fields
-   */
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface ILineItem {
+  productId: Types.ObjectId | IProduct;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  isTaxable: boolean;
+}
+
+interface IPaymentProcessing {
+  fee: number;
+  provider: string;
+  transactionId?: string;
+}
+
+// Sale-specific interface
+interface ISaleTransaction extends IBaseTransaction {
+  type: 'sale';
+  customer?: string;
+  email?: string;
+  isTaxable: boolean;
+  preTaxAmount: number;
+  taxAmount: number;
+  products: ILineItem[];
+  tip?: number;
+  discount?: number;
+  shipping?: number;
+  paymentProcessing?: IPaymentProcessing;
   shopifyOrderId?: string;
   shopifyTotalTax?: number;
   shopifySubtotalPrice?: number;
   shopifyTotalPrice?: number;
-  shopifyProcessingFee?: number;
   shopifyPaymentGateway?: string;
-  
-  /**
-   * Additional Excel-imported fields
-   * These are extra fields that may be included when importing from Excel
-   */
-  location?: string;
-  dogTrainingAgency?: string;
-  dogName?: string;
-  itemizedWholesaleSpend?: string;
-  state?: string;
-  startingCashBalance?: number;
-  endingCashBalance?: number;
-  wholesaleCost?: number;
-  softwareCost?: number;
-  adsCost?: number;
-  equipmentCost?: number;
-  miscellaneousExpense?: number;
-  printMediaExpense?: number;
-  shippingCost?: number;
-  transitCost?: number;
-  dryIceCost?: number;
-  packagingCost?: number;
-  spaceRentalCost?: number;
-  fee?: number;
-  pawsabilityRent?: number;
-  otherCost?: number;
-  paidToMadeline?: number;
-  paidToGeoff?: number;
-  actuallySentToMadeline?: number;
-  withheldForMadelineIncomeTax?: number;
-  actuallySentToGeoff?: number;
-  withheldForGeoffIncomeTax?: number;
-  investmentFromMadeline?: number;
-  investmentFromGeoff?: number;
-  revenue?: number;
-  estimatedWholesaleCost?: number;
-  estimatedProfit?: number;
-  estimatedProfitPercentage?: number;
-  estimatedItemizedProfit?: string;
-  
-  /**
-   * Training service specific fields
-   */
-  trainer?: string;
-  clientName?: string;
-  trainingType?: string;
-  sessionDuration?: number;
-  sessionNumber?: number;
-  totalSessions?: number;
-  sessionNotes?: string;
-  
-  /**
-   * Original Excel Transaction ID
-   * Used for tracking and preventing duplicate imports of Venmo, Cash App, and Cash transactions
-   */
-  excelId?: string;
 }
+
+// Expense-specific interface
+interface IExpenseTransaction extends IBaseTransaction {
+  type: 'expense';
+  expenseType: string;
+  expenseLabel: string;
+  supplier?: string;
+  supplierOrderNumber?: string;
+  paymentProcessing?: IPaymentProcessing;
+}
+
+// Training-specific interface
+interface ITrainingTransaction extends IBaseTransaction {
+  type: 'training';
+  trainer: string;
+  clientName: string;
+  dogName: string;
+  sessionNotes?: string;
+  revenue: number;
+  trainingAgency?: string;
+}
+
+// Combined type
+type ITransaction = ISaleTransaction | IExpenseTransaction | ITrainingTransaction;
+
+// Base schema with common fields
+const BaseTransactionSchema = new Schema<IBaseTransaction>({
+  date: { type: Date, required: true },
+  amount: { type: Number, required: true },
+  type: { type: String, required: true, enum: ['sale', 'expense', 'training'] },
+  source: { type: String, required: true, enum: ['manual', 'shopify', 'square', 'amex'] },
+  paymentMethod: { type: String },
+  notes: { type: String },
+}, {
+  timestamps: true,
+  discriminatorKey: 'type'
+});
+
+// Line item schema for products
+const LineItemSchema = new Schema<ILineItem>({
+  productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
+  name: { type: String, required: true },
+  quantity: { type: Number, required: true },
+  unitPrice: { type: Number, required: true },
+  totalPrice: { type: Number, required: true },
+  isTaxable: { type: Boolean, required: true }
+});
+
+// Payment processing schema
+const PaymentProcessingSchema = new Schema<IPaymentProcessing>({
+  fee: { type: Number, required: true },
+  provider: { type: String, required: true },
+  transactionId: { type: String }
+});
+
+// Sale transaction schema
+const SaleTransactionSchema = new Schema<ISaleTransaction>({
+  customer: { type: String },
+  email: { type: String },
+  isTaxable: { type: Boolean, required: true },
+  preTaxAmount: { type: Number, required: true },
+  taxAmount: { type: Number, required: true },
+  products: [LineItemSchema],
+  tip: { type: Number },
+  discount: { type: Number },
+  shipping: { type: Number },
+  paymentProcessing: PaymentProcessingSchema,
+  shopifyOrderId: { type: String },
+  shopifyTotalTax: { type: Number },
+  shopifySubtotalPrice: { type: Number },
+  shopifyTotalPrice: { type: Number },
+  shopifyPaymentGateway: { type: String }
+});
+
+// Expense transaction schema
+const ExpenseTransactionSchema = new Schema<IExpenseTransaction>({
+  expenseType: { type: String, required: true },
+  expenseLabel: { type: String, required: true },
+  supplier: { type: String },
+  supplierOrderNumber: { type: String },
+  paymentProcessing: PaymentProcessingSchema
+});
+
+// Training transaction schema
+const TrainingTransactionSchema = new Schema<ITrainingTransaction>({
+  trainer: { type: String, required: true },
+  clientName: { type: String, required: true },
+  dogName: { type: String, required: true },
+  sessionNotes: { type: String },
+  revenue: { type: Number, required: true },
+  trainingAgency: { type: String }
+});
+
+// Create the base model
+const TransactionModel = mongoose.models.Transaction || mongoose.model<IBaseTransaction>('Transaction', BaseTransactionSchema);
+
+// Add discriminators for different transaction types
+TransactionModel.discriminator('sale', SaleTransactionSchema);
+TransactionModel.discriminator('expense', ExpenseTransactionSchema);
+TransactionModel.discriminator('training', TrainingTransactionSchema);
+
+// Indexes for common queries
+TransactionModel.schema.index({ date: 1 });
+TransactionModel.schema.index({ type: 1 });
+TransactionModel.schema.index({ source: 1 });
+TransactionModel.schema.index({ 'products.productId': 1 });
+TransactionModel.schema.index({ customer: 1 });
+TransactionModel.schema.index({ supplier: 1 });
+TransactionModel.schema.index({ trainer: 1 });
+
+export default TransactionModel;
+export type { ITransaction, ISaleTransaction, IExpenseTransaction, ITrainingTransaction, ILineItem, IPaymentProcessing };
 
 /**
  * Helper functions for working with transactions
