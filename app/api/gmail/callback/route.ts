@@ -2,12 +2,11 @@ import { NextResponse } from 'next/server'
 import { gmailService } from '@/lib/gmail'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { auth } from '@clerk/nextjs'
-import { redirect } from 'next/navigation'
+import { auth } from '@clerk/nextjs/server'
 
 export async function GET(request: Request) {
   try {
-    const { userId } = auth()
+    const { userId } = await auth()
     if (!userId) {
       return NextResponse.json(
         { error: 'Unauthorized' },
