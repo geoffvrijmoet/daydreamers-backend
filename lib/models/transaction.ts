@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
-import ProductModel, { IProduct } from './Product';
+import { IProduct } from './Product';
 
 /**
  * MongoDB Transaction Schema
