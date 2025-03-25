@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
-import mongoose from 'mongoose'
 import { google } from 'googleapis'
 import { gmailService } from '@/lib/gmail'
 import { OAuth2Client } from 'google-auth-library'
+import CredentialModel from '@/lib/models/Credential'
+import SettingModel from '@/lib/models/Setting'
 
 // Initialize the auth client for verification
 const auth = new OAuth2Client({
@@ -34,11 +35,23 @@ async function verifyAuthToken(request: Request) {
 // Set up Gmail push notifications
 export async function POST() {
   try {
+    // Check required environment variables
+    if (!process.env.GOOGLE_CLOUD_PROJECT || !process.env.GMAIL_TOPIC_NAME) {
+      console.error('Missing required environment variables:', {
+        project: process.env.GOOGLE_CLOUD_PROJECT ? 'Present' : 'Missing',
+        topic: process.env.GMAIL_TOPIC_NAME ? 'Present' : 'Missing'
+      })
+      return NextResponse.json(
+        { error: 'Missing required environment variables' },
+        { status: 500 }
+      )
+    }
+
     // Initialize Gmail service with credentials
     await gmailService.initialize()
 
     await connectToDatabase()
-    const credentials = await mongoose.model('Credential').findOne({ type: 'gmail' })
+    const credentials = await CredentialModel.findOne({ type: 'gmail' })
     
     if (!credentials?.data) {
       return NextResponse.json(
@@ -60,7 +73,7 @@ export async function POST() {
     })
 
     // Store the watch expiration
-    await mongoose.model('Setting').updateOne(
+    await SettingModel.updateOne(
       { key: 'gmail_watch' },
       { 
         $set: { 
@@ -80,7 +93,7 @@ export async function POST() {
   } catch (error) {
     console.error('Error setting up Gmail watch:', error)
     return NextResponse.json(
-      { error: 'Failed to set up Gmail notifications' },
+      { error: error instanceof Error ? error.message : 'Failed to set up Gmail notifications' },
       { status: 500 }
     )
   }
@@ -104,7 +117,7 @@ export async function PUT(request: Request) {
     await connectToDatabase()
     
     // Get Gmail credentials
-    const credentials = await mongoose.model('Credential').findOne({ type: 'gmail' })
+    const credentials = await CredentialModel.findOne({ type: 'gmail' })
     if (!credentials?.data) {
       return NextResponse.json(
         { error: 'Gmail not authenticated' },
@@ -117,7 +130,7 @@ export async function PUT(request: Request) {
     const gmail = google.gmail({ version: 'v1', auth: gmailService.getAuth() })
 
     // Get the last processed historyId
-    const watchSettings = await mongoose.model('Setting').findOne({ key: 'gmail_watch' })
+    const watchSettings = await SettingModel.findOne({ key: 'gmail_watch' })
     const lastHistoryId = watchSettings?.historyId
 
     // Get history of changes
@@ -148,10 +161,7 @@ export async function PUT(request: Request) {
         const subject = headers?.find(h => h.name?.toLowerCase() === 'subject')?.value
 
         // Check if this email matches our criteria
-        // You can customize this based on your needs
         if (from?.includes('geofferyv@gmail.com') && subject?.includes('Invoice')) {
-          // Process the email
-          // Add your custom processing logic here
           console.log('Processing matching email:', { from, subject })
         }
       }
@@ -159,7 +169,7 @@ export async function PUT(request: Request) {
 
     // Update the last processed historyId
     if (history.data.historyId) {
-      await mongoose.model('Setting').updateOne(
+      await SettingModel.updateOne(
         { key: 'gmail_watch' },
         { 
           $set: { 
@@ -175,7 +185,7 @@ export async function PUT(request: Request) {
   } catch (error) {
     console.error('Error processing Gmail notification:', error)
     return NextResponse.json(
-      { error: 'Failed to process Gmail notification' },
+      { error: error instanceof Error ? error.message : 'Failed to process Gmail notification' },
       { status: 500 }
     )
   }
