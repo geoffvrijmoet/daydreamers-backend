@@ -336,7 +336,7 @@ export default function NewAmexTransaction({ searchParams }: { searchParams: { e
   const filteredAndGroupedProducts = useMemo(() => {
     const filtered = products.filter(product => 
       product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.sku.toLowerCase().includes(searchQuery.toLowerCase())
+      (product.sku?.toLowerCase() || '').includes(searchQuery.toLowerCase())
     )
 
     // Group by parent product name (everything before " - ")

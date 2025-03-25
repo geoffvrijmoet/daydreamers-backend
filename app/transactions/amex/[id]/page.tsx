@@ -127,7 +127,7 @@ export default function AmexTransactionEdit({ params }: { params: { id: string }
   const filteredAndGroupedProducts = useMemo(() => {
     const filtered = products.filter(product => 
       product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.sku.toLowerCase().includes(searchQuery.toLowerCase())
+      (product.sku?.toLowerCase() || '').includes(searchQuery.toLowerCase())
     )
 
     // Group by parent product name (everything before " - ")
