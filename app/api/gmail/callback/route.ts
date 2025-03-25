@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { gmailService } from '@/lib/gmail'
 import { connectToDatabase } from '@/lib/mongoose'
-import mongoose from 'mongoose'
+import CredentialModel from '@/lib/models/Credential'
 
 export async function GET(request: Request) {
   try {
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
 
     // Store credentials in database
     await connectToDatabase()
-    await mongoose.model('Credential').updateOne(
+    await CredentialModel.updateOne(
       { type: 'gmail' },
       { 
         $set: { 
