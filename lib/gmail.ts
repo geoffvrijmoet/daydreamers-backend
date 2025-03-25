@@ -6,9 +6,7 @@ import { getGoogleCredentialsPath } from './utils/google-auth'
 const GMAIL_CREDENTIALS = {
   client_id: process.env.GMAIL_CLIENT_ID,
   client_secret: process.env.GMAIL_CLIENT_SECRET,
-  redirect_uri: process.env.NODE_ENV === 'development' 
-    ? 'http://localhost:1111/api/gmail/callback'
-    : 'https://admin.daydreamersnyc.com/api/gmail/callback'
+  redirect_uri: process.env.GMAIL_REDIRECT_URI
 }
 
 export class GmailService {
