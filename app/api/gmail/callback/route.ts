@@ -2,18 +2,9 @@ import { NextResponse } from 'next/server'
 import { gmailService } from '@/lib/gmail'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { auth } from '@clerk/nextjs/server'
 
 export async function GET(request: Request) {
   try {
-    const { userId } = await auth()
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
-    }
-
     const url = new URL(request.url)
     const code = url.searchParams.get('code')
     
