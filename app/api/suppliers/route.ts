@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { Db } from 'mongodb'
 
 export async function GET() {
   try {
-    const db = await getDb()
-    const suppliers = await db.collection('suppliers')
+    await connectToDatabase()
+    const suppliers = await (mongoose.connection.db as Db).collection('suppliers')
       .find({})
       .sort({ name: 1 })
       .toArray()
@@ -32,10 +34,10 @@ export async function POST(request: Request) {
       )
     }
 
-    const db = await getDb()
+    await connectToDatabase()
 
     // Check if supplier with same name already exists
-    const existing = await db.collection('suppliers').findOne({ name })
+    const existing = await (mongoose.connection.db as Db).collection('suppliers').findOne({ name })
     if (existing) {
       return NextResponse.json(
         { error: 'A supplier with this name already exists' },
@@ -45,7 +47,7 @@ export async function POST(request: Request) {
 
     // Create new supplier
     const now = new Date()
-    const result = await db.collection('suppliers').insertOne({
+    const result = await (mongoose.connection.db as Db).collection('suppliers').insertOne({
       name,
       aliases: aliases || [],
       invoiceEmail,

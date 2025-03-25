@@ -1,8 +1,9 @@
 import type { WithId } from 'mongodb'
-import type { Transaction } from '@/types'
+import type { Transaction } from '../types'
 import dotenv from 'dotenv'
 import { resolve } from 'path'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '../lib/mongoose'
+import mongoose from 'mongoose'
 
 // Load environment variables from .env.local
 const envPath = resolve(process.cwd(), '.env.local')
@@ -32,20 +33,25 @@ interface CustomerData {
   sourceIds: Map<string, string>
 }
 
+// Type for transactions that have a customer field
+type TransactionWithCustomer = Omit<Transaction, 'customer'> & {
+  customer: string
+}
+
 async function createCustomers() {
   try {
     console.log('Connecting to MongoDB...')
-    const db = await getDb()
+    await connectToDatabase()
     
     // Get all transactions with customer information
-    const transactions = (await db.collection('transactions')
+    const transactions = (await (mongoose.connection.db as any).collection('transactions')
       .find({ 
         customer: { $exists: true, $ne: '' },
         type: 'sale',
         status: { $ne: 'void' }
       })
       .sort({ date: 1 })
-      .toArray()) as unknown as WithId<Transaction>[]
+      .toArray()) as unknown as WithId<TransactionWithCustomer>[]
 
     console.log(`Found ${transactions.length} transactions with customer information`)
 
@@ -67,7 +73,7 @@ async function createCustomers() {
     transactions.forEach(transaction => {
       const customerKey = transaction.source === 'square' 
         ? `square_${transaction.customer}`
-        : transaction.customer!.toLowerCase()
+        : transaction.customer.toLowerCase()
 
       if (!customerMap.has(customerKey)) {
         customerMap.set(customerKey, {
@@ -153,10 +159,10 @@ async function createCustomers() {
 
     // Create customers collection and insert documents
     console.log('Creating customers collection...')
-    await db.createCollection('customers')
+    await (mongoose.connection.db as any).createCollection('customers')
     
     console.log('Inserting customer documents...')
-    const result = await db.collection('customers').insertMany(customers)
+    const result = await (mongoose.connection.db as any).collection('customers').insertMany(customers)
     
     console.log(`Successfully created ${result.insertedCount} customer documents`)
     

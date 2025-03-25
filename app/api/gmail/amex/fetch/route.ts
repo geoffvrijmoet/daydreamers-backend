@@ -1,24 +1,24 @@
 import { NextResponse } from 'next/server'
 import { gmailService } from '@/lib/gmail'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 export async function GET() {
   try {
-    const db = await getDb()
-    const credentials = await db.collection('credentials').findOne({ type: 'gmail' })
+    await connectToDatabase()
+    const credentials = await mongoose.model('Credential').findOne({ type: 'gmail' })
     
     if (!credentials?.data) {
       throw new Error('Gmail not authenticated')
     }
 
     // First, get all existing Gmail transaction emailIds from MongoDB
-    const existingTransactions = await db.collection('transactions')
+    const existingTransactions = await mongoose.model('Transaction')
       .find({ 
         source: 'gmail',
         type: 'purchase'
       })
-      .project({ emailId: 1 })
-      .toArray()
+      .select({ emailId: 1 })
     
     const existingEmailIds = new Set(existingTransactions.map((t) => (t as { emailId: string }).emailId))
 

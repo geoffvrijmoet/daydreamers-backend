@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
-import { ObjectId } from 'mongodb'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { ObjectId, Db } from 'mongodb'
 
 export async function POST(request: Request) {
   try {
     const { productIds } = await request.json()
-    const db = await getDb()
+    await connectToDatabase()
 
     console.log('Attempting to delete products:', productIds)
 
@@ -13,7 +14,7 @@ export async function POST(request: Request) {
     const objectIds = productIds.map((id: string) => new ObjectId(id))
 
     // Delete the products
-    const result = await db.collection('products').deleteMany({
+    const result = await (mongoose.connection.db as Db).collection('products').deleteMany({
       _id: { $in: objectIds }
     })
 

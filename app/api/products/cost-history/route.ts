@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
-import { ObjectId } from 'mongodb'
-import { Db } from 'mongodb'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { ObjectId, Db } from 'mongodb'
 
 type CostHistoryEntry = {
   invoiceId: string
@@ -137,7 +137,7 @@ async function cleanupDuplicateEntries(db: Db, productId: string) {
 
 export async function POST(request: Request) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     const { productId, entry } = await request.json()
 
     console.log('Processing cost history update:', {
@@ -155,7 +155,7 @@ export async function POST(request: Request) {
     }
 
     // Get the current product to access its cost history
-    const product = await db.collection('products').findOne({
+    const product = await (mongoose.connection.db as Db).collection('products').findOne({
       _id: new ObjectId(productId)
     })
 
@@ -193,7 +193,7 @@ export async function POST(request: Request) {
     const averageCost = totalPurchased > 0 ? totalSpent / totalPurchased : 0
 
     // Update the product with new cost history and calculated fields
-    const result = await db.collection('products').updateOne(
+    const result = await (mongoose.connection.db as Db).collection('products').updateOne(
       { _id: new ObjectId(productId) },
       {
         $set: {
@@ -218,7 +218,7 @@ export async function POST(request: Request) {
     })
 
     // Clean up any duplicate entries that might exist
-    await cleanupDuplicateEntries(db, productId)
+    await cleanupDuplicateEntries(mongoose.connection.db as Db, productId)
 
     return NextResponse.json({ success: true })
   } catch (error) {

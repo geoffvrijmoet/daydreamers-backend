@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { ObjectId } from 'mongodb';
+import { connectToDatabase } from '@/lib/mongoose';
+import mongoose from 'mongoose';
+import { ObjectId, Db } from 'mongodb';
 
 export async function DELETE(
   request: Request,
@@ -16,8 +17,8 @@ export async function DELETE(
       );
     }
     
-    const db = await getDb();
-    const collection = db.collection('smart_mappings');
+    await connectToDatabase();
+    const collection = (mongoose.connection.db as Db).collection('smart_mappings');
     
     // Convert string ID to ObjectId
     let objectId: ObjectId;

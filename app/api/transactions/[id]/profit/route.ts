@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
-import { ObjectId } from 'mongodb'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 // Define types for profit calculation
 interface ProfitCalculationItem {
@@ -36,7 +36,7 @@ export async function POST(
   try {
     console.log('[API] Received profit calculation save request for transaction:', params.id);
     
-    const db = await getDb()
+    await connectToDatabase()
     const { profitDetails, taxDetails, calculatedAt }: ProfitRequest = await request.json()
     
     console.log('[API] Profit calculation data:', {
@@ -72,8 +72,8 @@ export async function POST(
     };
 
     // Update the transaction with profit details and tax calculation
-    const result = await db.collection('transactions').findOneAndUpdate(
-      { _id: new ObjectId(params.id) },
+    const result = await mongoose.model('Transaction').findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(params.id) },
       {
         $set: {
           profitCalculation,
@@ -82,7 +82,7 @@ export async function POST(
           updatedAt: new Date().toISOString()
         }
       },
-      { returnDocument: 'after' }
+      { new: true }
     )
 
     if (!result) {

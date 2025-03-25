@@ -1,6 +1,7 @@
 import { google } from 'googleapis'
 import { OAuth2Client } from 'google-auth-library'
 import { EmailTransaction, GmailCredentials } from '@/types'
+import { getGoogleCredentialsPath } from './utils/google-auth'
 
 const GMAIL_CREDENTIALS = {
   client_id: process.env.GMAIL_CLIENT_ID,
@@ -21,6 +22,11 @@ export class GmailService {
       GMAIL_CREDENTIALS.client_secret,
       GMAIL_CREDENTIALS.redirect_uri
     )
+  }
+
+  async initialize() {
+    // Set the credentials path for Google Auth
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = await getGoogleCredentialsPath()
   }
 
   getAuthUrl() {
@@ -153,6 +159,43 @@ export class GmailService {
 
   public getAuth(): OAuth2Client {
     return this.oauth2Client;
+  }
+
+  async setupWatch(): Promise<{historyId: string, expiration: string}> {
+    const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client })
+    
+    const response = await gmail.users.watch({
+      userId: 'me',
+      requestBody: {
+        labelIds: ['INBOX'],
+        topicName: `projects/${process.env.GOOGLE_CLOUD_PROJECT}/topics/${process.env.GMAIL_TOPIC_NAME}`
+      }
+    })
+
+    return {
+      historyId: response.data.historyId || '',
+      expiration: response.data.expiration || ''
+    }
+  }
+
+  async getHistory(startHistoryId: string) {
+    const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client })
+    
+    return gmail.users.history.list({
+      userId: 'me',
+      startHistoryId,
+      historyTypes: ['messageAdded']
+    })
+  }
+
+  async getMessage(messageId: string) {
+    const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client })
+    
+    return gmail.users.messages.get({
+      userId: 'me',
+      id: messageId,
+      format: 'full'
+    })
   }
 }
 

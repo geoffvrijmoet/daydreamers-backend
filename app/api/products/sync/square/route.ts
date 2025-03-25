@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { squareClient } from '@/lib/square'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { Db } from 'mongodb'
 
 type ReviewedProduct = {
   id: string
@@ -15,7 +17,7 @@ type ReviewedProduct = {
 
 export async function POST(request: Request) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     console.log('Starting Square catalog sync...')
 
     // Get reviewed products from request
@@ -40,7 +42,7 @@ export async function POST(request: Request) {
     // Process each reviewed product
     const updates = await Promise.all(products.map(async (reviewedProduct) => {
       // Look for existing product by Square ID
-      const existingProduct = await db.collection('products').findOne({
+      const existingProduct = await (mongoose.connection.db as Db).collection('products').findOne({
         squareId: reviewedProduct.id
       })
 
@@ -66,7 +68,7 @@ export async function POST(request: Request) {
 
       if (existingProduct) {
         // Update existing product
-        await db.collection('products').updateOne(
+        await (mongoose.connection.db as Db).collection('products').updateOne(
           { _id: existingProduct._id },
           { 
             $set: {
@@ -82,7 +84,7 @@ export async function POST(request: Request) {
         return { action: 'updated', id: existingProduct._id, name: reviewedProduct.name }
       } else {
         // Create new product
-        const result = await db.collection('products').insertOne({
+        const result = await (mongoose.connection.db as Db).collection('products').insertOne({
           ...productData,
           createdAt: new Date().toISOString()
         })
@@ -102,7 +104,7 @@ export async function POST(request: Request) {
       await Promise.all(inventoryResult.counts.map(async (count) => {
         if (!count.catalogObjectId || !count.quantity) return
 
-        await db.collection('products').updateOne(
+        await (mongoose.connection.db as Db).collection('products').updateOne(
           { squareId: count.catalogObjectId },
           { 
             $set: { 

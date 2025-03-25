@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { gmailService } from '@/lib/gmail'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 export async function GET() {
   try {
@@ -29,8 +30,8 @@ export async function POST(request: Request) {
     })
 
     // Store credentials in database
-    const db = await getDb()
-    await db.collection('credentials').updateOne(
+    await connectToDatabase()
+    await mongoose.model('Credential').updateOne(
       { type: 'gmail' },
       { 
         $set: { 
@@ -54,8 +55,8 @@ export async function POST(request: Request) {
 
 export async function DELETE() {
   try {
-    const db = await getDb()
-    await db.collection('credentials').deleteOne({ type: 'gmail' })
+    await connectToDatabase()
+    await mongoose.model('Credential').deleteOne({ type: 'gmail' })
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Gmail credentials deletion error:', error)

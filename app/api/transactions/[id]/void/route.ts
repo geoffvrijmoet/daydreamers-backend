@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     const transactionId = params.id
 
-    const result = await db.collection('transactions').updateOne(
+    const result = await mongoose.model('Transaction').updateOne(
       { id: transactionId },
       { 
         $set: { 

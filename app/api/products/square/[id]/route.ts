@@ -1,17 +1,19 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { Db } from 'mongodb'
 
 export async function GET(
   request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     
     console.log('[API] Looking up product by Square ID:', params.id);
     
     // Try to find the product by squareId
-    const product = await db.collection('products').findOne({ squareId: params.id })
+    const product = await (mongoose.connection.db as Db).collection('products').findOne({ squareId: params.id })
     
     if (!product) {
       console.log('[API] No product found with Square ID:', params.id);

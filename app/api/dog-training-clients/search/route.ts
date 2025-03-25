@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { connectToDatabase } from '@/lib/mongoose';
+import mongoose from 'mongoose';
+import { Db } from 'mongodb';
 
 /**
  * GET /api/dog-training-clients/search
@@ -19,7 +21,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const db = await getDb();
+    await connectToDatabase();
     
     // Base query for client name search
     const baseQuery = { 
@@ -35,7 +37,7 @@ export async function GET(request: Request) {
       : baseQuery;
     
     // Fetch clients matching the query
-    const clients = await db.collection('dogTrainingClients')
+    const clients = await (mongoose.connection.db as Db).collection('dogTrainingClients')
       .find(clientsQuery)
       .project({ 
         _id: 1, 

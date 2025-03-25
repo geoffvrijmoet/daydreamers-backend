@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { Db } from 'mongodb'
 
 export async function GET() {
   try {
-    const db = await getDb()
-    const theme = await db.collection('settings').findOne({ type: 'theme' })
+    await connectToDatabase()
+    const theme = await (mongoose.connection.db as Db).collection('settings').findOne({ type: 'theme' })
     return NextResponse.json(theme?.colors || null)
   } catch (error) {
     console.error('Error fetching theme:', error)
@@ -18,9 +20,9 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const colors = await request.json()
-    const db = await getDb()
+    await connectToDatabase()
     
-    await db.collection('settings').updateOne(
+    await (mongoose.connection.db as Db).collection('settings').updateOne(
       { type: 'theme' },
       { 
         $set: { 

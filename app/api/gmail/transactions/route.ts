@@ -1,16 +1,17 @@
 import { NextResponse } from 'next/server'
 import { gmailService } from '@/lib/gmail'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 // Mark route as dynamic
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     
     // Get stored credentials (you'll need to implement this)
-    const credentials = await db.collection('credentials').findOne({ type: 'gmail' })
+    const credentials = await mongoose.model('Credential').findOne({ type: 'gmail' })
     if (!credentials) {
       return NextResponse.json(
         { error: 'Gmail not authenticated' },

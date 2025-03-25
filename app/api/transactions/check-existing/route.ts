@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { ObjectId } from 'mongodb';
+import { connectToDatabase } from '@/lib/mongoose';
+import mongoose from 'mongoose';
 
 interface AmexTransaction {
   date: string;
@@ -16,7 +16,7 @@ interface MatchedTransaction {
   reference?: string;
   match: {
     id?: string;
-    _id: ObjectId | string;
+    _id: mongoose.Types.ObjectId | string;
     date: string;
     amount: number;
     type: string;
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       );
     }
     
-    const db = await getDb();
+    await connectToDatabase();
     const existingTransactions: MatchedTransaction[] = [];
     
     // Add logging for debugging
@@ -115,14 +115,14 @@ export async function POST(request: Request) {
       
       // Find transactions with matching amount and date
       // ALWAYS use "purchase" as the type
-      const foundTransactions = await db.collection('transactions').find({
+      const foundTransactions = await mongoose.model('Transaction').find({
         amount: Math.abs(amount), // MongoDB stores positive amounts
         type: 'purchase',  // Always search for purchases
         date: {
           $gte: startDate.toISOString(),
           $lte: endDate.toISOString()
         }
-      }).toArray();
+      });
       
       // Log matched transactions for the first AMEX transaction
       if (transaction === transactions[0]) {

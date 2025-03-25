@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
-import { ObjectId } from 'mongodb'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     const updateData = await request.json()
     delete updateData._id
 
-    const result = await db.collection('transactions').updateOne(
+    const result = await mongoose.model('Transaction').updateOne(
       { id: params.id },
       { 
         $set: {
@@ -43,10 +43,10 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     
-    const transaction = await db.collection('transactions').findOne({
-      _id: new ObjectId(params.id)
+    const transaction = await mongoose.model('Transaction').findOne({
+      _id: new mongoose.Types.ObjectId(params.id)
     })
 
     if (!transaction) {
@@ -72,7 +72,7 @@ export async function PATCH(
 ) {
   try {
     const updates = await request.json();
-    const db = await getDb();
+    await connectToDatabase();
     
     // Log the incoming update request
     console.log(`[API] Updating transaction ${params.id}:`, updates);
@@ -94,7 +94,7 @@ export async function PATCH(
       // If we're updating the amount, we might need to update related fields
       // Calculate pre-tax amount if not explicitly provided
       if (updates.preTaxAmount === undefined) {
-        const transaction = await db.collection('transactions').findOne({ _id: new ObjectId(params.id) });
+        const transaction = await mongoose.model('Transaction').findOne({ _id: new mongoose.Types.ObjectId(params.id) });
         if (transaction) {
           // If transaction has a tax amount, update the pre-tax amount calculation
           if (transaction.taxAmount) {
@@ -107,15 +107,15 @@ export async function PATCH(
       }
     }
 
-    const result = await db.collection('transactions').findOneAndUpdate(
-      { _id: new ObjectId(params.id) },
+    const result = await mongoose.model('Transaction').findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(params.id) },
       { 
         $set: {
           ...updates,
           updatedAt: new Date().toISOString()
         }
       },
-      { returnDocument: 'after' }
+      { new: true }
     );
 
     if (!result) {

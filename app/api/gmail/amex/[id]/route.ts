@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 export async function GET(
   request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = await getDb()
-    const transaction = await db.collection('transactions').findOne({
+    await connectToDatabase()
+    const transaction = await mongoose.model('Transaction').findOne({
       id: params.id,
       source: 'gmail'
     })
@@ -35,9 +36,9 @@ export async function PUT(
 ) {
   try {
     const updates = await request.json()
-    const db = await getDb()
+    await connectToDatabase()
 
-    const result = await db.collection('transactions').findOneAndUpdate(
+    const result = await mongoose.model('Transaction').findOneAndUpdate(
       { 
         id: params.id,
         source: 'gmail'
@@ -48,7 +49,7 @@ export async function PUT(
           updatedAt: new Date().toISOString()
         }
       },
-      { returnDocument: 'after' }
+      { new: true }
     )
 
     if (!result) {

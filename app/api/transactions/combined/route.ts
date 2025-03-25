@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 export async function GET(request: Request) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('startDate') || '2023-01-01T00:00:00.000Z'
     const endDate = searchParams.get('endDate') || new Date().toISOString()
@@ -14,21 +15,17 @@ export async function GET(request: Request) {
     })
 
     // First, let's check what's actually in the collection
-    const oldestTransaction = await db.collection('transactions')
-      .find({ type: 'sale' })
+    const oldestTransaction = await mongoose.model('Transaction')
+      .findOne({ type: 'sale' })
       .sort({ date: 1 })
-      .limit(1)
-      .toArray()
 
-    const newestTransaction = await db.collection('transactions')
-      .find({ type: 'sale' })
+    const newestTransaction = await mongoose.model('Transaction')
+      .findOne({ type: 'sale' })
       .sort({ date: -1 })
-      .limit(1)
-      .toArray()
 
     console.log('Transaction date range in DB:', {
-      oldest: oldestTransaction[0]?.date,
-      newest: newestTransaction[0]?.date
+      oldest: oldestTransaction?.date,
+      newest: newestTransaction?.date
     })
 
     // Create date objects for comparison
@@ -36,7 +33,7 @@ export async function GET(request: Request) {
     const end = new Date(endDate)
 
     // Fetch only sales transactions from MongoDB within date range
-    const transactions = await db.collection('transactions')
+    const transactions = await mongoose.model('Transaction')
       .find({
         type: 'sale',
         date: {
@@ -45,7 +42,6 @@ export async function GET(request: Request) {
         }
       })
       .sort({ date: -1 })
-      .toArray()
 
     console.log('Total sales transactions by source and date range:', {
       dateRange: {

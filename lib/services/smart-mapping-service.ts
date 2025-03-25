@@ -1,6 +1,7 @@
-import { ObjectId } from 'mongodb';
-import { getDb } from '@/lib/db';
+import { ObjectId, Db } from 'mongodb';
+import { connectToDatabase } from '@/lib/mongoose';
 import { SmartMappingSchema, createSmartMapping, incrementMappingUsage, MappingTypes } from '@/lib/models/smart-mapping';
+import mongoose from 'mongoose';
 
 /**
  * SmartMappingService - Lightweight service for learning and suggesting mappings
@@ -23,13 +24,13 @@ export class SmartMappingService {
     source: string
   ): Promise<SmartMappingSchema | null> {
     try {
-      const db = await getDb();
+      await connectToDatabase();
       
       // Normalize the source string (lowercase, trim)
       const normalizedSource = source.toLowerCase().trim();
       
       // Look for an exact match first
-      const mapping = await db.collection(this.COLLECTION_NAME).findOne({
+      const mapping = await (mongoose.connection.db as Db).collection(this.COLLECTION_NAME).findOne({
         mappingType,
         source: normalizedSource
       });
@@ -56,13 +57,13 @@ export class SmartMappingService {
     metadata?: Record<string, unknown>
   ): Promise<SmartMappingSchema | null> {
     try {
-      const db = await getDb();
+      await connectToDatabase();
       
       // Normalize the source and target
       const normalizedSource = source.toLowerCase().trim();
       
       // Check if mapping already exists
-      const existingMapping = await db.collection(this.COLLECTION_NAME).findOne({
+      const existingMapping = await (mongoose.connection.db as Db).collection(this.COLLECTION_NAME).findOne({
         mappingType,
         source: normalizedSource
       }) as SmartMappingSchema | null;
@@ -89,7 +90,7 @@ export class SmartMappingService {
           }
         }
         
-        await db.collection(this.COLLECTION_NAME).updateOne(
+        await (mongoose.connection.db as Db).collection(this.COLLECTION_NAME).updateOne(
           { _id: existingMapping._id },
           { $set: updatedMapping }
         );
@@ -109,7 +110,7 @@ export class SmartMappingService {
         await this.pruneOldMappingsIfNeeded(mappingType);
         
         // Insert the new mapping
-        const result = await db.collection(this.COLLECTION_NAME).insertOne({
+        const result = await (mongoose.connection.db as Db).collection(this.COLLECTION_NAME).insertOne({
           ...newMapping,
           _id: new ObjectId()
         });
@@ -134,13 +135,13 @@ export class SmartMappingService {
     maxResults = this.DEFAULT_MAX_RESULTS
   ): Promise<SmartMappingSchema[]> {
     try {
-      const db = await getDb();
+      await connectToDatabase();
       
       // Normalize the source
       const normalizedSource = source.toLowerCase().trim();
       
       // Find exact match first
-      const exactMatch = await db.collection(this.COLLECTION_NAME).findOne({
+      const exactMatch = await (mongoose.connection.db as Db).collection(this.COLLECTION_NAME).findOne({
         mappingType,
         source: normalizedSource
       });
@@ -166,7 +167,7 @@ export class SmartMappingService {
       };
       
       // Find potential matches and sort by score/usageCount
-      const matches = await db.collection(this.COLLECTION_NAME)
+      const matches = await (mongoose.connection.db as Db).collection(this.COLLECTION_NAME)
         .find(query)
         .sort({ score: -1, usageCount: -1 })
         .limit(maxResults)
@@ -230,10 +231,10 @@ export class SmartMappingService {
     minUsageCount = 3
   ): Promise<Record<string, { productId: string, productName: string, confidence: number }>> {
     try {
-      const db = await getDb();
+      await connectToDatabase();
       
       // Find all high-confidence product mappings
-      const mappings = await db.collection(this.COLLECTION_NAME)
+      const mappings = await (mongoose.connection.db as Db).collection(this.COLLECTION_NAME)
         .find({
           mappingType: MappingTypes.PRODUCT_NAMES,
           confidence: { $gte: confidenceThreshold },
@@ -258,7 +259,7 @@ export class SmartMappingService {
   }
   
   /**
-   * Record an email supplier mapping
+   * Record an email-to-supplier mapping
    */
   static async recordEmailSupplierMapping(
     emailPattern: string,
@@ -275,36 +276,22 @@ export class SmartMappingService {
   }
   
   /**
-   * Private method to keep the collection size in check
-   * This ensures we don't exceed MongoDB's free tier limits
+   * Prune old mappings if we exceed the maximum per type
    */
   private static async pruneOldMappingsIfNeeded(mappingType: string): Promise<void> {
     try {
-      const db = await getDb();
+      await connectToDatabase();
       
-      // Count mappings of this type
-      const count = await db.collection(this.COLLECTION_NAME).countDocuments({
-        mappingType
-      });
+      const count = await (mongoose.connection.db as Db).collection(this.COLLECTION_NAME)
+        .countDocuments({ mappingType });
       
       if (count >= this.MAX_MAPPINGS_PER_TYPE) {
-        // We need to prune - remove the oldest, least used mappings
-        const mappingsToRemove = count - this.MAX_MAPPINGS_PER_TYPE + 10; // Remove extra to avoid frequent pruning
-        
-        const oldMappings = await db.collection(this.COLLECTION_NAME)
-          .find({ mappingType })
-          .sort({ score: 1, usageCount: 1, lastUsed: 1 })
-          .limit(mappingsToRemove)
-          .toArray();
-        
-        if (oldMappings.length > 0) {
-          const ids = oldMappings.map(m => m._id);
-          await db.collection(this.COLLECTION_NAME).deleteMany({
-            _id: { $in: ids }
+        // Remove oldest mappings until we're under the limit
+        await (mongoose.connection.db as Db).collection(this.COLLECTION_NAME)
+          .deleteMany({
+            mappingType,
+            usageCount: 0
           });
-          
-          console.log(`Pruned ${oldMappings.length} old ${mappingType} mappings to stay within limits`);
-        }
       }
     } catch (error) {
       console.error('Error pruning old mappings:', error);

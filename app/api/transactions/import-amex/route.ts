@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { format } from "date-fns";
-import { getDb } from "@/lib/db";
+import { connectToDatabase } from "@/lib/mongoose";
+import mongoose from 'mongoose';
 
 // Define a type that matches the MongoDB Transaction document structure
 type CustomDocument = {
@@ -80,8 +81,7 @@ async function processTransactions(
   }> = [];
   
   try {
-    const db = await getDb();
-    const transactionsCollection = db.collection('transactions');
+    await connectToDatabase();
     
     for (const transaction of transactions) {
       try {
@@ -107,17 +107,17 @@ async function processTransactions(
           }
           
           // Create the transaction directly in MongoDB
-          const result = await transactionsCollection.insertOne(customDoc);
+          const result = await mongoose.model('Transaction').create(customDoc);
           
-          importedIds.push(result.insertedId.toString());
-          console.log(`Created transaction with ID: ${result.insertedId}`);
+          importedIds.push(result._id.toString());
+          console.log(`Created transaction with ID: ${result._id}`);
         } else {
           // Original transaction processing logic
           // Generate reference if not available
           const reference = transaction.reference || `AMEX-${format(new Date(transaction.date), "yyyyMMdd")}-${Math.floor(Math.random() * 10000)}`;
           
           // Check if transaction already exists
-          const existingTransaction = await transactionsCollection.findOne({
+          const existingTransaction = await mongoose.model('Transaction').findOne({
             date: new Date(transaction.date),
             amount: Math.abs(transaction.amount),
             type: transaction.amount < 0 ? "purchase" : "sale",
@@ -153,10 +153,10 @@ async function processTransactions(
             updatedAt: now.toISOString()
           };
           
-          const result = await transactionsCollection.insertOne(newTransaction);
+          const result = await mongoose.model('Transaction').create(newTransaction);
           
-          importedIds.push(result.insertedId.toString());
-          console.log(`Created transaction with ID: ${result.insertedId}`);
+          importedIds.push(result._id.toString());
+          console.log(`Created transaction with ID: ${result._id}`);
         }
       } catch (err) {
         console.error("Error processing individual transaction:", err);

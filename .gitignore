@@ -44,3 +44,5 @@ next-env.d.ts
 # Scripts
 scripts/create-suppliers.ts
 scripts/dedupe-transactions.ts
+
+/secrets

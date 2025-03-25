@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 import { google } from 'googleapis'
 import { GmailService } from '@/lib/gmail'
 import { JSDOM } from 'jsdom'
@@ -15,10 +16,10 @@ export async function GET(
     const { searchParams } = new URL(request.url)
     const skip = parseInt(searchParams.get('skip') || '0')
 
-    const db = await getDb()
+    await connectToDatabase()
 
     // First get the transaction to get its emailId
-    const transaction = await db.collection('transactions').findOne({
+    const transaction = await mongoose.model('Transaction').findOne({
       id: params.id,
       source: 'gmail'
     })
@@ -31,7 +32,7 @@ export async function GET(
     }
 
     // Get Gmail credentials
-    const credentials = await db.collection('credentials').findOne({ type: 'gmail' })
+    const credentials = await mongoose.model('Credential').findOne({ type: 'gmail' })
     if (!credentials?.data) {
       return NextResponse.json(
         { error: 'Gmail not authenticated' },
@@ -73,7 +74,7 @@ export async function GET(
     }
 
     // Find the supplier in our database
-    const supplier = await db.collection('suppliers').findOne({
+    const supplier = await mongoose.model('Supplier').findOne({
       $or: [
         { name: supplierName },
         { aliases: supplierName }

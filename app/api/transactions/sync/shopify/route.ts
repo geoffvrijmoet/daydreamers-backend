@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { shopifyClient } from '@/lib/shopify'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 import { Transaction } from '@/types'
 
 export async function POST(request: Request) {
@@ -9,11 +10,11 @@ export async function POST(request: Request) {
     const startDate = searchParams.get('startDate')
     const endDate = searchParams.get('endDate')
     
-    const db = await getDb()
+    await connectToDatabase()
     console.log('Starting Shopify transactions sync...')
 
     // Get last sync timestamp if no dates provided
-    const syncState = await db.collection('syncState').findOne({ source: 'shopify' })
+    const syncState = await mongoose.model('SyncState').findOne({ source: 'shopify' })
     const lastSyncTime = startDate || syncState?.lastSuccessfulSync || '2023-01-01T00:00:00Z'
     const now = endDate || new Date().toISOString()
 
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
       const shopifyId = `shopify_${order.id}`
 
       // Check if transaction already exists
-      const existing = await db.collection('transactions').findOne({ id: shopifyId })
+      const existing = await mongoose.model('Transaction').findOne({ id: shopifyId })
 
       // Determine transaction status
       let status: 'completed' | 'cancelled' | 'refunded' = 'completed'
@@ -115,7 +116,7 @@ export async function POST(request: Request) {
       if (existing) {
         // If transaction exists but status has changed, update it
         if (existing.status !== status) {
-          await db.collection('transactions').updateOne(
+          await mongoose.model('Transaction').findOneAndUpdate(
             { _id: existing._id },
             { 
               $set: { 
@@ -124,7 +125,8 @@ export async function POST(request: Request) {
                 refundDate: transaction.refundDate,
                 updatedAt: transaction.updatedAt
               } 
-            }
+            },
+            { new: true }
           )
           console.log(`Updated Shopify order ${order.id} status to ${status}`)
           return { action: 'updated', id: order.id }
@@ -134,7 +136,7 @@ export async function POST(request: Request) {
       }
 
       // Create new transaction
-      await db.collection('transactions').insertOne({
+      await mongoose.model('Transaction').create({
         ...transaction,
         createdAt: new Date().toISOString()
       })
@@ -148,7 +150,7 @@ export async function POST(request: Request) {
     const skipped = results.filter(r => r.action === 'skipped').length
 
     // Update last successful sync time
-    await db.collection('syncState').updateOne(
+    await mongoose.model('SyncState').findOneAndUpdate(
       { source: 'shopify' },
       { 
         $set: { 
@@ -158,33 +160,16 @@ export async function POST(request: Request) {
           updatedAt: now
         }
       },
-      { upsert: true }
+      { upsert: true, new: true }
     )
 
-    console.log('Shopify sync complete:', { created, updated, skipped })
-
     return NextResponse.json({
-      message: `Sync complete. Created: ${created}, Updated: ${updated}, Skipped: ${skipped} transactions`,
-      details: results
+      success: true,
+      results: { created, updated, skipped }
     })
 
   } catch (error) {
     console.error('Error syncing Shopify transactions:', error)
-    
-    // Update sync state with error
-    const db = await getDb()
-    await db.collection('syncState').updateOne(
-      { source: 'shopify' },
-      { 
-        $set: { 
-          lastSyncStatus: 'error',
-          lastError: error instanceof Error ? error.message : 'Unknown error',
-          updatedAt: new Date().toISOString()
-        }
-      },
-      { upsert: true }
-    )
-
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to sync transactions' },
       { status: 500 }

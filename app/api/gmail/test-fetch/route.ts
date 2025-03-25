@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
-import { getDb } from '@/lib/db';
+import { connectToDatabase } from '@/lib/mongoose';
+import mongoose from 'mongoose';
 import { gmailService } from '@/lib/gmail';
 import { logger } from '@/lib/utils/logger';
 
@@ -23,8 +24,8 @@ export async function GET() {
     logger.info('Starting Gmail API test for Amex Large Transaction emails');
     
     // Get credentials
-    const db = await getDb();
-    const credentials = await db.collection('credentials').findOne({ type: 'gmail' });
+    await connectToDatabase();
+    const credentials = await mongoose.model('Credential').findOne({ type: 'gmail' });
     
     if (!credentials?.data) {
       logger.warn('No Gmail credentials found');

@@ -1,6 +1,7 @@
 import { config } from 'dotenv'
 import { resolve } from 'path'
-import { getDb } from '../lib/db'
+import { connectToDatabase } from '../lib/mongoose'
+import mongoose from 'mongoose'
 
 // Load environment variables from .env.local using absolute path
 const envPath = resolve(process.cwd(), '.env.local')
@@ -12,10 +13,10 @@ console.log('MongoDB URI:', process.env.MONGODB_URI ? 'Found' : 'Not found')
 
 async function setupDatabase() {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     
     // Create indexes
-    await db.collection('products').createIndexes([
+    await (mongoose.connection.db as any).collection('products').createIndexes([
       { key: { sku: 1 }, unique: true },
       { key: { name: 1 } },
       { key: { category: 1 } },
@@ -61,7 +62,7 @@ async function setupDatabase() {
       }
     ]
 
-    const result = await db.collection('products').insertMany(
+    const result = await (mongoose.connection.db as any).collection('products').insertMany(
       sampleProducts.map(product => ({
         ...product,
         createdAt: new Date().toISOString(),

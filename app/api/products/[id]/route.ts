@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
-import { connectToDatabase } from '@/lib/mongodb'
-import { ObjectId } from 'mongodb'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { ObjectId, Db } from 'mongodb'
 import { type Product } from '@/types'
 
 export async function GET(
@@ -8,8 +9,8 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { db } = await connectToDatabase()
-    const product = await db.collection<Product>('products').findOne({ 
+    await connectToDatabase()
+    const product = await (mongoose.connection.db as Db).collection<Product>('products').findOne({ 
       _id: new ObjectId(params.id) as unknown as string
     })
 
@@ -38,11 +39,11 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { db } = await connectToDatabase()
+    await connectToDatabase()
     const updates = await request.json()
     
     // Get the current product
-    const currentProduct = await db.collection('products').findOne({
+    const currentProduct = await (mongoose.connection.db as Db).collection('products').findOne({
       _id: new ObjectId(params.id)
     })
 
@@ -57,7 +58,7 @@ export async function PATCH(
     if ('proxyOf' in updates || 'proxyRatio' in updates) {
       // If removing proxy relationship
       if (updates.proxyOf === null) {
-        await db.collection('products').updateOne(
+        await (mongoose.connection.db as Db).collection('products').updateOne(
           { _id: new ObjectId(currentProduct.proxyOf) },
           { $set: { isProxied: false } }
         )
@@ -65,7 +66,7 @@ export async function PATCH(
       // If setting new proxy relationship
       else if (updates.proxyOf) {
         // Verify target product exists
-        const targetProduct = await db.collection('products').findOne({
+        const targetProduct = await (mongoose.connection.db as Db).collection('products').findOne({
           _id: new ObjectId(updates.proxyOf)
         })
         if (!targetProduct) {
@@ -75,7 +76,7 @@ export async function PATCH(
           )
         }
         // Mark target product as being proxied
-        await db.collection('products').updateOne(
+        await (mongoose.connection.db as Db).collection('products').updateOne(
           { _id: new ObjectId(updates.proxyOf) },
           { $set: { isProxied: true } }
         )
@@ -84,14 +85,14 @@ export async function PATCH(
 
     // Handle inventory-related updates
     if ('currentStock' in updates && currentProduct.proxyOf) {
-      const proxyTarget = await db.collection('products').findOne({
+      const proxyTarget = await (mongoose.connection.db as Db).collection('products').findOne({
         _id: new ObjectId(currentProduct.proxyOf)
       })
       if (proxyTarget) {
         // Calculate the change in stock
         const stockDiff = updates.currentStock - currentProduct.currentStock
         // Update the proxy target's stock proportionally
-        await db.collection('products').updateOne(
+        await (mongoose.connection.db as Db).collection('products').updateOne(
           { _id: new ObjectId(currentProduct.proxyOf) },
           { 
             $inc: { 
@@ -104,12 +105,12 @@ export async function PATCH(
 
     // Handle cost-related updates
     if ('lastPurchasePrice' in updates && currentProduct.proxyOf) {
-      const proxyTarget = await db.collection('products').findOne({
+      const proxyTarget = await (mongoose.connection.db as Db).collection('products').findOne({
         _id: new ObjectId(currentProduct.proxyOf)
       })
       if (proxyTarget) {
         // Update the proxy target's cost proportionally
-        await db.collection('products').updateOne(
+        await (mongoose.connection.db as Db).collection('products').updateOne(
           { _id: new ObjectId(currentProduct.proxyOf) },
           { 
             $set: { 
@@ -121,7 +122,7 @@ export async function PATCH(
     }
 
     // Update the product
-    const result = await db.collection('products').updateOne(
+    const result = await (mongoose.connection.db as Db).collection('products').updateOne(
       { _id: new ObjectId(params.id) },
       { 
         $set: { 
@@ -156,10 +157,10 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { db } = await connectToDatabase()
+    await connectToDatabase()
 
     // First, get the product to check if it has Square/Shopify IDs
-    const product = await db.collection('products').findOne({
+    const product = await (mongoose.connection.db as Db).collection('products').findOne({
       _id: new ObjectId(params.id)
     })
 
@@ -193,7 +194,7 @@ export async function DELETE(
     }
 
     // If product is local-only, proceed with deletion
-    const result = await db.collection('products').deleteOne({
+    const result = await (mongoose.connection.db as Db).collection('products').deleteOne({
       _id: new ObjectId(params.id)
     })
 

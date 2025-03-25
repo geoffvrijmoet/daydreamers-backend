@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { connectToDatabase } from '@/lib/mongoose';
+import mongoose from 'mongoose';
+import { Db } from 'mongodb';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -13,10 +15,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const db = await getDb();
+    await connectToDatabase();
     
     // Search for customers with a name containing the query (case insensitive)
-    const customers = await db.collection('customers')
+    const customers = await (mongoose.connection.db as Db).collection('customers')
       .find({ 
         name: { 
           $regex: query, 

@@ -1,10 +1,11 @@
-import { getDb } from '../lib/db'
+import { connectToDatabase } from '../lib/mongoose'
+import mongoose from 'mongoose'
 
 async function updateAmexTransactions() {
-  const db = await getDb()
+  await connectToDatabase()
   
   try {
-    const result = await db.collection('transactions').updateMany(
+    const result = await (mongoose.connection.db as any).collection('transactions').updateMany(
       { source: 'gmail' },
       [{
         $set: {

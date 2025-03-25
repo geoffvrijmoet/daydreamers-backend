@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { ObjectId } from 'mongodb';
+import { connectToDatabase } from '@/lib/mongoose';
+import mongoose from 'mongoose';
+import { ObjectId, Db } from 'mongodb';
 
 /**
  * GET /api/dog-training-clients/[id]
@@ -14,7 +15,7 @@ export async function GET(
   const id = params.id;
   
   try {
-    const db = await getDb();
+    await connectToDatabase();
     
     let query = {};
     // Check if the ID is in ObjectId format or a string ID
@@ -24,7 +25,7 @@ export async function GET(
       query = { id };
     }
     
-    const client = await db.collection('dogTrainingClients').findOne(query);
+    const client = await (mongoose.connection.db as Db).collection('dogTrainingClients').findOne(query);
     
     if (!client) {
       return NextResponse.json(
@@ -59,7 +60,7 @@ export async function PUT(
   
   try {
     const body = await request.json();
-    const db = await getDb();
+    await connectToDatabase();
     
     let query = {};
     // Check if the ID is in ObjectId format or a string ID
@@ -70,7 +71,7 @@ export async function PUT(
     }
     
     // Get the current client data to handle revenue calculations
-    const currentClient = await db.collection('dogTrainingClients').findOne(query);
+    const currentClient = await (mongoose.connection.db as Db).collection('dogTrainingClients').findOne(query);
     if (!currentClient) {
       return NextResponse.json(
         { success: false, error: 'Dog training client not found' },
@@ -126,7 +127,7 @@ export async function PUT(
     delete updateData.createdAt;
     
     // Update client document
-    const result = await db.collection('dogTrainingClients').updateOne(
+    const result = await (mongoose.connection.db as Db).collection('dogTrainingClients').updateOne(
       query,
       { $set: updateData }
     );
@@ -139,7 +140,7 @@ export async function PUT(
     }
     
     // Fetch the updated client
-    const updatedClient = await db.collection('dogTrainingClients').findOne(query);
+    const updatedClient = await (mongoose.connection.db as Db).collection('dogTrainingClients').findOne(query);
     
     return NextResponse.json({ 
       success: true, 
@@ -166,7 +167,7 @@ export async function DELETE(
   const id = params.id;
   
   try {
-    const db = await getDb();
+    await connectToDatabase();
     
     let query = {};
     // Check if the ID is in ObjectId format or a string ID
@@ -177,7 +178,7 @@ export async function DELETE(
     }
     
     // Delete client document
-    const result = await db.collection('dogTrainingClients').deleteOne(query);
+    const result = await (mongoose.connection.db as Db).collection('dogTrainingClients').deleteOne(query);
     
     if (result.deletedCount === 0) {
       return NextResponse.json(

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { ObjectId, Db } from 'mongodb'
 import { SmartMappingService } from '@/lib/services/smart-mapping-service'
-import { ObjectId } from 'mongodb'
 
 export async function GET(request: Request) {
   try {
@@ -12,8 +13,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Search term is required' }, { status: 400 })
     }
     
-    const db = await getDb()
-    const products = db.collection('products')
+    await connectToDatabase()
+    const products = (mongoose.connection.db as Db).collection('products')
     
     // First, check for smart mapping suggestions
     const suggestions = await SmartMappingService.suggestProductsForName(term)

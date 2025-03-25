@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { connectToDatabase } from '@/lib/mongoose';
+import mongoose from 'mongoose';
+import { Db } from 'mongodb';
 import { DogTrainingClientSchema, DogSchema, createDogTrainingClientId } from '@/lib/models/dog-training-client';
 
 /**
@@ -19,9 +21,9 @@ export async function GET(request: Request) {
   }
   
   try {
-    const db = await getDb();
+    await connectToDatabase();
     
-    const clients = await db.collection('dogTrainingClients')
+    const clients = await (mongoose.connection.db as Db).collection('dogTrainingClients')
       .find(query)
       .limit(limit)
       .sort({ name: 1 })
@@ -48,7 +50,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const db = await getDb();
+    await connectToDatabase();
     
     // Set creation timestamp
     const now = new Date().toISOString();
@@ -79,7 +81,7 @@ export async function POST(request: Request) {
       updatedAt: now
     };
     
-    const result = await db.collection('dogTrainingClients').insertOne(newClient);
+    const result = await (mongoose.connection.db as Db).collection('dogTrainingClients').insertOne(newClient);
     
     return NextResponse.json({ 
       success: true, 

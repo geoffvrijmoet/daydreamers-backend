@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { shopifyClient } from '@/lib/shopify'
-import { getDb } from '@/lib/db'
-import { ObjectId } from 'mongodb'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 interface ShopifyTransaction {
   status: string;
@@ -25,12 +25,12 @@ export async function POST(
   });
 
   try {
-    const db = await getDb()
+    await connectToDatabase()
     
     // Get the transaction
     console.log('[API] Finding transaction in MongoDB...');
-    const transaction = await db.collection('transactions').findOne({ 
-      _id: new ObjectId(params.id),
+    const transaction = await mongoose.model('Transaction').findOne({ 
+      _id: new mongoose.Types.ObjectId(params.id),
       source: 'shopify'
     })
 
@@ -135,15 +135,15 @@ export async function POST(
 
       // Update the transaction with the new fee
       console.log('[API] Updating transaction in MongoDB...');
-      const result = await db.collection('transactions').findOneAndUpdate(
-        { _id: new ObjectId(params.id) },
+      const result = await mongoose.model('Transaction').findOneAndUpdate(
+        { _id: new mongoose.Types.ObjectId(params.id) },
         { 
           $set: { 
             shopifyProcessingFee: processingFee,
             updatedAt: new Date().toISOString()
           } 
         },
-        { returnDocument: 'after' }
+        { new: true }
       )
 
       if (!result) {

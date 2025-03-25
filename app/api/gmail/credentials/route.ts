@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 import { GmailCredentials } from '@/types'
 
 export async function GET() {
   try {
-    const db = await getDb()
-    const credentials = await db.collection('credentials').findOne({ type: 'gmail' })
+    await connectToDatabase()
+    const credentials = await mongoose.model('Credential').findOne({ type: 'gmail' })
     return NextResponse.json({ 
       hasCredentials: !!credentials,
       credentials: credentials?.data || null
@@ -22,9 +23,9 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const credentials: GmailCredentials = await request.json()
-    const db = await getDb()
+    await connectToDatabase()
     
-    await db.collection('credentials').updateOne(
+    await mongoose.model('Credential').updateOne(
       { type: 'gmail' },
       { 
         $set: { 
@@ -48,8 +49,8 @@ export async function POST(request: Request) {
 
 export async function DELETE() {
   try {
-    const db = await getDb()
-    await db.collection('credentials').deleteOne({ type: 'gmail' })
+    await connectToDatabase()
+    await mongoose.model('Credential').deleteOne({ type: 'gmail' })
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error deleting Gmail credentials:', error)

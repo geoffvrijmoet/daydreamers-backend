@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 export async function POST(request: Request) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     const { transactions } = await request.json()
     
     if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
@@ -23,9 +24,9 @@ export async function POST(request: Request) {
     }))
     
     // Insert all transactions at once
-    const result = await db.collection('transactions').insertMany(preparedTransactions)
+    const result = await mongoose.model('Transaction').insertMany(preparedTransactions)
     
-    if (!result.acknowledged) {
+    if (!result.length) {
       return NextResponse.json(
         { success: false, error: 'Failed to insert transactions' },
         { status: 500 }
@@ -34,8 +35,8 @@ export async function POST(request: Request) {
     
     return NextResponse.json({ 
       success: true, 
-      importedCount: result.insertedCount,
-      ids: result.insertedIds
+      importedCount: result.length,
+      ids: result.map(doc => doc._id)
     })
   } catch (error) {
     console.error('Error batch importing transactions:', error)

@@ -1,17 +1,18 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 export async function GET() {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     
     // Get all stored transactions
-    const transactions = await db.collection('transactions')
+    const transactions = await mongoose.model('Transaction')
       .find({ 
         source: 'gmail',
         type: 'purchase'  // Only get AMEX purchases
       })
-      .project({
+      .select({
         id: 1,
         date: 1,
         amount: 1,
@@ -28,7 +29,6 @@ export async function GET() {
         _id: 1
       })
       .sort({ date: -1 })
-      .toArray()
 
     return NextResponse.json({ transactions })
   } catch (error) {

@@ -1,18 +1,18 @@
 import { NextResponse } from 'next/server'
 import { squareClient } from '@/lib/square'
-import { getDb } from '@/lib/db'
-import { ObjectId } from 'mongodb'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     
     // Get the transaction from MongoDB
-    const transaction = await db.collection('transactions').findOne({
-      _id: new ObjectId(params.id)
+    const transaction = await mongoose.model('Transaction').findOne({
+      _id: new mongoose.Types.ObjectId(params.id)
     })
 
     if (!transaction || transaction.source !== 'square') {
@@ -75,10 +75,10 @@ export async function POST(
 
     console.log('[API] Updating transaction with fresh Square data:', updates)
 
-    const updatedTransaction = await db.collection('transactions').findOneAndUpdate(
-      { _id: new ObjectId(params.id) },
+    const updatedTransaction = await mongoose.model('Transaction').findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(params.id) },
       { $set: updates },
-      { returnDocument: 'after' }
+      { new: true }
     )
 
     if (!updatedTransaction) {

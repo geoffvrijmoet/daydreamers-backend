@@ -486,7 +486,7 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
                         />
                         <EditableValue
                           label="SKU"
-                          value={variant.sku}
+                          value={variant.sku || ''}
                           productId={variant.id}
                           field="sku"
                           className="mt-2"

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { squareClient } from '@/lib/square'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { Db } from 'mongodb'
 
 type SquareProduct = {
   id: string
@@ -13,11 +15,11 @@ type SquareProduct = {
 
 export async function GET() {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     console.log('Fetching Square catalog for preview...')
 
     // First, get existing product IDs from MongoDB
-    const existingProducts = await db.collection('products')
+    const existingProducts = await (mongoose.connection.db as Db).collection('products')
       .find({ squareId: { $exists: true } })
       .project({ squareId: 1 })
       .toArray()

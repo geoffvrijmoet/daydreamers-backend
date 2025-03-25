@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 export async function POST(request: Request) {
   try {
@@ -12,8 +13,8 @@ export async function POST(request: Request) {
       )
     }
 
-    const db = await getDb()
-    const result = await db.collection('transactions').deleteMany({
+    await connectToDatabase()
+    const result = await mongoose.model('Transaction').deleteMany({
       id: { $in: ids },
       source: 'gmail' // Safety check to only delete Gmail transactions
     })

@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 export async function POST(request: Request) {
   try {
     const transaction = await request.json()
-    const db = await getDb()
+    await connectToDatabase()
 
-    await db.collection('transactions').insertOne({
+    await mongoose.model('Transaction').create({
       ...transaction,
       createdAt: new Date().toISOString()
     })

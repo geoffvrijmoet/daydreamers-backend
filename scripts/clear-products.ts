@@ -1,6 +1,7 @@
 import { config } from 'dotenv'
 import { resolve } from 'path'
-import { getDb } from '../lib/db'
+import { connectToDatabase } from '../lib/mongoose'
+import mongoose from 'mongoose'
 
 // Load environment variables from .env.local using absolute path
 const envPath = resolve(process.cwd(), '.env.local')
@@ -24,15 +25,15 @@ if (!process.env.MONGODB_URI) {
 async function clearProducts() {
   try {
     console.log('Connecting to MongoDB...')
-    const db = await getDb()
+    await connectToDatabase()
     
     // Delete all documents from the products collection
-    const result = await db.collection('products').deleteMany({})
+    const result = await (mongoose.connection.db as any).collection('products').deleteMany({})
     
     console.log(`Cleared ${result.deletedCount} products from database`)
     
     // Verify collection is empty
-    const count = await db.collection('products').countDocuments()
+    const count = await (mongoose.connection.db as any).collection('products').countDocuments()
     console.log(`Products collection now has ${count} documents`)
     
     process.exit(0)

@@ -1,19 +1,19 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 export async function GET() {
   try {
-    const db = await getDb()
+    await connectToDatabase()
 
     // Get the most recent successful sync from either Square or Shopify
-    const syncStates = await db.collection('syncState')
+    const syncStates = await mongoose.model('SyncState')
       .find({ 
         source: { $in: ['square', 'shopify'] },
         lastSyncStatus: 'success'
       })
       .sort({ lastSuccessfulSync: -1 })
       .limit(1)
-      .toArray()
 
     if (syncStates.length === 0) {
       return NextResponse.json({ lastSuccessfulSync: null })

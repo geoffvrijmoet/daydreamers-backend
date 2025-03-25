@@ -1,69 +1,66 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/mongodb'
-import { ObjectId } from 'mongodb'
-import { type IProduct } from '@/lib/models/Product'
+import { connectToDatabase } from '@/lib/mongoose'
+import ProductModel from '@/lib/models/Product'
+import { FilterQuery } from 'mongoose'
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     
-    console.log('Fetching products from MongoDB...')
-    const products = await db.collection<IProduct>('products').find({}).toArray()
-    console.log(`Found ${products.length} products`)
+    // Get query parameters
+    const { searchParams } = new URL(request.url)
+    const category = searchParams.get('category')
+    const search = searchParams.get('search')
+    const active = searchParams.get('active')
+    const sortBy = searchParams.get('sortBy') || 'name'
+    const sortOrder = searchParams.get('sortOrder') || 'asc'
+    const page = parseInt(searchParams.get('page') || '1')
+    const limit = parseInt(searchParams.get('limit') || '50')
 
-    // Map _id to id and transform the data for frontend consumption
-    const mappedProducts = products.map(product => ({
-      id: (product._id as ObjectId).toString(),
-      name: product.name,
-      description: product.description,
-      category: product.category,
-      retailPrice: product.retailPrice,
-      currentStock: product.currentStock,
-      minimumStock: product.minimumStock,
-      lastPurchasePrice: product.lastPurchasePrice,
-      averageCost: product.averageCost,
-      supplier: product.supplier,
-      isProxied: product.isProxied,
-      proxyOf: product.proxyOf,
-      proxyRatio: product.proxyRatio,
-      costHistory: product.costHistory.map(entry => ({
-        ...entry,
-        date: entry.date.toISOString()
-      })),
-      totalSpent: product.totalSpent,
-      totalPurchased: product.totalPurchased,
-      lastRestockDate: product.lastRestockDate?.toISOString(),
-      active: product.active,
-      variants: product.variants.map(variant => ({
-        name: variant.name,
-        sku: variant.sku,
-        barcode: variant.barcode,
-        price: variant.price,
-        stock: variant.stock,
-        platformMetadata: variant.platformMetadata.map(meta => ({
-          ...meta,
-          lastSyncedAt: meta.lastSyncedAt.toISOString()
-        }))
-      })),
-      platformMetadata: product.platformMetadata.map(meta => ({
-        ...meta,
-        lastSyncedAt: meta.lastSyncedAt.toISOString()
-      })),
-      syncStatus: {
-        lastSyncAttempt: product.syncStatus.lastSyncAttempt.toISOString(),
-        lastSuccessfulSync: product.syncStatus.lastSuccessfulSync.toISOString(),
-        errors: product.syncStatus.errors.map(error => ({
-          ...error,
-          date: error.date.toISOString()
-        }))
-      },
-      createdAt: product.createdAt.toISOString(),
-      updatedAt: product.updatedAt.toISOString()
-    }))
+    // Build query
+    const query: FilterQuery<typeof ProductModel> = {}
+    
+    if (category) {
+      query.category = category
+    }
+    
+    if (active !== null) {
+      query.active = active === 'true'
+    }
+    
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { sku: { $regex: search, $options: 'i' } },
+        { baseProductName: { $regex: search, $options: 'i' } },
+        { variantName: { $regex: search, $options: 'i' } }
+      ]
+    }
 
-    console.log('First product as example:', mappedProducts[0])
+    // Build sort object
+    const sort: Record<string, 1 | -1> = {}
+    sort[sortBy] = sortOrder === 'desc' ? -1 : 1
 
-    return NextResponse.json({ products: mappedProducts })
+    // Execute query with pagination
+    const skip = (page - 1) * limit
+    const [products, total] = await Promise.all([
+      ProductModel.find(query)
+        .sort(sort)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      ProductModel.countDocuments(query)
+    ])
+
+    return NextResponse.json({
+      products,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    })
   } catch (error) {
     console.error('Error fetching products:', error)
     return NextResponse.json(
@@ -75,52 +72,51 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const db = await getDb()
-    const productData = await request.json()
+    await connectToDatabase()
+    const body = await request.json()
 
-    // Create the new product with default values
-    const newProduct: Partial<IProduct> = {
-      name: productData.name,
-      description: productData.description || '',
-      category: productData.category || '',
-      retailPrice: productData.retailPrice,
-      currentStock: productData.currentStock || 0,
-      minimumStock: productData.minimumStock || 5,
-      lastPurchasePrice: productData.lastPurchasePrice || 0,
-      averageCost: productData.averageCost || 0,
-      supplier: productData.supplier || '',
-      isProxied: productData.isProxied || false,
-      proxyOf: productData.proxyOf,
-      proxyRatio: productData.proxyRatio,
-      costHistory: [],
-      totalSpent: 0,
-      totalPurchased: 0,
-      active: productData.active ?? true,
-      variants: [{
-        name: 'Default',
-        sku: productData.sku,
-        barcode: productData.barcode,
-        price: productData.retailPrice,
-        stock: productData.currentStock || 0,
-        platformMetadata: []
-      }],
-      platformMetadata: [],
-      syncStatus: {
-        lastSyncAttempt: new Date(),
-        lastSuccessfulSync: new Date(),
-        errors: []
-      },
-      createdAt: new Date(),
-      updatedAt: new Date()
+    // Validate required fields
+    const requiredFields = ['baseProductName', 'variantName', 'category', 'sku', 'price']
+    const missingFields = requiredFields.filter(field => !body[field])
+    
+    if (missingFields.length > 0) {
+      return NextResponse.json(
+        { error: `Missing required fields: ${missingFields.join(', ')}` },
+        { status: 400 }
+      )
     }
 
-    const result = await db.collection<IProduct>('products').insertOne(newProduct as IProduct)
-    
-    // Return the created product with the new _id
-    return NextResponse.json({ 
-      id: (result.insertedId as ObjectId).toString(),
-      ...newProduct
+    // Check for duplicate SKU
+    const existingProduct = await ProductModel.findOne({ sku: body.sku })
+    if (existingProduct) {
+      return NextResponse.json(
+        { error: 'Product with this SKU already exists' },
+        { status: 400 }
+      )
+    }
+
+    // Create new product
+    const product = await ProductModel.create({
+      ...body,
+      name: `${body.baseProductName}${body.variantName !== 'Default' ? ` - ${body.variantName}` : ''}`,
+      stock: body.stock || 0,
+      minimumStock: body.minimumStock || 5,
+      lastPurchasePrice: body.lastPurchasePrice || 0,
+      averageCost: body.averageCost || 0,
+      totalSpent: body.totalSpent || 0,
+      totalPurchased: body.totalPurchased || 0,
+      active: body.active !== false,
+      isProxied: body.isProxied || false,
+      costHistory: body.costHistory || [],
+      platformMetadata: body.platformMetadata || [],
+      syncStatus: {
+        lastSyncAttempt: null,
+        lastSuccessfulSync: null,
+        errors: []
+      }
     })
+
+    return NextResponse.json(product, { status: 201 })
   } catch (error) {
     console.error('Error creating product:', error)
     return NextResponse.json(
@@ -130,34 +126,30 @@ export async function POST(request: Request) {
   }
 }
 
-// Add update endpoint
 export async function PUT(request: Request) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     const { id, ...updates } = await request.json()
 
-    const result = await db.collection('products').findOneAndUpdate(
-      { _id: new ObjectId(id) },
+    const product = await ProductModel.findByIdAndUpdate(
+      id,
       { 
         $set: {
           ...updates,
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date()
         }
       },
-      { returnDocument: 'after' }
+      { new: true }
     )
 
-    if (!result) {
+    if (!product) {
       return NextResponse.json(
         { error: 'Product not found' },
         { status: 404 }
       )
     }
 
-    return NextResponse.json({
-      ...result,
-      id: result._id.toString()
-    })
+    return NextResponse.json(product)
   } catch (error) {
     console.error('Error updating product:', error)
     return NextResponse.json(

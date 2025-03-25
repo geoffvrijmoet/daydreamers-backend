@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { Db } from 'mongodb'
 
 export async function GET(request: Request) {
   try {
@@ -16,12 +18,12 @@ export async function GET(request: Request) {
     const shopifyVariantId = `gid://shopify/ProductVariant/${variantId}`
     console.log('[API] Converted to Shopify variant ID:', shopifyVariantId)
 
-    const db = await getDb()
+    await connectToDatabase()
     console.log('[API] Connected to database')
     
     // Find product with matching Shopify variant ID
     console.log('[API] Searching for product with shopifyVariantId:', shopifyVariantId)
-    const product = await db.collection('products')
+    const product = await (mongoose.connection.db as Db).collection('products')
       .findOne({ 
         shopifyVariantId,
         active: { $ne: false }

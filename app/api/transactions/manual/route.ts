@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
 import { fromEasternTime } from '@/lib/utils/dates'
+import mongoose from 'mongoose'
 
 export async function POST(request: Request) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     const data = await request.json()
 
     // The frontend now sends us:
@@ -21,7 +22,7 @@ export async function POST(request: Request) {
       updatedAt: now
     }
 
-    await db.collection('transactions').insertOne(transaction)
+    await mongoose.model('Transaction').create(transaction)
 
     return NextResponse.json({ success: true })
   } catch (error) {
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     const { id, ...updates } = await request.json()
 
     // Convert any dates to UTC while treating them as Eastern Time
@@ -45,12 +46,12 @@ export async function PUT(request: Request) {
       updatedAt: fromEasternTime(new Date())
     }
 
-    const result = await db.collection('transactions').findOneAndUpdate(
+    const result = await mongoose.model('Transaction').findOneAndUpdate(
       { id },
       { 
         $set: updateData
       },
-      { returnDocument: 'after' }
+      { new: true }
     )
 
     if (!result) {
@@ -73,9 +74,9 @@ export async function PUT(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const { id } = await request.json()
-    const db = await getDb()
+    await connectToDatabase()
 
-    const result = await db.collection('transactions').deleteOne({ id })
+    const result = await mongoose.model('Transaction').deleteOne({ id })
 
     if (result.deletedCount === 0) {
       return NextResponse.json(

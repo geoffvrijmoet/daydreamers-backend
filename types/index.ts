@@ -98,6 +98,8 @@ export interface Product {
   squareParentId?: string
   shopifyId?: string
   shopifyParentId?: string
+  shopifyVariantId?: string
+  sku?: string
   platformMetadata: {
     platform: 'shopify' | 'square'
     productId: string

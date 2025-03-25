@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
-import { ObjectId } from 'mongodb'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { ObjectId, Db } from 'mongodb'
 
 export async function GET(
   request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = await getDb()
-    const supplier = await db.collection('suppliers').findOne({
+    await connectToDatabase()
+    const supplier = await (mongoose.connection.db as Db).collection('suppliers').findOne({
       _id: new ObjectId(params.id)
     })
 
@@ -45,10 +46,10 @@ export async function PATCH(
       )
     }
 
-    const db = await getDb()
+    await connectToDatabase()
 
     // Check if another supplier with the same name exists (excluding current supplier)
-    const existing = await db.collection('suppliers').findOne({
+    const existing = await (mongoose.connection.db as Db).collection('suppliers').findOne({
       _id: { $ne: new ObjectId(params.id) },
       name
     })
@@ -60,7 +61,7 @@ export async function PATCH(
     }
 
     // Update supplier
-    const result = await db.collection('suppliers').findOneAndUpdate(
+    const result = await (mongoose.connection.db as Db).collection('suppliers').findOneAndUpdate(
       { _id: new ObjectId(params.id) },
       {
         $set: {

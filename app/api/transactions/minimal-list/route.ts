@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
 
 /**
  * Returns a minimal list of transactions (ID, source, amount) for client-side 
@@ -7,12 +8,12 @@ import { getDb } from '@/lib/db'
  */
 export async function GET() {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     
     // Get only the necessary fields for duplicate checking
-    const transactions = await db.collection('transactions')
+    const transactions = await mongoose.model('Transaction')
       .find({})
-      .project({ 
+      .select({ 
         _id: 1, 
         id: 1, 
         source: 1, 
@@ -24,7 +25,6 @@ export async function GET() {
         supplierOrderNumber: 1, // Include supplierOrderNumber for expense checking
         paymentMethod: 1 // Include payment method for filtering by payment type
       })
-      .toArray()
     
     console.log(`Returning ${transactions.length} transactions for duplication checking`)
     

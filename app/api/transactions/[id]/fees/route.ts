@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
-import { ObjectId } from 'mongodb'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { ObjectId, Db } from 'mongodb'
 
 export async function PATCH(
   request: Request,
@@ -20,11 +21,11 @@ export async function PATCH(
       );
     }
 
-    const db = await getDb();
+    await connectToDatabase();
     
     // Update the transaction with the new fee
     console.log('[API] Updating transaction in MongoDB...');
-    const result = await db.collection('transactions').findOneAndUpdate(
+    const result = await (mongoose.connection.db as Db).collection('transactions').findOneAndUpdate(
       { _id: new ObjectId(params.id) },
       { 
         $set: { 

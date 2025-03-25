@@ -114,7 +114,6 @@ const ProductSchema = new Schema<IProduct>({
 
 // Indexes for common queries
 ProductSchema.index({ baseProductName: 1 });
-ProductSchema.index({ sku: 1 }, { unique: true });
 ProductSchema.index({ category: 1 });
 ProductSchema.index({ stock: 1 });
 ProductSchema.index({ active: 1 });

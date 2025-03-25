@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server'
 import { squareClient } from '@/lib/square'
-import { getDb } from '@/lib/db'
-import { ObjectId } from 'mongodb'
+import { connectToDatabase } from '@/lib/mongoose'
+import mongoose from 'mongoose'
+import { ObjectId, Db } from 'mongodb'
 
 export async function POST(request: Request) {
   try {
-    const db = await getDb()
+    await connectToDatabase()
     const { productId } = await request.json()
 
     // Get product from our database
-    const product = await db.collection('products').findOne({ _id: new ObjectId(productId) })
+    const product = await (mongoose.connection.db as Db).collection('products').findOne({ _id: new ObjectId(productId) })
     if (!product) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 })
     }
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
       })
 
       // Save Square ID back to our database
-      await db.collection('products').updateOne(
+      await (mongoose.connection.db as Db).collection('products').updateOne(
         { _id: new ObjectId(productId) },
         { 
           $set: { 
