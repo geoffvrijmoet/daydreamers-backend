@@ -14,8 +14,10 @@ export function ProductForm({ onSuccess, initialData }: ProductFormProps) {
   const [error, setError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
 
-  const [formData, setFormData] = useState<Omit<Product, 'id'>>({
+  const [formData, setFormData] = useState<Omit<Product, '_id' | 'id' | 'platformMetadata' | 'syncStatus'>>({
     name: initialData?.name || '',
+    baseProductName: initialData?.baseProductName || '',
+    variantName: initialData?.variantName || '',
     sku: initialData?.sku || '',
     description: initialData?.description || '',
     lastPurchasePrice: initialData?.lastPurchasePrice || 0,
@@ -33,7 +35,10 @@ export function ProductForm({ onSuccess, initialData }: ProductFormProps) {
     costHistory: initialData?.costHistory || [],
     totalSpent: initialData?.totalSpent || 0,
     totalPurchased: initialData?.totalPurchased || 0,
-    lastRestockDate: initialData?.lastRestockDate || new Date().toISOString()
+    lastRestockDate: initialData?.lastRestockDate || new Date().toISOString(),
+    isProxied: initialData?.isProxied || false,
+    proxyOf: initialData?.proxyOf || undefined,
+    proxyRatio: initialData?.proxyRatio || undefined
   })
 
   // Calculate pre-tax price whenever retail price changes
@@ -90,6 +95,8 @@ export function ProductForm({ onSuccess, initialData }: ProductFormProps) {
       if (!initialData) {
         setFormData({
           name: '',
+          baseProductName: '',
+          variantName: '',
           sku: '',
           description: '',
           lastPurchasePrice: 0,
@@ -107,7 +114,10 @@ export function ProductForm({ onSuccess, initialData }: ProductFormProps) {
           costHistory: [],
           totalSpent: 0,
           totalPurchased: 0,
-          lastRestockDate: new Date().toISOString()
+          lastRestockDate: new Date().toISOString(),
+          isProxied: false,
+          proxyOf: undefined,
+          proxyRatio: undefined
         })
       }
     } catch (err) {

@@ -404,7 +404,7 @@ export function ShopifySyncReview({ onSuccess }: ShopifySyncReviewProps) {
   // Filter sorted MongoDB products by search term
   const filteredMongoProducts = sortedMongoProducts.filter(product =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.sku.toLowerCase().includes(searchTerm.toLowerCase())
+    (product.sku?.toLowerCase() || '').includes(searchTerm.toLowerCase())
   );
 
   // Sort Shopify products based on similarity to the filtered MongoDB products

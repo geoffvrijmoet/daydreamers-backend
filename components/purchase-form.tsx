@@ -73,7 +73,7 @@ export function PurchaseForm({ onSuccess, onCancel, isExpanded = false }: Purcha
   // Filter products based on search query
   const filteredProducts = products.filter(product => 
     product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    product.sku.toLowerCase().includes(searchQuery.toLowerCase())
+    (product.sku?.toLowerCase() || '').includes(searchQuery.toLowerCase())
   )
 
   const handleProductSelect = (product: Product) => {

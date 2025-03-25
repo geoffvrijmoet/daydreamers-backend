@@ -87,7 +87,7 @@ export function ManualTransactionForm({ isExpanded = false, onSuccess, onCancel 
   const filteredAndGroupedProducts = useMemo(() => {
     const filtered = products.filter(product => 
       product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.sku.toLowerCase().includes(searchQuery.toLowerCase())
+      (product.sku?.toLowerCase() || '').includes(searchQuery.toLowerCase())
     )
 
     // Group by parent product name (everything before " - ")
