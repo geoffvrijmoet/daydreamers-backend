@@ -34,8 +34,8 @@ export class GmailService {
       credentials,
       scopes: [
         'https://www.googleapis.com/auth/cloud-platform',
-        'https://www.googleapis.com/auth/gmail.modify',
-        'https://www.googleapis.com/auth/gmail.settings.basic'
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.metadata'
       ]
     })
 
