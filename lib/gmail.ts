@@ -198,10 +198,15 @@ export class GmailService {
       // Try to get the topic first to verify access
       const [exists] = await this.pubsubClient.topic(process.env.GMAIL_TOPIC_NAME!).exists()
       if (!exists) {
+        console.error('Topic does not exist:', process.env.GMAIL_TOPIC_NAME)
         throw new Error('Topic does not exist')
       }
     } catch (error) {
-      console.error('Error accessing Pub/Sub topic:', error)
+      console.error('Error accessing Pub/Sub topic:', {
+        error,
+        topicName: process.env.GMAIL_TOPIC_NAME,
+        projectId: process.env.GOOGLE_CLOUD_PROJECT
+      })
       throw new Error('Failed to access Pub/Sub topic. Please verify the topic exists and the service account has proper permissions.')
     }
 
