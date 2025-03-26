@@ -2,6 +2,8 @@ import { google } from 'googleapis'
 import { OAuth2Client } from 'google-auth-library'
 import { EmailTransaction, GmailCredentials } from '@/types'
 import { getGoogleCredentialsPath } from './utils/google-auth'
+import { GoogleAuth } from 'google-auth-library'
+import { PubSub } from '@google-cloud/pubsub'
 
 const GMAIL_CREDENTIALS = {
   client_id: process.env.GMAIL_CLIENT_ID,
@@ -11,6 +13,8 @@ const GMAIL_CREDENTIALS = {
 
 export class GmailService {
   private oauth2Client: OAuth2Client
+  private serviceAuth: GoogleAuth | null = null
+  private pubsubClient: PubSub | null = null
 
   constructor() {
     if (!GMAIL_CREDENTIALS.client_id || !GMAIL_CREDENTIALS.client_secret || !GMAIL_CREDENTIALS.redirect_uri) {
@@ -25,8 +29,18 @@ export class GmailService {
   }
 
   async initialize() {
-    // Set the credentials path for Google Auth
-    process.env.GOOGLE_APPLICATION_CREDENTIALS = await getGoogleCredentialsPath()
+    // Set up service account auth for Pub/Sub operations
+    const credentialsPath = await getGoogleCredentialsPath()
+    this.serviceAuth = new GoogleAuth({
+      keyFile: credentialsPath,
+      scopes: ['https://www.googleapis.com/auth/cloud-platform']
+    })
+
+    // Initialize PubSub client
+    this.pubsubClient = new PubSub({
+      keyFilename: credentialsPath,
+      projectId: process.env.GOOGLE_CLOUD_PROJECT
+    })
   }
 
   getAuthUrl() {
@@ -162,13 +176,32 @@ export class GmailService {
   }
 
   async setupWatch(): Promise<{historyId: string, expiration: string}> {
+    if (!this.serviceAuth || !this.pubsubClient) {
+      throw new Error('Service account auth not initialized')
+    }
+
+    // Use the Gmail OAuth client for the watch request
     const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client })
     
+    const topicName = `projects/${process.env.GOOGLE_CLOUD_PROJECT}/topics/${process.env.GMAIL_TOPIC_NAME}`
+
+    try {
+      // Try to get the topic first to verify access
+      const [exists] = await this.pubsubClient.topic(process.env.GMAIL_TOPIC_NAME!).exists()
+      if (!exists) {
+        throw new Error('Topic does not exist')
+      }
+    } catch (error) {
+      console.error('Error accessing Pub/Sub topic:', error)
+      throw new Error('Failed to access Pub/Sub topic. Please verify the topic exists and the service account has proper permissions.')
+    }
+
+    // If we can access the topic, proceed with setting up the Gmail watch
     const response = await gmail.users.watch({
       userId: 'me',
       requestBody: {
         labelIds: ['INBOX'],
-        topicName: `projects/${process.env.GOOGLE_CLOUD_PROJECT}/topics/${process.env.GMAIL_TOPIC_NAME}`
+        topicName: topicName
       }
     })
 
