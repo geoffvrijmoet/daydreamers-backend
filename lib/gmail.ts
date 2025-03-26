@@ -32,7 +32,11 @@ export class GmailService {
     const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '{}')
     this.serviceAuth = new GoogleAuth({
       credentials,
-      scopes: ['https://www.googleapis.com/auth/cloud-platform']
+      scopes: [
+        'https://www.googleapis.com/auth/cloud-platform',
+        'https://www.googleapis.com/auth/gmail.modify',
+        'https://www.googleapis.com/auth/gmail.settings.basic'
+      ]
     })
 
     // Initialize PubSub client
