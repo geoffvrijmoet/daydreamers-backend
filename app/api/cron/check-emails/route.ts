@@ -56,8 +56,14 @@ async function parseInvoiceEmail(emailId: string, gmail: GmailService) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    // Verify the request is coming from Vercel Cron
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     // Initialize Gmail service
     await gmailService.initialize()
     await connectToDatabase()
