@@ -1,7 +1,6 @@
 import { google } from 'googleapis'
 import { OAuth2Client } from 'google-auth-library'
 import { EmailTransaction, GmailCredentials } from '@/types'
-import { getGoogleCredentialsPath } from './utils/google-auth'
 import { GoogleAuth } from 'google-auth-library'
 import { PubSub } from '@google-cloud/pubsub'
 
@@ -30,15 +29,15 @@ export class GmailService {
 
   async initialize() {
     // Set up service account auth for Pub/Sub operations
-    const credentialsPath = await getGoogleCredentialsPath()
+    const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '{}')
     this.serviceAuth = new GoogleAuth({
-      keyFile: credentialsPath,
+      credentials,
       scopes: ['https://www.googleapis.com/auth/cloud-platform']
     })
 
     // Initialize PubSub client
     this.pubsubClient = new PubSub({
-      keyFilename: credentialsPath,
+      credentials,
       projectId: process.env.GOOGLE_CLOUD_PROJECT
     })
   }
@@ -180,8 +179,14 @@ export class GmailService {
       throw new Error('Service account auth not initialized')
     }
 
-    // Use the Gmail OAuth client for the watch request
-    const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client })
+    // Get credentials from service account
+    const authClient = await this.serviceAuth.getClient()
+    
+    // Use the service account auth for Gmail
+    const gmail = google.gmail({ 
+      version: 'v1', 
+      auth: authClient as OAuth2Client
+    })
     
     const topicName = `projects/${process.env.GOOGLE_CLOUD_PROJECT}/topics/${process.env.GMAIL_TOPIC_NAME}`
 
