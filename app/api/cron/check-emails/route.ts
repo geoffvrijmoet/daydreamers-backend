@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import { gmailService } from '@/lib/gmail'
 import CredentialModel from '@/lib/models/Credential'
-import SettingModel from '@/lib/models/Setting'
 import InvoiceEmailModel from '@/lib/models/InvoiceEmail'
 import { google } from 'googleapis'
 import { gmail_v1 } from 'googleapis'
@@ -81,12 +80,12 @@ export async function GET(request: Request) {
     gmailService.setCredentials(credentials.data)
     const gmail = google.gmail({ version: 'v1', auth: gmailService.getAuth() })
 
-    // Get last check timestamp
-    const lastCheck = await SettingModel.findOne({ key: 'last_email_check' })
-    const lastCheckDate = lastCheck?.value ? new Date(lastCheck.value) : new Date(0)
-
-    // Search for matching emails since last check
-    const query = `from:geofferyv@gmail.com subject:Invoice after:${Math.floor(lastCheckDate.getTime() / 1000)}`
+    // Calculate timestamp for 24 hours ago
+    const oneDayAgo = new Date()
+    oneDayAgo.setHours(oneDayAgo.getHours() - 24)
+    
+    // Search for matching emails from the past 24 hours
+    const query = `from:geofferyv@gmail.com subject:Invoice after:${Math.floor(oneDayAgo.getTime() / 1000)}`
     
     const response = await gmail.users.messages.list({
       userId: 'me',
@@ -96,19 +95,6 @@ export async function GET(request: Request) {
 
     if (!response.data.messages) {
       console.log('No new matching emails found')
-      
-      // Update last check timestamp
-      await SettingModel.updateOne(
-        { key: 'last_email_check' },
-        { 
-          $set: { 
-            value: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          }
-        },
-        { upsert: true }
-      )
-      
       return NextResponse.json({ message: 'No new emails found' })
     }
 
@@ -140,18 +126,6 @@ export async function GET(request: Request) {
         })
       }
     }
-
-    // Update last check timestamp
-    await SettingModel.updateOne(
-      { key: 'last_email_check' },
-      { 
-        $set: { 
-          value: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        }
-      },
-      { upsert: true }
-    )
 
     return NextResponse.json({
       success: true,
