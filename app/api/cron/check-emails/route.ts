@@ -3,6 +3,8 @@ import { connectToDatabase } from '@/lib/mongoose'
 import { gmailService } from '@/lib/gmail'
 import CredentialModel from '@/lib/models/Credential'
 import InvoiceEmailModel from '@/lib/models/InvoiceEmail'
+import SupplierModel from '@/lib/models/Supplier'
+import SyncStateModel from '@/lib/models/SyncState'
 import { google } from 'googleapis'
 import { gmail_v1 } from 'googleapis'
 
@@ -70,70 +72,125 @@ export async function GET(request: Request) {
     await gmailService.initialize()
     await connectToDatabase()
 
+    console.log('Starting cron job execution...')
+
     // Get Gmail credentials
     const credentials = await CredentialModel.findOne({ type: 'gmail' })
     if (!credentials?.data) {
+      console.log('No Gmail credentials found in database')
       return NextResponse.json(
         { error: 'Gmail not authenticated' },
         { status: 401 }
       )
     }
 
+    console.log('Found Gmail credentials, setting up service...')
+    
     // Set up Gmail API
     gmailService.setCredentials(credentials.data)
     const gmail = google.gmail({ version: 'v1', auth: gmailService.getAuth() })
 
-    // Calculate timestamp for 24 hours ago
-    const oneDayAgo = new Date()
-    oneDayAgo.setHours(oneDayAgo.getHours() - 24)
-    
-    // Search for matching emails from the past 24 hours
-    const query = `from:geofferyv@gmail.com subject:Invoice after:${Math.floor(oneDayAgo.getTime() / 1000)}`
-    
-    const response = await gmail.users.messages.list({
-      userId: 'me',
-      q: query,
-      maxResults: 50
+    // Get suppliers with invoice email configuration
+    const suppliers = await SupplierModel.find({
+      invoiceEmail: { $exists: true, $ne: '' },
+      invoiceSubjectPattern: { $exists: true, $ne: '' }
     })
 
-    if (!response.data.messages) {
-      console.log('No new matching emails found')
-      return NextResponse.json({ message: 'No new emails found' })
+    if (!suppliers.length) {
+      console.log('No suppliers configured for invoice email checking')
+      return NextResponse.json({ 
+        success: true,
+        emailsProcessed: 0,
+        emails: [],
+        message: 'No suppliers configured for invoice email checking'
+      })
     }
 
-    // Process each matching email
-    const processedEmails = []
-    for (const message of response.data.messages) {
-      if (!message.id) continue
-      
-      // Check if we've already processed this email
-      const existingEmail = await InvoiceEmailModel.findOne({ emailId: message.id })
+    // Get last sync time from SyncState
+    const syncState = await SyncStateModel.findOne({ source: 'gmail' })
+    const now = new Date()
+    
+    // If no sync state exists, default to 7 days ago for initial sync
+    const defaultSyncTime = new Date(now)
+    defaultSyncTime.setDate(defaultSyncTime.getDate() - 7)
+    
+    const lastSyncTime = syncState?.lastSuccessfulSync || defaultSyncTime.toISOString()
+    console.log(`Using ${syncState ? 'existing' : 'default'} sync time:`, lastSyncTime)
 
-      if (existingEmail) {
-        console.log(`Email ${message.id} already processed, skipping`)
+    // Process each supplier's emails
+    const allProcessedEmails = []
+    let totalEmailsProcessed = 0
+
+    for (const supplier of suppliers) {
+      console.log(`Processing emails for supplier: ${supplier.name}`)
+      
+      const query = `from:${supplier.invoiceEmail} subject:"${supplier.invoiceSubjectPattern}" after:${Math.floor(new Date(lastSyncTime).getTime() / 1000)}`
+      console.log('Searching for invoices with query:', query)
+      
+      const response = await gmail.users.messages.list({
+        userId: 'me',
+        q: query,
+        maxResults: 50
+      })
+
+      if (!response.data.messages) {
+        console.log(`No new matching emails found for ${supplier.name}`)
         continue
       }
-      
-      const parsedEmail = await parseInvoiceEmail(message.id, gmail)
-      if (parsedEmail) {
-        // Create a new invoice email record
-        const invoiceEmail = new InvoiceEmailModel({
-          ...parsedEmail,
-          status: 'pending'
-        })
 
-        await invoiceEmail.save()
-        processedEmails.push({
-          ...parsedEmail,
-          _id: invoiceEmail._id
-        })
+      // Process each matching email
+      for (const message of response.data.messages) {
+        if (!message.id) continue
+        
+        // Check if we've already processed this email
+        const existingEmail = await InvoiceEmailModel.findOne({ emailId: message.id })
+
+        if (existingEmail) {
+          console.log(`Email ${message.id} already processed, skipping`)
+          continue
+        }
+        
+        const parsedEmail = await parseInvoiceEmail(message.id, gmail)
+        if (parsedEmail) {
+          // Create a new invoice email record
+          const invoiceEmail = new InvoiceEmailModel({
+            ...parsedEmail,
+            supplier: supplier.name,
+            status: 'pending'
+          })
+
+          await invoiceEmail.save()
+          allProcessedEmails.push({
+            ...parsedEmail,
+            supplier: supplier.name,
+            _id: invoiceEmail._id
+          })
+          totalEmailsProcessed++
+        }
       }
     }
+
+    // Update sync state
+    await SyncStateModel.findOneAndUpdate(
+      { source: 'gmail' },
+      { 
+        $set: { 
+          lastSuccessfulSync: now,
+          lastSyncStatus: 'success',
+          lastSyncResults: {
+            created: totalEmailsProcessed,
+            updated: 0,
+            skipped: 0
+          }
+        }
+      },
+      { upsert: true, new: true }
+    )
 
     return NextResponse.json({
       success: true,
-      emailsProcessed: processedEmails.length,
-      emails: processedEmails
+      emailsProcessed: totalEmailsProcessed,
+      emails: allProcessedEmails
     })
 
   } catch (error) {
