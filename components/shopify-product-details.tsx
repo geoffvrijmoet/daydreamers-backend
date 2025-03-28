@@ -54,16 +54,18 @@ export function ShopifyProductDetails({ product, onUpdate }: ShopifyProductDetai
   const [formData, setFormData] = useState<ShopifyData | null>(null)
 
   useEffect(() => {
-    if (product.shopifyId) {
+    const shopifyMetadata = product.platformMetadata?.find(m => m.platform === 'shopify');
+    if (shopifyMetadata?.productId) {
       fetchShopifyData()
     }
-  }, [product.shopifyId])
+  }, [product.platformMetadata])
 
   const fetchShopifyData = async () => {
-    if (!product.shopifyId) return
+    const shopifyMetadata = product.platformMetadata?.find(m => m.platform === 'shopify');
+    if (!shopifyMetadata?.productId) return
 
     try {
-      const variantId = extractShopifyId(product.shopifyId)
+      const variantId = extractShopifyId(shopifyMetadata.productId)
       if (!variantId) {
         throw new Error('Invalid Shopify ID format')
       }
@@ -86,13 +88,14 @@ export function ShopifyProductDetails({ product, onUpdate }: ShopifyProductDetai
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!formData || !product.shopifyId) return
+    const shopifyMetadata = product.platformMetadata?.find(m => m.platform === 'shopify');
+    if (!formData || !shopifyMetadata?.productId) return
 
     setLoading(true)
     setError(null)
 
     try {
-      const variantId = extractShopifyId(product.shopifyId)
+      const variantId = extractShopifyId(shopifyMetadata.productId)
       if (!variantId) {
         throw new Error('Invalid Shopify ID format')
       }
