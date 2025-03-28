@@ -25,7 +25,7 @@ export default function ProductsPage() {
   async function fetchProducts() {
     try {
       console.log('Fetching products...')
-      const response = await fetch('/api/products')
+      const response = await fetch('/api/products?limit=1000')
       
       if (!response.ok) {
         const errorData = await response.json()

@@ -2,20 +2,19 @@ import { NextResponse } from 'next/server'
 import { squareClient } from '@/lib/square'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { Transaction } from '@/types'
 import type { Order } from 'square'
+import SyncStateModel from '@/lib/models/SyncState'
 
 export async function POST(request: Request) {
   try {
-    const { searchParams } = new URL(request.url)
-    const startDate = searchParams.get('startDate')
-    const endDate = searchParams.get('endDate')
+    const body = await request.json()
+    const { startDate, endDate } = body
     
     await connectToDatabase()
     console.log('Starting Square transactions sync...')
 
     // Get last sync timestamp if no dates provided
-    const syncState = await mongoose.model('SyncState').findOne({ source: 'square' })
+    const syncState = await SyncStateModel.findOne({ source: 'square' })
     const lastSyncTime = startDate || syncState?.lastSuccessfulSync || '2023-01-01T00:00:00Z'
     const now = endDate || new Date().toISOString()
 
@@ -89,10 +88,12 @@ export async function POST(request: Request) {
     const operations = orders
       .filter((order): order is Order => !!order.id && !!order.totalMoney?.amount)
       .map(async (order) => {
-      const squareId = `square_${order.id}`
 
       // Check if transaction already exists
-      const existing = await mongoose.model('Transaction').findOne({ id: squareId })
+      const existing = await mongoose.model('Transaction').findOne({
+        'platformMetadata.platform': 'square',
+        'platformMetadata.orderId': order.id
+      })
 
       // Determine transaction status
       let status: 'completed' | 'cancelled' | 'refunded' = 'completed'
@@ -113,9 +114,12 @@ export async function POST(request: Request) {
       
       // Subtotal includes tax but not tip
       const subtotal = totalAmount - tipAmount;
-      // Work backwards to find pre-tax amount
-      const preTaxAmount = subtotal / (1 + TAX_RATE);
-      const calculatedTax = subtotal - preTaxAmount;
+      // Work backwards to find pre-tax amount and round to 2 decimal places
+      const preTaxAmount = Number((subtotal / (1 + TAX_RATE)).toFixed(2));
+      const calculatedTax = Number((subtotal - preTaxAmount).toFixed(2));
+
+      // Calculate Square processing fee (2.6% + $0.15)
+      const processingFee = Number((totalAmount * 0.026 + 0.15).toFixed(2));
 
       console.log('[Square Sync] Tax calculation:', {
         totalAmount,
@@ -123,34 +127,57 @@ export async function POST(request: Request) {
         subtotal,
         preTaxAmount,
         calculatedTax,
+        processingFee,
         effectiveTaxRate: ((calculatedTax / preTaxAmount) * 100).toFixed(3) + '%'
       });
 
-      const transaction: Omit<Transaction, '_id'> = {
-        id: squareId,
-        date: order.createdAt ?? new Date().toISOString(),
-        type: 'sale',
+      const transaction = {
+        type: 'sale' as const,
+        date: order.createdAt,
         amount: totalAmount,
         preTaxAmount,
         taxAmount: calculatedTax,
-        tip: tipAmount || undefined,
-        description: order.lineItems?.[0]?.name 
-          ? `Square: ${order.lineItems[0].name}${order.lineItems.length > 1 ? ` (+${order.lineItems.length - 1} more)` : ''}`
-          : `Square Order #${order.id}`,
-        source: 'square',
-        lineItems: order.lineItems?.map(item => ({
-          name: item.name || '',
-          quantity: Number(item.quantity),
-          price: item.basePriceMoney?.amount ? Number(item.basePriceMoney.amount) / 100 : 0,
-          sku: item.catalogObjectId || undefined
-        })),
-        customer: order.customerId ?? '',
-        paymentMethod: order.tenders?.[0]?.type ?? undefined,
+        tip: tipAmount,
         status,
-        refundAmount: refundInfo?.amount ? Number(refundInfo.amount) / 100 : undefined,
+        source: 'square' as const,
+        customer: order.customerId ? `square_${order.customerId}` : undefined,
+        refundAmount: refundInfo?.amount,
         refundDate: refundInfo?.date,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: order.updatedAt,
+        isTaxable: true,
+        paymentProcessing: {
+          fee: processingFee,
+          provider: 'Square',
+          transactionId: order.id
+        },
+        platformMetadata: {
+          platform: 'square' as const,
+          orderId: order.id,
+          data: {
+            orderId: order.id,
+            locationId: order.locationId || process.env.SQUARE_LOCATION_ID!,
+            state: order.state as 'OPEN' | 'COMPLETED' | 'CANCELED',
+            createdAt: order.createdAt,
+            updatedAt: order.updatedAt
+          }
+        },
+        products: await Promise.all(order.lineItems?.map(async item => {
+          // Try to find the MongoDB product using Square's catalog ID
+          const product = item.catalogObjectId ? 
+            await mongoose.model('Product').findOne({
+              'platformMetadata.platform': 'square',
+              'platformMetadata.productId': item.catalogObjectId
+            }) : null;
+
+          return {
+            name: item.name,
+            quantity: Number(item.quantity),
+            unitPrice: Number(item.basePriceMoney?.amount || 0) / 100,
+            totalPrice: Number(item.totalMoney?.amount || 0) / 100,
+            isTaxable: true, // All Square products are taxable
+            productId: product?._id || new mongoose.Types.ObjectId() // Use existing product ID if found, otherwise generate new one
+          };
+        }) || [])
       }
 
       if (existing) {
@@ -176,10 +203,21 @@ export async function POST(request: Request) {
       }
 
       // Create new transaction
-      await mongoose.model('Transaction').create({
+      const newTransaction = await mongoose.model('Transaction').create({
         ...transaction,
         createdAt: new Date().toISOString()
       })
+
+      console.log('Created transaction with platformMetadata:', {
+        transactionId: newTransaction._id,
+        orderId: order.id,
+        platformMetadata: newTransaction.platformMetadata,
+        fullTransaction: {
+          ...newTransaction.toObject(),
+          products: newTransaction.products.length + ' products'
+        }
+      })
+
       console.log(`Synced Square order ${order.id}`)
       return { action: 'created', id: order.id }
     })
@@ -190,7 +228,7 @@ export async function POST(request: Request) {
     const skipped = results.filter(r => r.action === 'skipped').length
 
     // Update last successful sync time
-    await mongoose.model('SyncState').findOneAndUpdate(
+    await SyncStateModel.findOneAndUpdate(
       { source: 'square' },
       { 
         $set: { 

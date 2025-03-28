@@ -106,7 +106,7 @@ interface MongoProduct {
   _id: string;
   id: string;
   name: string;
-  retailPrice: number;
+  price: number;
   lastPurchasePrice?: number;
   [key: string]: unknown;
 }
@@ -1205,7 +1205,7 @@ export default function SalesPage() {
               }
               
               if (matchedProduct) {
-                // For purchases, use lastPurchasePrice if available instead of retailPrice
+                // For purchases, use lastPurchasePrice if available instead of price
                 const unitPrice = Number(matchedProduct.lastPurchasePrice) || 0;
                 
                 // Use the actual spend if available from detailed format, otherwise calculate
@@ -1308,8 +1308,8 @@ export default function SalesPage() {
               }
               
               if (matchedProduct) {
-                // For sales, use retailPrice instead of price
-                const unitPrice = Number(matchedProduct.retailPrice) || 0;
+                // For sales, use price instead of price
+                const unitPrice = Number(matchedProduct.price) || 0;
                 
                 formattedProducts.push({
                   name: matchedProduct.name,
@@ -2071,7 +2071,7 @@ export default function SalesPage() {
       console.log(`🧪 First few product examples:`, mongoProducts.slice(0, 3).map(p => ({
         _id: p._id,
         name: p.name,
-        retailPrice: p.retailPrice,
+        price: p.price,
         lastPurchasePrice: p.lastPurchasePrice
       })));
       
@@ -2216,12 +2216,12 @@ export default function SalesPage() {
                 unitPrice = parseFloat(matchedProduct.lastPurchasePrice);
               }
             } else {
-              // For sales, use retailPrice
-              console.log(`💲 Retail price data: ${JSON.stringify(matchedProduct.retailPrice)}`);
-              if (typeof matchedProduct.retailPrice === 'number') {
-                unitPrice = matchedProduct.retailPrice;
-              } else if (typeof matchedProduct.retailPrice === 'string') {
-                unitPrice = parseFloat(matchedProduct.retailPrice);
+              // For sales, use price
+              console.log(`💲 Retail price data: ${JSON.stringify(matchedProduct.price)}`);
+              if (typeof matchedProduct.price === 'number') {
+                unitPrice = matchedProduct.price;
+              } else if (typeof matchedProduct.price === 'string') {
+                unitPrice = parseFloat(matchedProduct.price);
               }
             }
             
@@ -3604,7 +3604,7 @@ export default function SalesPage() {
                           suggestedProducts.map((product) => (
                             <TableRow key={product._id}>
                               <TableCell>{product.name}</TableCell>
-                              <TableCell>{formatCurrency(product.retailPrice)}</TableCell>
+                              <TableCell>{formatCurrency(product.price)}</TableCell>
                               <TableCell>
                                 <Button
                                   variant="outline"

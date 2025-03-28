@@ -38,7 +38,7 @@ export function ShopifyProductForm({ product, onSuccess }: ShopifyProductFormPro
     vendor: product.supplier || 'Daydreamers Pet Supply',
     productType: product.category || 'Pet Supplies',
     tags: '',
-    price: product.retailPrice,
+    price: product.price,
     compareAtPrice: undefined,
     barcode: product.barcode,
     weight: 0,

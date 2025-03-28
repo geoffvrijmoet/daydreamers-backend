@@ -81,8 +81,8 @@ export function PurchaseForm({ onSuccess, onCancel, isExpanded = false }: Purcha
       productId: product.id,
       name: product.name,
       quantity: 1,
-      unitPrice: product.wholesalePrice || 0,
-      totalPrice: product.wholesalePrice || 0
+      unitPrice: product.lastPurchasePrice || 0,
+      totalPrice: product.lastPurchasePrice || 0
     }
 
     setPurchase(prev => ({
@@ -339,7 +339,7 @@ export function PurchaseForm({ onSuccess, onCancel, isExpanded = false }: Purcha
                         >
                           <div className="text-sm font-medium">{product.name}</div>
                           <div className="text-xs text-gray-500">
-                            SKU: {product.sku} - ${(product.wholesalePrice || 0).toFixed(2)}
+                            SKU: {product.sku} - ${(product.lastPurchasePrice || 0).toFixed(2)}
                           </div>
                         </button>
                       ))

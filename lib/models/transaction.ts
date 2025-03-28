@@ -19,6 +19,7 @@ interface IBaseTransaction extends Document {
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
+  platformMetadata?: IPlatformMetadata;
 }
 
 interface ILineItem {
@@ -36,6 +37,29 @@ interface IPaymentProcessing {
   transactionId?: string;
 }
 
+// Platform-specific metadata interfaces
+interface ISquareMetadata {
+  orderId: string;
+  locationId: string;
+  state: 'OPEN' | 'COMPLETED' | 'CANCELED';
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface IShopifyMetadata {
+  orderId: string;
+  orderNumber: string;
+  gateway: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface IPlatformMetadata {
+  platform: 'square' | 'shopify';
+  orderId: string;
+  data: ISquareMetadata | IShopifyMetadata;
+}
+
 // Sale-specific interface
 interface ISaleTransaction extends IBaseTransaction {
   type: 'sale';
@@ -49,6 +73,7 @@ interface ISaleTransaction extends IBaseTransaction {
   discount?: number;
   shipping?: number;
   paymentProcessing?: IPaymentProcessing;
+  platformMetadata?: IPlatformMetadata;
   shopifyOrderId?: string;
   shopifyTotalTax?: number;
   shopifySubtotalPrice?: number;
@@ -80,6 +105,13 @@ interface ITrainingTransaction extends IBaseTransaction {
 // Combined type
 type ITransaction = ISaleTransaction | IExpenseTransaction | ITrainingTransaction;
 
+// Platform metadata schema
+const PlatformMetadataSchema = new Schema<IPlatformMetadata>({
+  platform: { type: String, required: true, enum: ['square', 'shopify'] },
+  orderId: { type: String, required: true },
+  data: { type: Schema.Types.Mixed, required: true }
+});
+
 // Base schema with common fields
 const BaseTransactionSchema = new Schema<IBaseTransaction>({
   date: { type: Date, required: true },
@@ -88,6 +120,7 @@ const BaseTransactionSchema = new Schema<IBaseTransaction>({
   source: { type: String, required: true, enum: ['manual', 'shopify', 'square', 'amex'] },
   paymentMethod: { type: String },
   notes: { type: String },
+  platformMetadata: PlatformMetadataSchema,
 }, {
   timestamps: true,
   discriminatorKey: 'type'
@@ -122,6 +155,7 @@ const SaleTransactionSchema = new Schema<ISaleTransaction>({
   discount: { type: Number },
   shipping: { type: Number },
   paymentProcessing: PaymentProcessingSchema,
+  platformMetadata: PlatformMetadataSchema,
   shopifyOrderId: { type: String },
   shopifyTotalTax: { type: Number },
   shopifySubtotalPrice: { type: Number },
@@ -149,12 +183,20 @@ const TrainingTransactionSchema = new Schema<ITrainingTransaction>({
 });
 
 // Create the base model
-const TransactionModel = mongoose.models.Transaction || mongoose.model<IBaseTransaction>('Transaction', BaseTransactionSchema);
+const TransactionModel = (mongoose.models.Transaction || mongoose.model<IBaseTransaction>('Transaction', BaseTransactionSchema)) as mongoose.Model<IBaseTransaction> & {
+  discriminators?: { [key: string]: mongoose.Model<ISaleTransaction | IExpenseTransaction | ITrainingTransaction> };
+};
 
-// Add discriminators for different transaction types
-TransactionModel.discriminator('sale', SaleTransactionSchema);
-TransactionModel.discriminator('expense', ExpenseTransactionSchema);
-TransactionModel.discriminator('training', TrainingTransactionSchema);
+// Add discriminators for different transaction types if they don't already exist
+if (!TransactionModel.discriminators?.['sale']) {
+  TransactionModel.discriminator('sale', SaleTransactionSchema);
+}
+if (!TransactionModel.discriminators?.['expense']) {
+  TransactionModel.discriminator('expense', ExpenseTransactionSchema);
+}
+if (!TransactionModel.discriminators?.['training']) {
+  TransactionModel.discriminator('training', TrainingTransactionSchema);
+}
 
 // Indexes for common queries
 TransactionModel.schema.index({ date: 1 });
@@ -164,9 +206,23 @@ TransactionModel.schema.index({ 'products.productId': 1 });
 TransactionModel.schema.index({ customer: 1 });
 TransactionModel.schema.index({ supplier: 1 });
 TransactionModel.schema.index({ trainer: 1 });
+TransactionModel.schema.index({ id: 1 }, { unique: true });
+
+// Add index for platformMetadata.orderId to ensure no duplicate orders
+TransactionModel.schema.index({ 'platformMetadata.platform': 1, 'platformMetadata.orderId': 1 }, { unique: true, sparse: true });
 
 export default TransactionModel;
-export type { ITransaction, ISaleTransaction, IExpenseTransaction, ITrainingTransaction, ILineItem, IPaymentProcessing };
+export type { 
+  ITransaction, 
+  ISaleTransaction, 
+  IExpenseTransaction, 
+  ITrainingTransaction, 
+  ILineItem, 
+  IPaymentProcessing,
+  IPlatformMetadata,
+  ISquareMetadata,
+  IShopifyMetadata 
+};
 
 /**
  * Helper functions for working with transactions
@@ -177,7 +233,8 @@ export type { ITransaction, ISaleTransaction, IExpenseTransaction, ITrainingTran
  */
 export function formatTransactionDate(date: Date | string): string {
   const dateObj = typeof date === 'string' ? new Date(date) : date;
-  return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+  const estDate = new Date(dateObj.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  return `${estDate.getFullYear()}-${String(estDate.getMonth() + 1).padStart(2, '0')}-${String(estDate.getDate()).padStart(2, '0')}`;
 }
 
 /**

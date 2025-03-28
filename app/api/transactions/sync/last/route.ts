@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
-import mongoose from 'mongoose'
+import SyncStateModel from '@/lib/models/SyncState'
 
 export async function GET() {
   try {
     await connectToDatabase()
 
     // Get the most recent successful sync from either Square or Shopify
-    const syncStates = await mongoose.model('SyncState')
+    const syncStates = await SyncStateModel
       .find({ 
         source: { $in: ['square', 'shopify'] },
         lastSyncStatus: 'success'

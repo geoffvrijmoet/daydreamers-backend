@@ -32,8 +32,8 @@ export async function GET(request: Request) {
           _id: 1,
           name: 1,
           sku: 1,
-          retailPrice: 1,
-          currentStock: 1,
+          price: 1,
+          stock: 1,
           lastPurchasePrice: 1,
           shopifyVariantId: 1, // Added to verify the match
           averageCost: 1
@@ -59,8 +59,8 @@ export async function GET(request: Request) {
         _id: product._id,
         name: product.name,
         sku: product.sku,
-        retailPrice: product.retailPrice,
-        currentStock: product.currentStock,
+        price: product.price,
+        stock: product.stock,
         lastPurchasePrice: product.lastPurchasePrice,
         averageCost: product.averageCost
       }

@@ -68,8 +68,14 @@ export async function POST(request: Request) {
     await connectToDatabase()
     const body = await request.json()
 
+    // Ensure the date is properly handled
+    const transactionData = {
+      ...body,
+      date: new Date(body.date) // Convert the ISO string to a Date object
+    }
+
     // Create new transaction using Mongoose
-    const transaction = await TransactionModel.create(body)
+    const transaction = await TransactionModel.create(transactionData)
 
     return NextResponse.json(transaction, { status: 201 })
   } catch (error) {

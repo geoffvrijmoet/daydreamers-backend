@@ -61,14 +61,12 @@ export type TransactionItem = {
   totalPrice: number
 }
 
-export type CostHistoryEntry = {
+export interface CostHistoryEntry {
   date: string
+  cost: number
   quantity: number
-  unitPrice: number
-  totalPrice: number
-  source: 'square' | 'shopify' | 'gmail' | 'manual'
-  invoiceId?: string
-  notes?: string
+  source: 'wholesale' | 'manual' | 'square' | 'shopify'
+  reference?: string
 }
 
 export interface Product {
@@ -79,9 +77,10 @@ export interface Product {
   name: string
   description?: string
   category: string
-  retailPrice: number
-  wholesalePrice?: number
-  currentStock: number
+  sku: string
+  barcode?: string
+  price: number
+  stock: number
   minimumStock: number
   lastPurchasePrice: number
   averageCost: number
@@ -94,13 +93,6 @@ export interface Product {
   totalPurchased: number
   lastRestockDate?: string
   active: boolean
-  squareId?: string
-  squareParentId?: string
-  shopifyId?: string
-  shopifyParentId?: string
-  shopifyVariantId?: string
-  sku?: string
-  barcode?: string
   platformMetadata: {
     platform: 'shopify' | 'square'
     productId: string

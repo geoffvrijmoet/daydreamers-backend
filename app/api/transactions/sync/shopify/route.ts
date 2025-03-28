@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { shopifyClient } from '@/lib/shopify'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { Transaction } from '@/types'
+import SyncStateModel from '@/lib/models/SyncState'
 
 export async function POST(request: Request) {
   try {
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     console.log('Starting Shopify transactions sync...')
 
     // Get last sync timestamp if no dates provided
-    const syncState = await mongoose.model('SyncState').findOne({ source: 'shopify' })
+    const syncState = await SyncStateModel.findOne({ source: 'shopify' })
     const lastSyncTime = startDate || syncState?.lastSuccessfulSync || '2023-01-01T00:00:00Z'
     const now = endDate || new Date().toISOString()
 
@@ -41,76 +41,37 @@ export async function POST(request: Request) {
       let status: 'completed' | 'cancelled' | 'refunded' = 'completed'
       if (order.cancelled_at) {
         status = 'cancelled'
-      } else if (order.refunds?.length > 0) {
+      } else if (order.refunds && order.refunds.length > 0) {
         status = 'refunded'
       }
 
-      // Get transaction fees
-      let processingFee = 0;
-      try {
-        const transactions = await shopifyClient.transaction.list(order.id);
-        // Find the successful payment transaction
-        interface ShopifyTransaction {
-          status: string;
-          kind: string;
-          net_payment?: number;
-        }
-        const paymentTransaction = transactions.find(t => 
-          t.status === 'success' && 
-          t.kind === 'sale' && 
-          (t as ShopifyTransaction).net_payment !== undefined
-        ) as ShopifyTransaction | undefined;
-        
-        if (paymentTransaction) {
-          // Processing fee is the difference between total price and net payment
-          const totalAmount = Number(order.total_price);
-          const netPayment = Number(paymentTransaction.net_payment);
-          processingFee = totalAmount - netPayment;
-          
-          console.log(`[Shopify Sync] Found processing fees for order ${order.id}:`, {
-            orderTotal: totalAmount,
-            netPayment: netPayment,
-            processingFee: processingFee.toFixed(2)
-          });
-        } else {
-          console.log(`[Shopify Sync] No payment transaction found for order ${order.id}`);
-        }
-      } catch (err) {
-        console.error(`[Shopify Sync] Error fetching transaction fees for order ${order.id}:`, err);
-      }
+      // Calculate tax amounts
+      const TAX_RATE = 0.08875;
+      const totalAmount = Number(order.total_price);
+      
+      // Calculate pre-tax amount
+      const preTaxAmount = totalAmount / (1 + TAX_RATE);
+      const calculatedTax = totalAmount - preTaxAmount;
 
-      const transaction: Omit<Transaction, '_id'> = {
+      const transaction = {
         id: shopifyId,
-        date: order.created_at ?? new Date().toISOString(),
-        type: 'sale',
-        amount: Number(order.total_price),
-        preTaxAmount: Number(order.subtotal_price),
-        taxAmount: Number(order.total_tax),
-        description: order.line_items?.[0]?.title 
-          ? `Shopify: ${order.line_items[0].title}${order.line_items.length > 1 ? ` (+${order.line_items.length - 1} more)` : ''}`
-          : `Shopify Order #${order.order_number}`,
-        source: 'shopify',
-        lineItems: order.line_items?.map(item => ({
+        type: 'sale' as const,
+        date: order.created_at,
+        amount: totalAmount,
+        preTaxAmount,
+        taxAmount: calculatedTax,
+        status,
+        source: 'shopify' as const,
+        customer: order.customer?.email,
+        refundAmount: order.refunds?.[0]?.transactions?.[0]?.amount,
+        refundDate: order.refunds?.[0]?.created_at,
+        updatedAt: order.updated_at,
+        products: order.line_items.map(item => ({
           name: item.title,
           quantity: item.quantity,
-          price: Number(item.price),
-          sku: item.sku,
-          variant_id: item.variant_id?.toString()
-        })),
-        customer: `${order.customer?.first_name} ${order.customer?.last_name}`.trim(),
-        paymentMethod: order.gateway,
-        status,
-        refundAmount: order.refunds?.reduce((sum, refund) => 
-          sum + Number(refund.transactions?.[0]?.amount || 0), 0) || undefined,
-        refundDate: order.refunds?.[0]?.created_at,
-        shopifyOrderId: order.id.toString(),
-        shopifyTotalTax: Number(order.total_tax),
-        shopifySubtotalPrice: Number(order.subtotal_price),
-        shopifyTotalPrice: Number(order.total_price),
-        shopifyProcessingFee: processingFee,
-        shopifyPaymentGateway: order.gateway,
-        createdAt: order.created_at ?? new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+          unitPrice: Number(item.price),
+          totalPrice: Number(item.price) * item.quantity
+        }))
       }
 
       if (existing) {
@@ -150,7 +111,7 @@ export async function POST(request: Request) {
     const skipped = results.filter(r => r.action === 'skipped').length
 
     // Update last successful sync time
-    await mongoose.model('SyncState').findOneAndUpdate(
+    await SyncStateModel.findOneAndUpdate(
       { source: 'shopify' },
       { 
         $set: { 
@@ -167,7 +128,6 @@ export async function POST(request: Request) {
       success: true,
       results: { created, updated, skipped }
     })
-
   } catch (error) {
     console.error('Error syncing Shopify transactions:', error)
     return NextResponse.json(

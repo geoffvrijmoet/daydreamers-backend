@@ -10,8 +10,8 @@ import { gmail_v1 } from 'googleapis'
 
 type GmailService = gmail_v1.Gmail
 
-// Helper function to parse email body for invoice details
-async function parseInvoiceEmail(emailId: string, gmail: GmailService) {
+// Helper function to parse email body
+async function parseEmail(emailId: string, gmail: GmailService) {
   try {
     const email = await gmail.users.messages.get({
       userId: 'me',
@@ -30,23 +30,12 @@ async function parseInvoiceEmail(emailId: string, gmail: GmailService) {
     }
 
     const decodedBody = Buffer.from(body, 'base64').toString('utf-8')
-    
-    // You can customize these patterns based on your email format
-    const amountMatch = decodedBody.match(/\$(\d+,?\d*\.\d{2})/i)
-    const invoiceNumberMatch = decodedBody.match(/Invoice[:#\s]+([A-Z0-9-]+)/i)
-    
-    if (!amountMatch) {
-      console.log(`No amount found in email ${emailId}`)
-      return null
-    }
 
     return {
       emailId,
       date: email.data.internalDate 
         ? new Date(parseInt(email.data.internalDate))
         : new Date(),
-      amount: parseFloat(amountMatch[1].replace(',', '')),
-      invoiceNumber: invoiceNumberMatch?.[1] || undefined,
       subject: subject || 'No Subject',
       from: from || 'No Sender',
       body: decodedBody
@@ -62,6 +51,7 @@ export const maxDuration = 60
 
 export async function GET(request: Request) {
   try {
+    console.log('Starting cron job execution...')
     // Verify the request is coming from Vercel Cron
     const authHeader = request.headers.get('authorization')
     if (!authHeader || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -106,17 +96,13 @@ export async function GET(request: Request) {
       })
     }
 
-    // Get last sync time from SyncState
+    // Get last sync time or default to 7 days ago
     const syncState = await SyncStateModel.findOne({ source: 'gmail' })
-    const now = new Date()
+    const sevenDaysAgo = new Date()
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+    const lastSyncTime = syncState?.lastSuccessfulSync || sevenDaysAgo.toISOString()
+    const afterTimestamp = Math.floor(new Date(lastSyncTime).getTime() / 1000)
     
-    // If no sync state exists, default to 7 days ago for initial sync
-    const defaultSyncTime = new Date(now)
-    defaultSyncTime.setDate(defaultSyncTime.getDate() - 7)
-    
-    const lastSyncTime = syncState?.lastSuccessfulSync || defaultSyncTime.toISOString()
-    console.log(`Using ${syncState ? 'existing' : 'default'} sync time:`, lastSyncTime)
-
     // Process each supplier's emails
     const allProcessedEmails = []
     let totalEmailsProcessed = 0
@@ -124,13 +110,14 @@ export async function GET(request: Request) {
     for (const supplier of suppliers) {
       console.log(`Processing emails for supplier: ${supplier.name}`)
       
-      const query = `from:${supplier.invoiceEmail} subject:"${supplier.invoiceSubjectPattern}" after:${Math.floor(new Date(lastSyncTime).getTime() / 1000)}`
+      // Build the Gmail search query with subject pattern
+      const query = `from:${supplier.invoiceEmail} subject:${supplier.invoiceSubjectPattern} after:${afterTimestamp}`
       console.log('Searching for invoices with query:', query)
       
       const response = await gmail.users.messages.list({
         userId: 'me',
         q: query,
-        maxResults: 50
+        maxResults: 100
       })
 
       if (!response.data.messages) {
@@ -150,19 +137,17 @@ export async function GET(request: Request) {
           continue
         }
         
-        const parsedEmail = await parseInvoiceEmail(message.id, gmail)
+        const parsedEmail = await parseEmail(message.id, gmail)
         if (parsedEmail) {
           // Create a new invoice email record
           const invoiceEmail = new InvoiceEmailModel({
             ...parsedEmail,
-            supplier: supplier.name,
             status: 'pending'
           })
 
           await invoiceEmail.save()
           allProcessedEmails.push({
             ...parsedEmail,
-            supplier: supplier.name,
             _id: invoiceEmail._id
           })
           totalEmailsProcessed++
@@ -171,6 +156,7 @@ export async function GET(request: Request) {
     }
 
     // Update sync state
+    const now = new Date().toISOString()
     await SyncStateModel.findOneAndUpdate(
       { source: 'gmail' },
       { 
@@ -181,7 +167,8 @@ export async function GET(request: Request) {
             created: totalEmailsProcessed,
             updated: 0,
             skipped: 0
-          }
+          },
+          updatedAt: now
         }
       },
       { upsert: true, new: true }

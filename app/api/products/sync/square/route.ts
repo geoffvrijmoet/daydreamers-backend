@@ -50,7 +50,7 @@ export async function POST(request: Request) {
         name: reviewedProduct.name,
         description: reviewedProduct.description || '',
         sku: reviewedProduct.sku,
-        retailPrice: reviewedProduct.price,
+        price: reviewedProduct.price,
         currentStock: 0, // Will be updated from inventory
         minimumStock: reviewedProduct.minimumStock,
         lastPurchasePrice: existingProduct?.lastPurchasePrice || 0,

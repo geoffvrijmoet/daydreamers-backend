@@ -58,8 +58,7 @@ export default function NewVariant({ params }: { params: { id: string } }) {
     sku: '',
     currentStock: 0,
     minimumStock: parentProduct.minimumStock || 0,
-    retailPrice: parentProduct.retailPrice || 0,
-    wholesalePrice: parentProduct.wholesalePrice || 0,
+    price: parentProduct.price || 0,
     lastPurchasePrice: parentProduct.lastPurchasePrice || 0,
     supplier: parentProduct.supplier || '',
     category: parentProduct.category || '',
@@ -68,10 +67,12 @@ export default function NewVariant({ params }: { params: { id: string } }) {
     averageCost: 0,
     costHistory: [],
     active: true,
-    // Keep platform-specific IDs for external sync
-    squareParentId: parentProduct.squareParentId,
-    shopifyParentId: parentProduct.shopifyId?.split('/').pop()?.split('_')[0],
-    platformMetadata: []
+    platformMetadata: parentProduct.platformMetadata || [],
+    syncStatus: {
+      lastSyncAttempt: new Date().toISOString(),
+      lastSuccessfulSync: new Date().toISOString(),
+      errors: []
+    }
   } as unknown as Product; // Use unknown to bypass type checking
 
   return (

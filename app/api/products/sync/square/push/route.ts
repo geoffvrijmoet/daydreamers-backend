@@ -31,7 +31,7 @@ export async function POST(request: Request) {
                 id: '#variation_' + productId,
                 itemVariationData: {
                   priceMoney: {
-                    amount: BigInt(Math.round(product.retailPrice * 100)),
+                    amount: BigInt(Math.round(product.price * 100)),
                     currency: 'USD'
                   },
                   pricingType: 'FIXED_PRICING',
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
               id: `${product.squareId}_variation`,
               itemVariationData: {
                 priceMoney: {
-                  amount: BigInt(Math.round(product.retailPrice * 100)),
+                  amount: BigInt(Math.round(product.price * 100)),
                   currency: 'USD'
                 },
                 pricingType: 'FIXED_PRICING',

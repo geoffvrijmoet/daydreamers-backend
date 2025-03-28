@@ -75,14 +75,11 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
   }, [fetchProduct, fetchVariants])
 
   useEffect(() => {
-    if (product?.shopifyId) {
-
-      checkShopifyProduct(product.shopifyId)
-    } else if (product?.shopifyVariantId) {
-
-      checkShopifyProduct(`gid://shopify/ProductVariant/${product.shopifyVariantId}`)
+    const shopifyMetadata = product?.platformMetadata?.find(m => m.platform === 'shopify');
+    if (shopifyMetadata?.productId) {
+      checkShopifyProduct(shopifyMetadata.productId);
     }
-  }, [product?.shopifyId, product?.shopifyVariantId, checkShopifyProduct])
+  }, [product?.platformMetadata, checkShopifyProduct]);
 
   const handleUpdateField = async (productId: string, field: string, value: string | number) => {
     try {
@@ -230,7 +227,8 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
 
   // Add warning message if Shopify product doesn't exist
   const ShopifyWarning = () => {
-    if (!product?.shopifyId || shopifyProductExists === null) return null
+    const shopifyMetadata = product?.platformMetadata?.find(m => m.platform === 'shopify');
+    if (!shopifyMetadata?.productId || shopifyProductExists === null) return null;
     
     return !shopifyProductExists ? (
       <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
@@ -262,14 +260,14 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
     return <div>Product not found</div>
   }
 
-  const isVariant = product.shopifyParentId || product.squareParentId;
-  // Instead of filtering out the current product, get all products with the same squareParentId
-  const allProducts = variants.filter(v => v.squareParentId === product.squareParentId);
+  const isVariant = product.platformMetadata?.some(m => m.parentId);
+  const allProducts = variants.filter(v => 
+    v.platformMetadata?.some(m => m.parentId) === product.platformMetadata?.some(m => m.parentId)
+  );
 
-    // If this is the parent product, include it in allProducts
-    allProducts.unshift(product);
-
-  const baseProduct = isVariant ? variants.find(v => !v.shopifyParentId && !v.squareParentId) || product : product;
+  const baseProduct = isVariant ? 
+    variants.find(v => !v.platformMetadata?.some(m => m.parentId)) || product : 
+    product;
   const baseProductName = baseProduct.name.split(' - ')[0];
   console.log(allProducts)
 
@@ -419,7 +417,7 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
                     >
                       <option value="">Select a product...</option>
                       {variants
-                        .filter(v => v.id !== product.id && v.squareParentId === product.squareParentId)
+                        .filter(v => v.id !== product.id && v.platformMetadata?.some(m => m.parentId) === product.platformMetadata?.some(m => m.parentId))
                         .map(v => (
                           <option key={v._id} value={v._id}>
                             {v.name}
@@ -468,8 +466,8 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
             <div className="space-y-4">
               {allProducts.map((variant) => {
                 const variantName = variant.name.split(' - ')[1] || 'Default'
-                const profitPerUnit = calculateProfitPerUnit(variant.retailPrice, variant.averageCost)
-                const marginPercentage = ((profitPerUnit / variant.retailPrice) * 100).toFixed(1)
+                const profitPerUnit = calculateProfitPerUnit(variant.price, variant.averageCost)
+                const marginPercentage = ((profitPerUnit / variant.price) * 100).toFixed(1)
 
                 return (
                   <div 
@@ -494,10 +492,10 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
                       </div>
                       <div>
                         <EditableValue
-                          label="Current Stock"
-                          value={variant.currentStock}
+                          label="Stock"
+                          value={variant.stock}
                           productId={variant.id}
-                          field="currentStock"
+                          field="stock"
                           type="number"
                         />
                         <EditableValue
@@ -524,10 +522,10 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
                         <p className="mt-1 text-sm text-gray-900">${variant.averageCost.toFixed(2)}</p>
                       </div>
                       <EditableValue
-                        label="Retail Price"
-                        value={variant.retailPrice}
+                        label="Price"
+                        value={variant.price}
                         productId={variant.id}
-                        field="retailPrice"
+                        field="price"
                         type="number"
                         showPreTax={true}
                       />
@@ -545,9 +543,13 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
                     </div>
 
                     <div className="mt-4 text-sm text-gray-500">
-                      <p>Total Investment: ${(variant.averageCost * variant.currentStock).toFixed(2)}</p>
-                      {variant.shopifyId && <p>Shopify Variant ID: {variant.shopifyId}</p>}
-                      {variant.squareId && <p>Square Catalog ID: {variant.squareId}</p>}
+                      <p>Total Investment: ${(variant.averageCost * variant.stock).toFixed(2)}</p>
+                      {variant.platformMetadata?.map((metadata) => (
+                        <p key={metadata.platform}>
+                          {metadata.platform === 'shopify' ? 'Shopify' : 'Square'} ID: {metadata.productId}
+                          {metadata.variantId && ` (Variant: ${metadata.variantId})`}
+                        </p>
+                      ))}
                     </div>
                   </div>
                 )
@@ -556,7 +558,7 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
           </div>
         </div>
       </Card>
-      {(!product.shopifyId || shopifyProductExists === false) && (
+      {(!product.platformMetadata?.some(m => m.parentId) || shopifyProductExists === false) && (
         <Card className="p-6">
           <CreateShopifyProductForm 
             product={baseProduct}
@@ -564,7 +566,7 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
             onSuccess={() => {
               console.log('CALLBACK TRIGGERED - START');
               // Find all products with the same Square ID and process their names
-              const relatedProducts = allProducts.filter(p => p.squareId === product.squareId);
+              const relatedProducts = allProducts.filter(p => p.platformMetadata?.some(m => m.parentId) === product.platformMetadata?.some(m => m.parentId));
               console.log('Related products found:', relatedProducts);
               const processedNames = relatedProducts.map(p => {
                 const parts = p.name.split(' - ');

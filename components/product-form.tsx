@@ -22,14 +22,11 @@ export function ProductForm({ onSuccess, initialData }: ProductFormProps) {
     description: initialData?.description || '',
     lastPurchasePrice: initialData?.lastPurchasePrice || 0,
     averageCost: initialData?.averageCost || 0,
-    retailPrice: initialData?.retailPrice || 0,
-    wholesalePrice: initialData?.wholesalePrice || 0,
-    currentStock: initialData?.currentStock || 0,
+    price: initialData?.price || 0,
+    stock: initialData?.stock || 0,
     minimumStock: initialData?.minimumStock || 0,
     supplier: initialData?.supplier || '',
     category: initialData?.category || '',
-    squareId: initialData?.squareId || '',
-    shopifyId: initialData?.shopifyId || '',
     barcode: initialData?.barcode || '',
     active: initialData?.active ?? true,
     costHistory: initialData?.costHistory || [],
@@ -41,11 +38,11 @@ export function ProductForm({ onSuccess, initialData }: ProductFormProps) {
     proxyRatio: initialData?.proxyRatio || undefined
   })
 
-  // Calculate pre-tax price whenever retail price changes
-  const preTaxPrice = getPreTaxPrice(formData.retailPrice)
-  const salesTaxAmount = formData.retailPrice - preTaxPrice
-  const potentialProfitMargin = calculateProfitMargin(formData.retailPrice, formData.lastPurchasePrice)
-  const potentialProfitPerUnit = calculateProfitPerUnit(formData.retailPrice, formData.lastPurchasePrice)
+  // Calculate pre-tax price whenever price changes
+  const preTaxPrice = getPreTaxPrice(formData.price)
+  const salesTaxAmount = formData.price - preTaxPrice
+  const potentialProfitMargin = calculateProfitMargin(formData.price, formData.lastPurchasePrice)
+  const potentialProfitPerUnit = calculateProfitPerUnit(formData.price, formData.lastPurchasePrice)
 
   async function syncToSquare(productId: string) {
     setSyncing(true)
@@ -101,14 +98,11 @@ export function ProductForm({ onSuccess, initialData }: ProductFormProps) {
           description: '',
           lastPurchasePrice: 0,
           averageCost: 0,
-          retailPrice: 0,
-          wholesalePrice: 0,
-          currentStock: 0,
+          price: 0,
+          stock: 0,
           minimumStock: 0,
           supplier: '',
           category: '',
-          squareId: '',
-          shopifyId: '',
           barcode: '',
           active: true,
           costHistory: [],
@@ -184,7 +178,7 @@ export function ProductForm({ onSuccess, initialData }: ProductFormProps) {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Retail Price (with {(SALES_TAX_RATE * 100).toFixed(3)}% tax)
+                Price (with {(SALES_TAX_RATE * 100).toFixed(3)}% tax)
               </label>
               <div className="mt-1 relative rounded-md shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -194,8 +188,8 @@ export function ProductForm({ onSuccess, initialData }: ProductFormProps) {
                   type="number"
                   step="0.01"
                   required
-                  value={formData.retailPrice}
-                  onChange={e => setFormData(prev => ({ ...prev, retailPrice: Number(e.target.value) }))}
+                  value={formData.price}
+                  onChange={e => setFormData(prev => ({ ...prev, price: Number(e.target.value) }))}
                   className="pl-7 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700"
                 />
               </div>
@@ -206,7 +200,7 @@ export function ProductForm({ onSuccess, initialData }: ProductFormProps) {
           </div>
 
           {/* Profit Margin Calculator */}
-          {formData.lastPurchasePrice > 0 && formData.retailPrice > 0 && (
+          {formData.lastPurchasePrice > 0 && formData.price > 0 && (
             <div className="mt-4 text-sm">
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -252,14 +246,14 @@ export function ProductForm({ onSuccess, initialData }: ProductFormProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Current Stock
+              Stock
             </label>
             <input
               type="number"
               min="0"
               required
-              value={formData.currentStock}
-              onChange={e => setFormData(prev => ({ ...prev, currentStock: Number(e.target.value) }))}
+              value={formData.stock}
+              onChange={e => setFormData(prev => ({ ...prev, stock: Number(e.target.value) }))}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700"
             />
           </div>

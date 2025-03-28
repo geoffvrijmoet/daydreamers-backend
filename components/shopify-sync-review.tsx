@@ -25,7 +25,7 @@ interface ShopifyPreviewProduct {
     _id: string
     name: string
     sku: string
-    retailPrice: number
+    price: number
   }>
   selectedMatch?: string
   isExistingMatch: boolean
@@ -52,7 +52,7 @@ function MatchedProductPair({ mongoProduct, shopifyProduct }: {
       <div>
         <h4 className="font-medium">{mongoProduct.name}</h4>
         <p className="text-sm text-gray-500">SKU: {mongoProduct.sku}</p>
-        <p className="text-sm text-gray-500">Price: ${mongoProduct.retailPrice.toFixed(2)}</p>
+        <p className="text-sm text-gray-500">Price: ${mongoProduct.price.toFixed(2)}</p>
       </div>
       <div>
         <h4 className="font-medium">{shopifyProduct.title}</h4>
@@ -139,7 +139,7 @@ function ProductList({ products, matches, onSearch }: {
                       <div>
                         <h4 className="font-medium">{product.name}</h4>
                         <p className="text-sm text-gray-500">SKU: {product.sku}</p>
-                        <p className="text-sm text-gray-500">Price: ${product.retailPrice.toFixed(2)}</p>
+                        <p className="text-sm text-gray-500">Price: ${product.price.toFixed(2)}</p>
                       </div>
                       {Object.values(matches).includes(product._id || product.id) && (
                         <div className="text-sm text-green-600">

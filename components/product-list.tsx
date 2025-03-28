@@ -19,10 +19,9 @@ type EditableFields = {
   name: string
   sku: string
   description: string
-  currentStock: number
+  stock: number
   minimumStock: number
-  retailPrice: number
-  wholesalePrice: number
+  price: number
   lastPurchasePrice: number
   supplier: string
   category: string
@@ -59,13 +58,13 @@ function CostHistory({ entries }: { entries: CostHistoryEntry[] }) {
               {new Date(entry.date).toLocaleDateString()}
             </span>
             <span className="text-gray-900 dark:text-white">
-              ${entry.unitPrice.toFixed(2)}/unit
+              ${entry.cost.toFixed(2)}/unit
             </span>
             <span className="text-gray-500">
               Qty: {entry.quantity}
             </span>
             <span className="text-gray-900 dark:text-white text-right">
-              ${entry.totalPrice.toFixed(2)}
+              ${(entry.cost * entry.quantity).toFixed(2)}
             </span>
           </div>
         ))}
@@ -88,10 +87,10 @@ function CostAnalysis({ product }: { product: Product }) {
     : product.lastPurchasePrice
 
   const costTrend = product.costHistory.length >= 2
-    ? (product.lastPurchasePrice - product.costHistory[1].unitPrice) / product.costHistory[1].unitPrice * 100
+    ? (product.lastPurchasePrice - product.costHistory[1].cost) / product.costHistory[1].cost * 100
     : 0
 
-  const preTaxPrice = getPreTaxPrice(product.retailPrice)
+  const preTaxPrice = getPreTaxPrice(product.price)
 
   return (
     <div className="mt-4 border-t border-gray-200 dark:border-gray-700 pt-4">
@@ -200,11 +199,11 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
   const sortedProducts = [...products].sort((a, b) => {
     switch (sortBy) {
       case 'profit':
-        const profitA = (a.retailPrice - a.averageCost) / a.averageCost * 100
-        const profitB = (b.retailPrice - b.averageCost) / b.averageCost * 100
+        const profitA = (a.price - a.averageCost) / a.averageCost * 100
+        const profitB = (b.price - b.averageCost) / b.averageCost * 100
         return profitB - profitA
       case 'stock':
-        return a.currentStock - a.minimumStock - (b.currentStock - b.minimumStock)
+        return a.stock - a.minimumStock - (b.stock - b.minimumStock)
       default:
         return a.name.localeCompare(b.name)
     }
@@ -212,25 +211,26 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
 
   const filteredProducts = sortedProducts
     .filter(p => showInactive || p.active !== false)
-    .filter(p => !filterLowStock || p.currentStock <= p.minimumStock)
+    .filter(p => !filterLowStock || p.stock <= p.minimumStock)
 
   // Group products by parent ID
   const groupedProducts = filteredProducts.reduce((groups, product) => {
-    if (!product.squareParentId) {
+    const squareParentId = product.platformMetadata.find(m => m.platform === 'square')?.parentId
+    if (!squareParentId) {
       // Products without a parent ID get their own group
       return [...groups, [product]]
     }
 
     const existingGroup = groups.find(group => 
-      group[0].squareParentId === product.squareParentId
+      group[0].platformMetadata.find(m => m.platform === 'square')?.parentId === squareParentId
     )
 
     if (existingGroup) {
       existingGroup.push(product)
-      return groups
+    } else {
+      groups.push([product])
     }
-
-    return [...groups, [product]]
+    return groups
   }, [] as Product[][])
 
   return (
@@ -285,7 +285,7 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
             
             {group.map((product, productIndex) => (
               <div 
-                key={product.id}
+                key={product._id}
                 className={cn(
                   "py-2",
                   productIndex !== 0 && "border-t border-gray-100"
@@ -314,24 +314,21 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => router.push(`/products/${product.id}`)}
+                      onClick={() => router.push(`/products/${product._id}`)}
                     >
                       Edit Product
                     </Button>
                     <div className="text-right">
-                      {product.currentStock === 1 ? (
+                      {product.stock === 1 ? (
                         <>
-                          <p className="font-medium">${product.retailPrice.toFixed(2)}</p>
-                          <p className="text-sm text-gray-500">Stock: {product.currentStock}</p>
+                          <p className="font-medium">${product.price?.toFixed(2)}</p>
+                          <p className="text-sm text-gray-500">Stock: {product.stock}</p>
                         </>
                       ) : (
                         <>
-                          <p className="font-medium">
-                            ${Math.min(...group.map(p => p.retailPrice)).toFixed(2)} - 
-                            ${Math.max(...group.map(p => p.retailPrice)).toFixed(2)}
-                          </p>
+                          <p className="font-medium">${product.price?.toFixed(2)}</p>
                           <p className="text-sm text-gray-500">
-                            Total Stock: {group.reduce((sum, p) => sum + p.currentStock, 0)}
+                            Total Stock: {group.reduce((sum, p) => sum + p.stock, 0)}
                           </p>
                         </>
                       )}
@@ -350,18 +347,18 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
                       <div>
                         <p className="text-sm text-gray-500">Current Stock</p>
                         <div className="flex items-center gap-2">
-                          {editingProduct?.id === product.id && editingProduct.field === 'currentStock' ? (
+                          {editingProduct?.id === product.id && editingProduct.field === 'stock' ? (
                             <>
                               <Input
                                 type="number"
                                 value={editingProduct.value as number}
                                 onChange={(e) => setEditingProduct({ ...editingProduct, value: Number(e.target.value) })}
-                                className="w-24"
+                                className="w-20"
                               />
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleUpdateField(product.id, 'currentStock', editingProduct.value);
+                                  handleUpdateField(product.id, 'stock', editingProduct.value);
                                 }}
                                 className="text-xs text-green-600 hover:text-green-700"
                               >
@@ -372,18 +369,18 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
                                   e.stopPropagation();
                                   setEditingProduct(null);
                                 }}
-                                className="text-xs text-gray-500 hover:text-gray-600"
+                                className="text-xs text-red-600 hover:text-red-700"
                               >
                                 Cancel
                               </button>
                             </>
                           ) : (
                             <>
-                              <span className="font-medium">{product.currentStock}</span>
+                              <span className="font-medium">{product.stock}</span>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setEditingProduct({ id: product.id, field: 'currentStock', value: product.currentStock });
+                                  setEditingProduct({ id: product.id, field: 'stock', value: product.stock });
                                 }}
                                 className="text-xs text-gray-500 hover:text-gray-600"
                               >
@@ -397,7 +394,7 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
                       <div>
                         <p className="text-sm text-gray-500">Retail Price</p>
                         <div className="flex items-center gap-2">
-                          {editingProduct?.id === product.id && editingProduct.field === 'retailPrice' ? (
+                          {editingProduct?.id === product.id && editingProduct.field === 'price' ? (
                             <>
                               <Input
                                 type="number"
@@ -409,7 +406,7 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleUpdateField(product.id, 'retailPrice', editingProduct.value);
+                                  handleUpdateField(product.id, 'price', editingProduct.value);
                                 }}
                                 className="text-xs text-green-600 hover:text-green-700"
                               >
@@ -427,11 +424,11 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
                             </>
                           ) : (
                             <>
-                              <span className="font-medium">${product.retailPrice.toFixed(2)}</span>
+                              <span className="font-medium">${product.price.toFixed(2)}</span>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setEditingProduct({ id: product.id, field: 'retailPrice', value: product.retailPrice });
+                                  setEditingProduct({ id: product.id, field: 'price', value: product.price });
                                 }}
                                 className="text-xs text-gray-500 hover:text-gray-600"
                               >
@@ -440,7 +437,7 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
                             </>
                           )}
                         </div>
-                        <p className="text-xs text-gray-500">Pre-tax: ${getPreTaxPrice(product.retailPrice).toFixed(2)}</p>
+                        <p className="text-xs text-gray-500">Pre-tax: ${getPreTaxPrice(product.price).toFixed(2)}</p>
                       </div>
                     </div>
 
@@ -451,8 +448,8 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
                     {/* Additional Info */}
                     <div className="mt-4 text-sm text-gray-500">
                       <p>
-                        Profit per Unit: ${calculateProfitPerUnit(product.retailPrice, product.averageCost).toFixed(2)} • 
-                        Total Investment: ${(product.averageCost * product.currentStock).toFixed(2)}
+                        Profit per Unit: ${calculateProfitPerUnit(product.price, product.averageCost).toFixed(2)} • 
+                        Total Investment: ${(product.averageCost * product.stock).toFixed(2)}
                       </p>
                       {product.supplier && (
                         <p className="mt-2">Supplier: {product.supplier}</p>
@@ -476,8 +473,8 @@ export function ProductList({ products, onUpdate }: ProductListProps) {
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
               This action cannot be undone. The selected products will be permanently deleted from your database.
               {selectedProducts.some(id => 
-                products.find(p => p.id === id)?.squareId || 
-                products.find(p => p.id === id)?.shopifyId
+                products.find(p => p.id === id)?.platformMetadata.some(m => m.platform === 'square') || 
+                products.find(p => p.id === id)?.platformMetadata.some(m => m.platform === 'shopify')
               ) && (
                 <span className="block mt-2 text-red-600">
                   Warning: Some selected products exist in Square or Shopify. Delete them there first.

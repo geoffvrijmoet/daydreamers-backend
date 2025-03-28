@@ -10,7 +10,6 @@ import { format, subDays, startOfYear, startOfDay } from "date-fns"
 import { cn } from "@/lib/utils"
 import { CalendarIcon } from "lucide-react"
 import { toEasternTime, formatInEasternTime } from '@/lib/utils/dates'
-import { ManualTransactionForm } from "@/components/manual-transaction-form"
 import { PurchaseForm } from '@/components/purchase-form'
 import { TrainingForm } from '@/components/training-form'
 import { ChevronDown, ChevronRight } from "lucide-react"
@@ -711,14 +710,6 @@ export function TransactionsList() {
             {activeForm === 'sale' ? (
               <Card className="p-4">
                 <h3 className="font-medium mb-4">Add Manual Sale</h3>
-                <ManualTransactionForm 
-                  isExpanded={true} 
-                  onSuccess={() => {
-                    setActiveForm(null);
-                    refreshTransactions();
-                  }}
-                  onCancel={() => setActiveForm(null)}
-                />
               </Card>
             ) : activeForm === 'purchase' ? (
               <Card className="p-4">

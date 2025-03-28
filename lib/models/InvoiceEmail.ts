@@ -5,8 +5,6 @@ export interface IInvoiceEmail extends Document {
   date: Date;
   subject: string;
   from: string;
-  amount: number;
-  invoiceNumber?: string;
   body: string;
   status: 'pending' | 'processed' | 'ignored';
   processedAt?: Date;
@@ -20,8 +18,6 @@ const InvoiceEmailSchema = new Schema<IInvoiceEmail>({
   date: { type: Date, required: true },
   subject: { type: String, required: true },
   from: { type: String, required: true },
-  amount: { type: Number, required: true },
-  invoiceNumber: { type: String },
   body: { type: String, required: true },
   status: { 
     type: String, 
@@ -39,7 +35,6 @@ const InvoiceEmailSchema = new Schema<IInvoiceEmail>({
 InvoiceEmailSchema.index({ status: 1 });
 InvoiceEmailSchema.index({ emailId: 1 });
 InvoiceEmailSchema.index({ date: -1 });
-InvoiceEmailSchema.index({ amount: 1 });
 
 const InvoiceEmailModel = mongoose.models.InvoiceEmail || mongoose.model<IInvoiceEmail>('InvoiceEmail', InvoiceEmailSchema);
 

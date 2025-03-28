@@ -58,7 +58,7 @@ export async function GET() {
         name: 1,
         sku: 1,
         description: 1,
-        retailPrice: 1,
+        price: 1,
         shopifyId: 1,  // Include existing Shopify ID
         shopifyVariantId: 1  // Include existing variant ID
       })
@@ -148,7 +148,7 @@ export async function GET() {
             _id: existingMatch._id,
             name: existingMatch.name,
             sku: existingMatch.sku,
-            retailPrice: existingMatch.retailPrice
+            price: existingMatch.price
           }],
           selectedMatch: existingMatch._id.toString(),
           isExistingMatch: true
@@ -174,7 +174,7 @@ export async function GET() {
           _id: p._id,
           name: p.name,
           sku: p.sku,
-          retailPrice: p.retailPrice
+          price: p.price
         })),
         isExistingMatch: false
       };
