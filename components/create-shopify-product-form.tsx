@@ -111,7 +111,7 @@ export function CreateShopifyProductForm({ product, variants = [], onSuccess }: 
 
       return {
         title: name,
-        price: sourceProduct.retailPrice,
+        price: sourceProduct.price,
         compareAtPrice: null,
         barcode: '',
         sku: sourceProduct.sku || '',
