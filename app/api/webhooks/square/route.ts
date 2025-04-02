@@ -5,24 +5,40 @@ import mongoose from 'mongoose'
 import crypto from 'crypto'
 
 // Function to verify Square webhook signature
-function verifySquareSignature(signature: string, body: string) {
-  const hmac = crypto.createHmac('sha256', process.env.SQUARE_WEBHOOK_SIGNATURE_KEY!)
-  const hash = hmac.update(body).digest('base64')
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(hash))
+function verifySquareSignature(signatureHeader: string, body: string) {
+  if (!process.env.SQUARE_WEBHOOK_SIGNATURE_KEY) {
+    console.error('SQUARE_WEBHOOK_SIGNATURE_KEY not configured')
+    return false
+  }
+
+  try {
+    const hmac = crypto.createHmac('sha256', process.env.SQUARE_WEBHOOK_SIGNATURE_KEY)
+    const generatedSignature = hmac.update(body).digest('base64')
+    return signatureHeader === generatedSignature
+  } catch (error) {
+    console.error('Error verifying Square signature:', error)
+    return false
+  }
 }
 
 export async function POST(request: Request) {
   try {
     // Get the raw body for signature verification
     const rawBody = await request.text()
-    const body = JSON.parse(rawBody)
-
-    // Verify webhook signature
     const signature = request.headers.get('x-square-hmacsha256-signature')
-    if (!signature || !verifySquareSignature(signature, rawBody)) {
+
+    if (!signature) {
+      console.error('No Square signature header found')
+      return NextResponse.json({ error: 'Missing signature header' }, { status: 401 })
+    }
+
+    if (!verifySquareSignature(signature, rawBody)) {
       console.error('Invalid Square webhook signature')
+      console.error('Received signature:', signature)
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
+
+    const body = JSON.parse(rawBody)
 
     // Handle different event types
     const eventType = body.type

@@ -53,10 +53,10 @@ export async function GET(
  * Updates a dog training client
  */
 export async function PUT(
-  request: Request,
-  context: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: { id: string } }
 ) {
-  const id = context.params.id;
+  const id = params.id;
   
   try {
     const body = await request.json();
@@ -161,10 +161,10 @@ export async function PUT(
  * Deletes a dog training client
  */
 export async function DELETE(
-  request: Request,
-  context: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: { id: string } }
 ) {
-  const id = context.params.id;
+  const id = params.id;
   
   try {
     await connectToDatabase();
