@@ -3,12 +3,6 @@ import { connectToDatabase } from '@/lib/mongoose';
 import mongoose from 'mongoose';
 import { ObjectId, Db } from 'mongodb';
 
-type RouteContext = {
-  params: {
-    id: string;
-  };
-};
-
 /**
  * GET /api/dog-training-clients/[id]
  * 
@@ -16,9 +10,9 @@ type RouteContext = {
  */
 export async function GET(
   request: NextRequest,
-  context: RouteContext
+  { params }: { params: { id: string } }
 ) {
-  const id = context.params.id;
+  const id = params.id;
   
   try {
     await connectToDatabase();
@@ -60,9 +54,9 @@ export async function GET(
  */
 export async function PUT(
   request: NextRequest,
-  context: RouteContext
+  { params }: { params: { id: string } }
 ) {
-  const id = context.params.id;
+  const id = params.id;
   
   try {
     const body = await request.json();
@@ -168,9 +162,9 @@ export async function PUT(
  */
 export async function DELETE(
   request: NextRequest,
-  context: RouteContext
+  { params }: { params: { id: string } }
 ) {
-  const id = context.params.id;
+  const id = params.id;
   
   try {
     await connectToDatabase();
