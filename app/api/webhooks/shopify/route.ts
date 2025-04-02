@@ -50,22 +50,33 @@ interface ShopifyOrder {
 function verifyShopifyWebhook(rawBody: string, hmac: string | null): boolean {
   const secret = process.env.SHOPIFY_WEBHOOK_SECRET
   if (!hmac || !secret) {
-    console.error('Missing HMAC or webhook secret', { hmacPresent: !!hmac, secretPresent: !!secret })
+    console.error('Missing HMAC or webhook secret', { 
+      hmacPresent: !!hmac, 
+      secretPresent: !!secret,
+      secretLength: secret?.length
+    })
     return false
   }
 
   try {
+    // Generate the HMAC exactly as Shopify expects
     const calculatedHmac = crypto
       .createHmac('sha256', secret)
-      .update(rawBody, 'utf8')
+      .update(rawBody)  // Use the raw body directly
       .digest('base64')
 
-    console.log('Signature verification:', {
+    const isValid = hmac === calculatedHmac
+
+    console.log('Shopify webhook verification:', {
       provided: hmac,
-      calculated: calculatedHmac
+      calculated: calculatedHmac,
+      bodyLength: rawBody.length,
+      isValid,
+      // Log first few characters of the body for debugging
+      bodyPreview: rawBody.substring(0, 100) + '...'
     })
     
-    return hmac === calculatedHmac
+    return isValid
   } catch (error) {
     console.error('Error verifying Shopify webhook:', error)
     return false
@@ -74,15 +85,24 @@ function verifyShopifyWebhook(rawBody: string, hmac: string | null): boolean {
 
 export async function POST(request: Request) {
   try {
-    // Get the raw body for signature verification
+    // Get the raw body and HMAC
     const rawBody = await request.text()
     const hmac = request.headers.get('x-shopify-hmac-sha256')
+    
+    console.log('Received Shopify webhook:', {
+      hmacPresent: !!hmac,
+      contentLength: request.headers.get('content-length'),
+      topic: request.headers.get('x-shopify-topic'),
+      orderId: request.headers.get('x-shopify-order-id')
+    })
 
     // Verify webhook signature
     if (!verifyShopifyWebhook(rawBody, hmac)) {
       console.error('Invalid Shopify webhook signature', {
         hmacPresent: !!hmac,
         secretPresent: !!process.env.SHOPIFY_WEBHOOK_SECRET,
+        secretKeyPreview: process.env.SHOPIFY_WEBHOOK_SECRET ? 
+          `${process.env.SHOPIFY_WEBHOOK_SECRET.substring(0, 4)}...` : 'not set',
         headers: Object.fromEntries(request.headers)
       })
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
