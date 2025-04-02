@@ -47,38 +47,48 @@ interface ShopifyOrder {
 }
 
 // Verify Shopify webhook signature
-function verifyShopifyWebhook(body: string, hmac: string | null, secret: string): boolean {
-  if (!hmac) return false
-  
-  const calculatedHmac = crypto
-    .createHmac('sha256', secret)
-    .update(Buffer.from(body, 'utf-8'))
-    .digest('base64')
+function verifyShopifyWebhook(rawBody: string, hmac: string | null): boolean {
+  const secret = process.env.SHOPIFY_WEBHOOK_SECRET
+  if (!hmac || !secret) {
+    console.error('Missing HMAC or webhook secret', { hmacPresent: !!hmac, secretPresent: !!secret })
+    return false
+  }
+
+  try {
+    const calculatedHmac = crypto
+      .createHmac('sha256', secret)
+      .update(rawBody, 'utf8')
+      .digest('base64')
+
+    console.log('Signature verification:', {
+      provided: hmac,
+      calculated: calculatedHmac
+    })
     
-  return crypto.timingSafeEqual(
-    Buffer.from(calculatedHmac),
-    Buffer.from(hmac)
-  )
+    return hmac === calculatedHmac
+  } catch (error) {
+    console.error('Error verifying Shopify webhook:', error)
+    return false
+  }
 }
 
 export async function POST(request: Request) {
   try {
     // Get the raw body for signature verification
     const rawBody = await request.text()
-    const body = JSON.parse(rawBody) as ShopifyOrder
+    const hmac = request.headers.get('x-shopify-hmac-sha256')
 
     // Verify webhook signature
-    const hmac = request.headers.get('X-Shopify-Hmac-SHA256')
-    const secret = process.env.SHOPIFY_WEBHOOK_SECRET
-
-    if (!secret || !verifyShopifyWebhook(rawBody, hmac, secret)) {
+    if (!verifyShopifyWebhook(rawBody, hmac)) {
       console.error('Invalid Shopify webhook signature', {
         hmacPresent: !!hmac,
-        secretPresent: !!secret,
+        secretPresent: !!process.env.SHOPIFY_WEBHOOK_SECRET,
         headers: Object.fromEntries(request.headers)
       })
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
+
+    const body = JSON.parse(rawBody) as ShopifyOrder
 
     // Handle different event types
     const topic = request.headers.get('x-shopify-topic')
