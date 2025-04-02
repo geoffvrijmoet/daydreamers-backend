@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongoose';
 import mongoose from 'mongoose';
 import { ObjectId, Db } from 'mongodb';
@@ -9,10 +9,10 @@ import { ObjectId, Db } from 'mongodb';
  * Fetches a single dog training client by ID
  */
 export async function GET(
-  request: Request,
-  context: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: { id: string } }
 ) {
-  const id = context.params.id;
+  const id = params.id;
   
   try {
     await connectToDatabase();
