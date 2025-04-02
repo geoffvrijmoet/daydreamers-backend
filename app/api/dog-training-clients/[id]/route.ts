@@ -1,12 +1,7 @@
-import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongoose';
 import mongoose from 'mongoose';
 import { ObjectId, Db } from 'mongodb';
-
-type Context = {
-  params: { id: string }
-}
 
 /**
  * GET /api/dog-training-clients/[id]
@@ -14,8 +9,8 @@ type Context = {
  * Fetches a single dog training client by ID
  */
 export async function GET(
-  _request: NextRequest,
-  context: Context
+  request: Request,
+  context: { params: { id: string } }
 ) {
   const id = context.params.id;
   
@@ -58,8 +53,8 @@ export async function GET(
  * Updates a dog training client
  */
 export async function PUT(
-  request: NextRequest,
-  context: Context
+  request: Request,
+  context: { params: { id: string } }
 ) {
   const id = context.params.id;
   
@@ -166,8 +161,8 @@ export async function PUT(
  * Deletes a dog training client
  */
 export async function DELETE(
-  _request: NextRequest,
-  context: Context
+  request: Request,
+  context: { params: { id: string } }
 ) {
   const id = context.params.id;
   
