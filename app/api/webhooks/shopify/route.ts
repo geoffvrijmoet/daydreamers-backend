@@ -46,6 +46,24 @@ interface ShopifyOrder {
   financial_status: string
 }
 
+// Helper function to get raw body as a string
+async function getRawBody(request: Request): Promise<string> {
+  const reader = request.body?.getReader()
+  if (!reader) {
+    throw new Error('No request body')
+  }
+
+  const chunks: Uint8Array[] = []
+  
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+  }
+
+  return Buffer.concat(chunks.map(chunk => Buffer.from(chunk))).toString('utf8')
+}
+
 // Verify Shopify webhook signature
 function verifyShopifyWebhook(rawBody: string, hmac: string | null): boolean {
   const secret = process.env.SHOPIFY_WEBHOOK_SECRET
@@ -62,7 +80,7 @@ function verifyShopifyWebhook(rawBody: string, hmac: string | null): boolean {
     // Generate the HMAC exactly as Shopify expects
     const calculatedHmac = crypto
       .createHmac('sha256', secret)
-      .update(rawBody)  // Use the raw body directly
+      .update(Buffer.from(rawBody, 'utf8'))
       .digest('base64')
 
     const isValid = hmac === calculatedHmac
@@ -73,7 +91,9 @@ function verifyShopifyWebhook(rawBody: string, hmac: string | null): boolean {
       bodyLength: rawBody.length,
       isValid,
       // Log first few characters of the body for debugging
-      bodyPreview: rawBody.substring(0, 100) + '...'
+      bodyPreview: rawBody.substring(0, 100) + '...',
+      // Log the secret preview for verification
+      secretPreview: `${secret.substring(0, 4)}...`
     })
     
     return isValid
@@ -85,8 +105,6 @@ function verifyShopifyWebhook(rawBody: string, hmac: string | null): boolean {
 
 export async function POST(request: Request) {
   try {
-    // Get the raw body and HMAC
-    const rawBody = await request.text()
     const hmac = request.headers.get('x-shopify-hmac-sha256')
     
     console.log('Received Shopify webhook:', {
@@ -95,6 +113,9 @@ export async function POST(request: Request) {
       topic: request.headers.get('x-shopify-topic'),
       orderId: request.headers.get('x-shopify-order-id')
     })
+
+    // Get the raw body using the stream reader
+    const rawBody = await getRawBody(request.clone())
 
     // Verify webhook signature
     if (!verifyShopifyWebhook(rawBody, hmac)) {
