@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import mongoose from 'mongoose'
-import { ITransaction } from '@/lib/models/transaction'
+import TransactionModel from '@/lib/models/transaction'
 import { IProduct } from '@/lib/models/Product'
 import crypto from 'crypto'
 
@@ -47,12 +47,18 @@ interface ShopifyOrder {
 }
 
 // Verify Shopify webhook signature
-function verifyShopifyWebhook(body: string, hmac: string, secret: string): boolean {
-  const hash = crypto
+function verifyShopifyWebhook(body: string, hmac: string | null, secret: string): boolean {
+  if (!hmac) return false
+  
+  const calculatedHmac = crypto
     .createHmac('sha256', secret)
-    .update(body)
+    .update(Buffer.from(body, 'utf-8'))
     .digest('base64')
-  return hash === hmac
+    
+  return crypto.timingSafeEqual(
+    Buffer.from(calculatedHmac),
+    Buffer.from(hmac)
+  )
 }
 
 export async function POST(request: Request) {
@@ -62,11 +68,15 @@ export async function POST(request: Request) {
     const body = JSON.parse(rawBody) as ShopifyOrder
 
     // Verify webhook signature
-    const hmac = request.headers.get('x-shopify-hmac-sha256')
+    const hmac = request.headers.get('X-Shopify-Hmac-SHA256')
     const secret = process.env.SHOPIFY_WEBHOOK_SECRET
 
-    if (!hmac || !secret || !verifyShopifyWebhook(rawBody, hmac, secret)) {
-      console.error('Invalid Shopify webhook signature')
+    if (!secret || !verifyShopifyWebhook(rawBody, hmac, secret)) {
+      console.error('Invalid Shopify webhook signature', {
+        hmacPresent: !!hmac,
+        secretPresent: !!secret,
+        headers: Object.fromEntries(request.headers)
+      })
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
 
@@ -86,7 +96,7 @@ export async function POST(request: Request) {
         const orderId = order.id.toString()
 
         // Check if transaction already exists
-        const existingTransaction = await mongoose.model<ITransaction>('Transaction').findOne({
+        const existingTransaction = await TransactionModel.findOne({
           'platformMetadata.orderId': orderId,
           'platformMetadata.platform': 'shopify'
         })
@@ -148,11 +158,11 @@ export async function POST(request: Request) {
 
         if (existingTransaction) {
           // Update existing transaction
-          await mongoose.model<ITransaction>('Transaction').findByIdAndUpdate(existingTransaction._id, transaction)
+          await TransactionModel.findByIdAndUpdate(existingTransaction._id, transaction)
           console.log('Updated Shopify transaction:', orderId)
         } else {
           // Create new transaction
-          await mongoose.model<ITransaction>('Transaction').create(transaction)
+          await TransactionModel.create(transaction)
           console.log('Created new Shopify transaction:', orderId)
         }
 

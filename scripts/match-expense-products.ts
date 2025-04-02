@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 // Load environment variables from .env.local
 config({ path: path.resolve(__dirname, '../.env.local') });
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/daydreamers';
+const MONGODB_URI = process.env.MONGODB_URI;
 
 if (!MONGODB_URI) {
   throw new Error('Please define the MONGODB_URI environment variable');
