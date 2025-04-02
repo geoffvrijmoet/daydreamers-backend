@@ -46,41 +46,30 @@ interface ShopifyOrder {
   financial_status: string
 }
 
-// Helper function to get raw body as a string
-async function getRawBody(request: Request): Promise<string> {
-  const reader = request.body?.getReader()
-  if (!reader) {
-    throw new Error('No request body')
-  }
-
-  const chunks: Uint8Array[] = []
-  
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    chunks.push(value)
-  }
-
-  return Buffer.concat(chunks.map(chunk => Buffer.from(chunk))).toString('utf8')
-}
-
 // Verify Shopify webhook signature
-function verifyShopifyWebhook(rawBody: string, hmac: string | null): boolean {
+async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolean; body: string }> {
+  const hmac = request.headers.get('x-shopify-hmac-sha256')
   const secret = process.env.SHOPIFY_WEBHOOK_SECRET
+
   if (!hmac || !secret) {
     console.error('Missing HMAC or webhook secret', { 
       hmacPresent: !!hmac, 
       secretPresent: !!secret,
       secretLength: secret?.length
     })
-    return false
+    return { isValid: false, body: '' }
   }
 
   try {
-    // Generate the HMAC exactly as Shopify expects
+    // Get raw body as a buffer first
+    const clonedRequest = request.clone()
+    const bodyBuffer = Buffer.from(await clonedRequest.arrayBuffer())
+    const rawBody = bodyBuffer.toString('utf8')
+
+    // Calculate HMAC
     const calculatedHmac = crypto
       .createHmac('sha256', secret)
-      .update(Buffer.from(rawBody, 'utf8'))
+      .update(bodyBuffer)  // Use the raw buffer directly
       .digest('base64')
 
     const isValid = hmac === calculatedHmac
@@ -90,37 +79,32 @@ function verifyShopifyWebhook(rawBody: string, hmac: string | null): boolean {
       calculated: calculatedHmac,
       bodyLength: rawBody.length,
       isValid,
-      // Log first few characters of the body for debugging
       bodyPreview: rawBody.substring(0, 100) + '...',
-      // Log the secret preview for verification
       secretPreview: `${secret.substring(0, 4)}...`
     })
     
-    return isValid
+    return { isValid, body: rawBody }
   } catch (error) {
     console.error('Error verifying Shopify webhook:', error)
-    return false
+    return { isValid: false, body: '' }
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const hmac = request.headers.get('x-shopify-hmac-sha256')
-    
     console.log('Received Shopify webhook:', {
-      hmacPresent: !!hmac,
+      hmacPresent: !!request.headers.get('x-shopify-hmac-sha256'),
       contentLength: request.headers.get('content-length'),
       topic: request.headers.get('x-shopify-topic'),
       orderId: request.headers.get('x-shopify-order-id')
     })
 
-    // Get the raw body using the stream reader
-    const rawBody = await getRawBody(request.clone())
+    // Verify webhook signature and get body
+    const { isValid, body: rawBody } = await verifyShopifyWebhook(request)
 
-    // Verify webhook signature
-    if (!verifyShopifyWebhook(rawBody, hmac)) {
+    if (!isValid) {
       console.error('Invalid Shopify webhook signature', {
-        hmacPresent: !!hmac,
+        hmacPresent: !!request.headers.get('x-shopify-hmac-sha256'),
         secretPresent: !!process.env.SHOPIFY_WEBHOOK_SECRET,
         secretKeyPreview: process.env.SHOPIFY_WEBHOOK_SECRET ? 
           `${process.env.SHOPIFY_WEBHOOK_SECRET.substring(0, 4)}...` : 'not set',
