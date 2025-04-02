@@ -1,7 +1,13 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongoose';
 import mongoose from 'mongoose';
 import { ObjectId, Db } from 'mongodb';
+
+type RouteContext = {
+  params: {
+    id: string;
+  };
+};
 
 /**
  * GET /api/dog-training-clients/[id]
@@ -9,10 +15,10 @@ import { ObjectId, Db } from 'mongodb';
  * Fetches a single dog training client by ID
  */
 export async function GET(
-  request: Request,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  context: RouteContext
 ) {
-  const id = params.id;
+  const id = context.params.id;
   
   try {
     await connectToDatabase();
@@ -53,10 +59,10 @@ export async function GET(
  * Updates a dog training client
  */
 export async function PUT(
-  request: Request,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  context: RouteContext
 ) {
-  const id = params.id;
+  const id = context.params.id;
   
   try {
     const body = await request.json();
@@ -161,10 +167,10 @@ export async function PUT(
  * Deletes a dog training client
  */
 export async function DELETE(
-  request: Request,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  context: RouteContext
 ) {
-  const id = params.id;
+  const id = context.params.id;
   
   try {
     await connectToDatabase();
