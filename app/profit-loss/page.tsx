@@ -12,28 +12,47 @@ import { format, subDays } from "date-fns"
 import { cn } from "@/lib/utils"
 import { CalendarIcon } from "lucide-react"
 
-interface PurchaseTransaction {
+interface Transaction {
   _id: string
   date: string
   amount: number
+  type: 'sale' | 'expense' | 'training'
   vendor?: string
   description?: string
   paymentMethod?: string
   purchaseCategory?: string
   supplierOrderNumber?: string
+  preTaxAmount?: number
+  taxAmount?: number
+  source: 'manual' | 'shopify' | 'square' | 'amex'
 }
 
 interface CategoryGroup {
   name: string
-  transactions: PurchaseTransaction[]
+  transactions: Transaction[]
   subtotal: number
+}
+
+interface RevenueBreakdown {
+  sales: number
+  training: number
+  totalPreTax: number
+  totalTax: number
+  totalRevenue: number
 }
 
 export default function ProfitLossPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [transactions, setTransactions] = useState<PurchaseTransaction[]>([])
+  const [transactions, setTransactions] = useState<Transaction[]>([])
   const [totalAmount, setTotalAmount] = useState(0)
+  const [revenueBreakdown, setRevenueBreakdown] = useState<RevenueBreakdown>({
+    sales: 0,
+    training: 0,
+    totalPreTax: 0,
+    totalTax: 0,
+    totalRevenue: 0
+  })
   const [startDate, setStartDate] = useState<Date>()
   const [endDate, setEndDate] = useState<Date>()
   const [activeRange, setActiveRange] = useState<string>('allTime')
@@ -41,27 +60,68 @@ export default function ProfitLossPage() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['all']))
 
   useEffect(() => {
-    fetchPurchaseTransactions()
+    fetchTransactions()
   }, [startDate, endDate])
 
-  // Process transactions into category groups
+  // Process transactions into category groups and calculate revenue breakdown
   useEffect(() => {
     if (transactions.length === 0) {
       setCategoryGroups([])
+      setRevenueBreakdown({
+        sales: 0,
+        training: 0,
+        totalPreTax: 0,
+        totalTax: 0,
+        totalRevenue: 0
+      })
       return
     }
 
-    // Create category groups
+    // Create category groups for expenses
     const groups = new Map<string, CategoryGroup>()
     
-    // Process each transaction
+    // Calculate revenue breakdown
+    const breakdown = transactions.reduce((acc, t) => {
+      // Debug logging
+      console.log('Processing transaction:', {
+        id: t._id,
+        type: t.type,
+        amount: t.amount,
+        preTaxAmount: t.preTaxAmount,
+        taxAmount: t.taxAmount,
+        source: t.source,
+        date: t.date
+      })
+
+      if (t.type === 'sale') {
+        // For sales, always use preTaxAmount
+        acc.sales += t.preTaxAmount || 0
+        acc.totalPreTax += t.preTaxAmount || 0
+        acc.totalTax += t.taxAmount || 0
+        acc.totalRevenue += t.amount || 0
+      } else if (t.type === 'training') {
+        // For training, use amount as preTaxAmount (training isn't taxed)
+        acc.training += t.amount || 0
+        acc.totalPreTax += t.amount || 0
+        acc.totalRevenue += t.amount || 0
+      }
+      
+      return acc
+    }, { sales: 0, training: 0, totalPreTax: 0, totalTax: 0, totalRevenue: 0 })
+    
+    // Debug logging
+    console.log('Final revenue breakdown:', breakdown)
+    
+    setRevenueBreakdown(breakdown)
+    
+    // Process expense transactions into category groups
     transactions.forEach(transaction => {
-      // Get category name (or "Uncategorized" if missing)
+      if (transaction.type !== 'expense') return
+      
       const categoryName = transaction.purchaseCategory 
         ? (transaction.purchaseCategory.charAt(0).toUpperCase() + transaction.purchaseCategory.slice(1))
         : "Uncategorized"
       
-      // Create or update category group
       if (!groups.has(categoryName)) {
         groups.set(categoryName, {
           name: categoryName,
@@ -82,38 +142,45 @@ export default function ProfitLossPage() {
     setCategoryGroups(sortedGroups)
   }, [transactions])
 
-  const fetchPurchaseTransactions = async () => {
+  const fetchTransactions = async () => {
     try {
       setLoading(true)
       
       // Construct the query URL with date parameters if present
-      let url = '/api/transactions?type=purchase'
+      let url = '/api/transactions'
       if (startDate) {
-        url += `&startDate=${startDate.toISOString()}`
+        url += `?startDate=${startDate.toISOString()}`
       }
       if (endDate) {
-        url += `&endDate=${endDate.toISOString()}`
+        url += `${startDate ? '&' : '?'}endDate=${endDate.toISOString()}`
       }
       
-      // Fetch purchase transactions from MongoDB
       const response = await fetch(url)
       
       if (!response.ok) {
-        throw new Error('Failed to fetch purchase transactions')
+        throw new Error('Failed to fetch transactions')
       }
       
       const data = await response.json()
+      const allTransactions = data.transactions as Transaction[]
       
-      // Extract the purchase transactions
-      const purchaseTransactions = data.transactions as PurchaseTransaction[]
+      // Debug logging
+      console.log('Fetched transactions:', {
+        total: allTransactions.length,
+        sales: allTransactions.filter(t => t.type === 'sale').length,
+        training: allTransactions.filter(t => t.type === 'training').length,
+        expenses: allTransactions.filter(t => t.type === 'expense').length
+      })
       
-      // Calculate the total amount
-      const total = purchaseTransactions.reduce((sum, transaction) => sum + transaction.amount, 0)
+      // Calculate total expenses
+      const totalExpenses = allTransactions
+        .filter(t => t.type === 'expense')
+        .reduce((sum, t) => sum + t.amount, 0)
       
-      setTransactions(purchaseTransactions)
-      setTotalAmount(total)
+      setTransactions(allTransactions)
+      setTotalAmount(totalExpenses)
     } catch (err) {
-      console.error('Error fetching purchase transactions:', err)
+      console.error('Error fetching transactions:', err)
       setError(err instanceof Error ? err.message : 'An unknown error occurred')
     } finally {
       setLoading(false)
@@ -165,8 +232,9 @@ export default function ProfitLossPage() {
         setEndDate(setEndOfDay(today))
         break
       case 'lastYear':
-        const lastYearStart = new Date(today.getFullYear() - 1, 0, 1)
-        const lastYearEnd = new Date(today.getFullYear() - 1, 11, 31)
+        const currentYear = toEasternTime(new Date()).getFullYear()
+        const lastYearStart = new Date(currentYear - 1, 0, 1)
+        const lastYearEnd = new Date(currentYear - 1, 11, 31)
         setStartDate(lastYearStart)
         setEndDate(setEndOfDay(lastYearEnd))
         break
@@ -211,7 +279,7 @@ export default function ProfitLossPage() {
   }
 
   // Render a transaction row (reused across categories)
-  const renderTransactionRow = (transaction: PurchaseTransaction) => (
+  const renderTransactionRow = (transaction: Transaction) => (
     <tr key={transaction._id} className="border-b hover:bg-gray-50">
       <td className="p-3 text-sm">{formatTransactionDate(transaction.date)}</td>
       <td className="p-3 text-sm">{transaction.vendor || 'N/A'}</td>
@@ -227,13 +295,53 @@ export default function ProfitLossPage() {
     <div className="container mx-auto py-8">
       <h1 className="text-2xl font-bold mb-6">Profit & Loss</h1>
       
+      {/* Revenue Breakdown Card */}
       <Card className="mb-8">
         <CardHeader>
           <div className="flex justify-between items-center">
             <div>
-              <CardTitle>Purchase Transactions</CardTitle>
+              <CardTitle>Revenue Breakdown</CardTitle>
               <CardDescription>
-                Total amount of all purchase transactions
+                Summary of all revenue streams
+                {startDate && endDate && (
+                  <span className="ml-1">
+                    ({format(startDate, "MMM d, yyyy")} - {format(endDate, "MMM d, yyyy")})
+                  </span>
+                )}
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-medium text-gray-500">Sales Revenue</h3>
+                <p className="text-2xl font-semibold">${formatNumberWithCommas(revenueBreakdown.sales)}</p>
+                {revenueBreakdown.totalTax > 0 && (
+                  <p className="text-sm text-gray-500">
+                    Tax: ${formatNumberWithCommas(revenueBreakdown.totalTax)}
+                  </p>
+                )}
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500">Training Revenue</h3>
+                <p className="text-2xl font-semibold">${formatNumberWithCommas(revenueBreakdown.training)}</p>
+              </div>
+            </div>
+            
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Expenses Card */}
+      <Card className="mb-8">
+        <CardHeader>
+          <div className="flex justify-between items-center">
+            <div>
+              <CardTitle>Total Expenses</CardTitle>
+              <CardDescription>
+                Total amount of all expenses
                 {startDate && endDate && (
                   <span className="ml-1">
                     ({format(startDate, "MMM d, yyyy")} - {format(endDate, "MMM d, yyyy")})
@@ -342,7 +450,7 @@ export default function ProfitLossPage() {
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-8 w-8 text-blue-500 animate-spin mr-2" />
-              <p>Loading purchase transactions...</p>
+              <p>Loading expenses...</p>
             </div>
           ) : error ? (
             <div className="text-red-500 py-4">
@@ -351,19 +459,19 @@ export default function ProfitLossPage() {
           ) : (
             <div>
               <div className="bg-gray-100 p-4 rounded-lg mb-6">
-                <h2 className="text-lg font-medium mb-2">Total Purchases</h2>
+                <h2 className="text-lg font-medium mb-2">Total Expenses</h2>
                 <p className="text-3xl font-bold text-red-600">
                   ${formatNumberWithCommas(totalAmount)}
                 </p>
                 <p className="text-sm text-gray-500 mt-1">
-                  Total from {transactions.length} purchase transactions
+                  Total from {transactions.length} expense transactions
                 </p>
               </div>
               
               {/* Category Summary */}
               <div className="mb-6">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-medium">Purchase Categories</h3>
+                  <h3 className="text-lg font-medium">Expense Categories</h3>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -434,7 +542,7 @@ export default function ProfitLossPage() {
               
               {transactions.length === 0 && (
                 <div className="text-center py-8 text-gray-500">
-                  No purchase transactions found.
+                  No expense transactions found.
                 </div>
               )}
             </div>

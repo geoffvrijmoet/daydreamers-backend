@@ -79,9 +79,20 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
 
   // Calculate daily totals
   const dailyTotals = Object.entries(groupedTransactions).reduce((totals, [date, transactions]) => {
-    totals[date] = transactions.reduce((sum, t) => sum + t.amount, 0)
+    const dayStats = transactions.reduce((acc, t) => {
+      acc.revenue += t.amount
+      acc.preTaxAmount += t.preTaxAmount || 0
+      acc.salesTax += t.taxAmount || 0
+      // Only count sales tax from manual transactions (not Square/Shopify)
+      if (t.source === 'manual' && t.taxAmount) {
+        acc.nonPlatformSalesTax += t.taxAmount
+      }
+      return acc
+    }, { revenue: 0, preTaxAmount: 0, salesTax: 0, nonPlatformSalesTax: 0 })
+    
+    totals[date] = dayStats
     return totals
-  }, {} as Record<string, number>)
+  }, {} as Record<string, { revenue: number, preTaxAmount: number, salesTax: number, nonPlatformSalesTax: number }>)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -105,9 +116,26 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                     <h3 className="text-lg font-semibold">
                       {format(new Date(date), 'MMMM d, yyyy')}
                     </h3>
-                    <span className="text-sm text-gray-500">
-                      Total: ${dailyTotals[date].toFixed(2)}
-                    </span>
+                    <div className="text-right text-sm">
+                      <div className="text-gray-900">
+                        Revenue: ${dailyTotals[date].revenue.toFixed(2)}
+                        {dailyTotals[date].preTaxAmount > 0 && (
+                          <span className="text-gray-500">
+                            {' '}(Sales: ${dailyTotals[date].preTaxAmount.toFixed(2)})
+                          </span>
+                        )}
+                      </div>
+                      {dailyTotals[date].salesTax > 0 && (
+                        <div className="text-gray-500">
+                          Sales Tax: ${dailyTotals[date].salesTax.toFixed(2)}
+                          {dailyTotals[date].nonPlatformSalesTax > 0 && (
+                            <span>
+                              {' '}(Non-platform: ${dailyTotals[date].nonPlatformSalesTax.toFixed(2)})
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="space-y-2">
                     {transactions.map((transaction) => (
