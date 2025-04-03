@@ -6,6 +6,7 @@ export interface IWebhookProcessing extends Document {
   platform: 'shopify' | 'square'
   orderId: string
   topic: string
+  webhookId: string
   status: 'pending' | 'processing' | 'completed' | 'failed'
   attemptCount: number
   lastAttempt: Date
@@ -19,6 +20,7 @@ const WebhookProcessingSchema = new Schema<IWebhookProcessing>({
   platform: { type: String, required: true, enum: ['shopify', 'square'] },
   orderId: { type: String, required: true },
   topic: { type: String, required: true },
+  webhookId: { type: String, required: true },
   status: { 
     type: String, 
     required: true, 
@@ -34,8 +36,11 @@ const WebhookProcessingSchema = new Schema<IWebhookProcessing>({
   collection: 'webhook_processing'
 })
 
+// Create unique index on webhookId
+WebhookProcessingSchema.index({ webhookId: 1 }, { unique: true })
+
 // Index for efficient lookups
-WebhookProcessingSchema.index({ platform: 1, orderId: 1, topic: 1 }, { unique: true })
+WebhookProcessingSchema.index({ platform: 1, orderId: 1, topic: 1 })
 WebhookProcessingSchema.index({ status: 1, lastAttempt: 1 })
 
 const WebhookProcessingModel = mongoose.models.WebhookProcessing || 
