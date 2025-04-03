@@ -7,8 +7,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { format } from 'date-fns'
 import { HomeSyncButton } from './home-sync-button'
+import { toEasternTime, formatInEasternTime } from '@/lib/utils/dates'
 
 interface Transaction {
   _id: string
@@ -69,7 +69,7 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
 
   // Group transactions by date
   const groupedTransactions = transactions.reduce((groups, transaction) => {
-    const date = format(new Date(transaction.date), 'yyyy-MM-dd')
+    const date = formatInEasternTime(toEasternTime(transaction.date), 'yyyy-MM-dd')
     if (!groups[date]) {
       groups[date] = []
     }
@@ -114,7 +114,7 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                 <div key={date} className="space-y-4">
                   <div className="flex justify-between items-center">
                     <h3 className="text-lg font-semibold">
-                      {format(new Date(date), 'MMMM d, yyyy')}
+                      {formatInEasternTime(toEasternTime(date), 'MMMM d, yyyy')}
                     </h3>
                     <div className="text-right text-sm">
                       <div className="text-gray-900">
@@ -153,7 +153,7 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                                 : 'Training'}
                             </span>
                             <span className="text-sm text-gray-500">
-                              {format(new Date(transaction.date), 'h:mm a')}
+                              {formatInEasternTime(toEasternTime(transaction.date), 'h:mm a')}
                             </span>
                           </div>
                           {transaction.description && (
