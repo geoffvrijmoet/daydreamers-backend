@@ -131,19 +131,22 @@ export async function POST(request: Request) {
     // Try to create a new processing record with a unique index on webhookId
     console.log('Attempting to create webhook processing record...')
     try {
-      webhookProcessing = await WebhookProcessingModel.create({
+      const collection = WebhookProcessingModel.collection
+      const now = new Date()
+      const result = await collection.insertOne({
         platform: 'shopify',
         orderId,
         topic,
         webhookId,
         status: 'processing',
         attemptCount: 1,
-        lastAttempt: new Date(),
-        data: body
+        lastAttempt: now,
+        data: body,
+        createdAt: now,
+        updatedAt: now
       })
-      if (webhookProcessing) {
-        console.log(`Created new webhook processing record: ${webhookProcessing._id}`)
-      }
+      webhookProcessing = { _id: result.insertedId } as IWebhookProcessing
+      console.log(`Created new webhook processing record: ${webhookProcessing._id}`)
     } catch (err) {
       // Check if error is a MongoDB duplicate key error
       if (err && typeof err === 'object' && 'code' in err && err.code === 11000) {
@@ -153,6 +156,7 @@ export async function POST(request: Request) {
           message: 'Webhook already processed or processing'
         })
       }
+      console.error('Error creating webhook processing record:', err)
       throw err
     }
 
