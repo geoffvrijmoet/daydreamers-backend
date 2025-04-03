@@ -6,6 +6,9 @@ import WebhookProcessingModel from '@/lib/models/webhook-processing'
 import crypto from 'crypto'
 import { IWebhookProcessing } from '@/lib/models/webhook-processing'
 
+// Explicitly set runtime to nodejs
+export const runtime = 'nodejs'
+
 interface ShopifyTransaction {
   status: string
   receipt?: {
