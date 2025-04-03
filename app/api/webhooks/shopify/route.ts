@@ -135,7 +135,9 @@ export async function POST(request: Request) {
     console.log('Attempting to create webhook processing record...')
     try {
       const collection = WebhookProcessingModel.collection
+      console.log('Collection:', collection)
       const now = new Date()
+      console.log('Now:', now)
       const result = await collection.insertOne({
         platform: 'shopify',
         orderId,
