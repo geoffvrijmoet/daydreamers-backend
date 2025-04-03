@@ -6,9 +6,8 @@ import SyncStateModel from '@/lib/models/SyncState'
 
 export async function POST(request: Request) {
   try {
-    const { searchParams } = new URL(request.url)
-    const startDate = searchParams.get('startDate')
-    const endDate = searchParams.get('endDate')
+    const body = await request.json()
+    const { startDate, endDate } = body
     
     await connectToDatabase()
     console.log('Starting Shopify transactions sync...')
@@ -24,72 +23,96 @@ export async function POST(request: Request) {
     const orders = await shopifyClient.order.list({
       created_at_min: lastSyncTime,
       created_at_max: now,
-      status: 'any', // Get all orders including cancelled
-      limit: 100
+      status: 'any', // Include all order statuses
+      limit: 250 // Maximum allowed by Shopify
     })
 
     console.log(`Found ${orders.length} Shopify orders since ${lastSyncTime}`)
 
     // Process each order
     const operations = orders.map(async (order) => {
-      const shopifyId = `shopify_${order.id}`
-
       // Check if transaction already exists
-      const existing = await mongoose.model('Transaction').findOne({ id: shopifyId })
-
-      // Determine transaction status
-      let status: 'completed' | 'cancelled' | 'refunded' = 'completed'
-      if (order.cancelled_at) {
-        status = 'cancelled'
-      } else if (order.refunds && order.refunds.length > 0) {
-        status = 'refunded'
-      }
+      const existing = await mongoose.model('Transaction').findOne({
+        'platformMetadata.platform': 'shopify',
+        'platformMetadata.orderId': order.id.toString()
+      })
 
       // Calculate tax amounts
-      const TAX_RATE = 0.08875;
-      const totalAmount = Number(order.total_price);
-      
-      // Calculate pre-tax amount
-      const preTaxAmount = totalAmount / (1 + TAX_RATE);
-      const calculatedTax = totalAmount - preTaxAmount;
+      const totalAmount = Number(order.total_price)
+      const taxAmount = Number(order.total_tax) || 0
+      const preTaxAmount = totalAmount - taxAmount
+      const shippingAmount = Number(order.total_shipping_price_set?.shop_money?.amount || 0)
+      const discountAmount = Number(order.total_discounts || 0)
+
+      // Calculate Shopify processing fee (2.9% + $0.30)
+      const processingFee = Number((totalAmount * 0.029 + 0.30).toFixed(2))
 
       const transaction = {
-        id: shopifyId,
         type: 'sale' as const,
         date: order.created_at,
         amount: totalAmount,
         preTaxAmount,
-        taxAmount: calculatedTax,
-        status,
+        taxAmount,
+        shipping: shippingAmount,
+        discount: discountAmount,
+        status: order.financial_status === 'paid' ? 'completed' : 'pending',
         source: 'shopify' as const,
-        customer: order.customer?.email,
-        refundAmount: order.refunds?.[0]?.transactions?.[0]?.amount,
-        refundDate: order.refunds?.[0]?.created_at,
-        updatedAt: order.updated_at,
-        products: order.line_items.map(item => ({
-          name: item.title,
-          quantity: item.quantity,
-          unitPrice: Number(item.price),
-          totalPrice: Number(item.price) * item.quantity
+        customer: order.customer?.id ? `shopify_${order.customer.id}` : undefined,
+        email: order.customer?.email,
+        isTaxable: true,
+        paymentProcessing: {
+          fee: processingFee,
+          provider: 'Shopify',
+          transactionId: order.id.toString()
+        },
+        platformMetadata: {
+          platform: 'shopify' as const,
+          orderId: order.id.toString(),
+          data: {
+            orderId: order.id.toString(),
+            orderNumber: order.order_number.toString(),
+            gateway: order.gateway || 'unknown',
+            createdAt: order.created_at,
+            updatedAt: order.updated_at
+          }
+        },
+        shopifyOrderId: order.id.toString(),
+        shopifyTotalTax: taxAmount,
+        shopifySubtotalPrice: preTaxAmount,
+        shopifyTotalPrice: totalAmount,
+        shopifyPaymentGateway: order.gateway,
+        products: await Promise.all(order.line_items.map(async item => {
+          // Try to find the MongoDB product using Shopify's product ID
+          const product = item.product_id ? await mongoose.model('Product').findOne({
+            'platformMetadata.platform': 'shopify',
+            'platformMetadata.productId': item.product_id?.toString() || ''
+          }) : null
+
+          return {
+            name: item.title,
+            quantity: item.quantity,
+            unitPrice: Number(item.price),
+            totalPrice: Number(item.price) * item.quantity,
+            isTaxable: true, // All Shopify products are taxable
+            productId: product?._id || new mongoose.Types.ObjectId() // Use existing product ID if found, otherwise generate new one
+          }
         }))
       }
 
       if (existing) {
         // If transaction exists but status has changed, update it
-        if (existing.status !== status) {
+        if (existing.status !== transaction.status) {
           await mongoose.model('Transaction').findOneAndUpdate(
             { _id: existing._id },
             { 
               $set: { 
-                status,
-                refundAmount: transaction.refundAmount,
-                refundDate: transaction.refundDate,
-                updatedAt: transaction.updatedAt
+                status: transaction.status,
+                updatedAt: transaction.platformMetadata.data.updatedAt
               } 
             },
             { new: true }
           )
-          console.log(`Updated Shopify order ${order.id} status to ${status}`)
+          console.log(`Updated Shopify order ${order.id} status to ${transaction.status}`)
           return { action: 'updated', id: order.id }
         }
         console.log(`Shopify order ${order.id} already synced`)
@@ -97,10 +120,21 @@ export async function POST(request: Request) {
       }
 
       // Create new transaction
-      await mongoose.model('Transaction').create({
+      const newTransaction = await mongoose.model('Transaction').create({
         ...transaction,
         createdAt: new Date().toISOString()
       })
+
+      console.log('Created transaction with platformMetadata:', {
+        transactionId: newTransaction._id,
+        orderId: order.id,
+        platformMetadata: newTransaction.platformMetadata,
+        fullTransaction: {
+          ...newTransaction.toObject(),
+          products: newTransaction.products.length + ' products'
+        }
+      })
+
       console.log(`Synced Shopify order ${order.id}`)
       return { action: 'created', id: order.id }
     })

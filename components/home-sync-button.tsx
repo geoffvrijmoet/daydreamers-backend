@@ -11,7 +11,10 @@ export function HomeSyncButton() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [lastSyncResult, setLastSyncResult] = useState<{created: number, updated: number, skipped: number} | null>(null)
+  const [lastSyncResult, setLastSyncResult] = useState<{
+    square: { created: number, updated: number, skipped: number },
+    shopify: { created: number, updated: number, skipped: number }
+  } | null>(null)
 
   // Load last sync date on mount
   useEffect(() => {
@@ -47,7 +50,8 @@ export function HomeSyncButton() {
       setIsSyncing(true)
       setError(null)
       
-      const response = await fetch('/api/transactions/sync/square', {
+      // Run Square sync
+      const squareResponse = await fetch('/api/transactions/sync/square', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -58,13 +62,36 @@ export function HomeSyncButton() {
         }),
       })
       
-      if (!response.ok) {
-        const error = await response.text()
+      if (!squareResponse.ok) {
+        const error = await squareResponse.text()
         throw new Error(error)
       }
       
-      const data = await response.json()
-      setLastSyncResult(data.results)
+      const squareResult = await squareResponse.json()
+
+      // Run Shopify sync
+      const shopifyResponse = await fetch('/api/transactions/sync/shopify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          startDate,
+          endDate,
+        }),
+      })
+      
+      if (!shopifyResponse.ok) {
+        const error = await shopifyResponse.text()
+        throw new Error(error)
+      }
+      
+      const shopifyResult = await shopifyResponse.json()
+
+      setLastSyncResult({
+        square: squareResult.results,
+        shopify: shopifyResult.results
+      })
     } catch (error) {
       console.error('Sync error:', error)
       setError(error instanceof Error ? error.message : 'Failed to sync')
@@ -81,7 +108,7 @@ export function HomeSyncButton() {
           disabled={isSyncing || !startDate || !endDate}
           className="rounded-r-none"
         >
-          {isSyncing ? 'Syncing...' : 'Sync Square'}
+          {isSyncing ? 'Syncing...' : 'Sync Orders'}
         </Button>
         <Popover>
           <PopoverTrigger asChild>
@@ -123,8 +150,9 @@ export function HomeSyncButton() {
       )}
 
       {lastSyncResult && (
-        <div className="text-sm">
-          Last sync results: {lastSyncResult.created} created, {lastSyncResult.updated} updated, {lastSyncResult.skipped} skipped
+        <div className="text-sm space-y-1">
+          <div>Square: {lastSyncResult.square.created} created, {lastSyncResult.square.updated} updated, {lastSyncResult.square.skipped} skipped</div>
+          <div>Shopify: {lastSyncResult.shopify.created} created, {lastSyncResult.shopify.updated} updated, {lastSyncResult.shopify.skipped} skipped</div>
         </div>
       )}
     </div>

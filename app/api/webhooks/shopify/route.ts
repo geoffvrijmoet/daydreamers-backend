@@ -24,7 +24,7 @@ interface ShopifyWebhookBody {
 
 // Explicitly set runtime to nodejs
 export const runtime = 'nodejs'
-export const maxDuration = 300 // 5 minute timeout
+export const maxDuration = 60 // 1 minute timeout
 
 // Verify Shopify webhook signature
 async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolean; body: string }> {
