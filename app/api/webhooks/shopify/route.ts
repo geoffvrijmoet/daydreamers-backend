@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { MongoClient, ObjectId } from 'mongodb'
 
 // Types
 interface ShopifyLineItem {
@@ -20,7 +19,7 @@ interface ShopifyWebhookBody {
 }
 
 interface Product {
-  _id: ObjectId
+  _id: string
   name: string
   category: string
   platformMetadata: {
@@ -29,9 +28,99 @@ interface Product {
   }
 }
 
+interface MongoResponse<T> {
+  document?: T
+  documents?: T[]
+  error?: string
+}
+
+interface MongoFilter {
+  [key: string]: unknown
+}
+
+interface MongoUpdate {
+  $set: Record<string, unknown>
+}
+
 // Use edge runtime with 60s timeout (Hobby plan limit)
-export const runtime = 'edge'
+export const runtime = 'node'
 export const maxDuration = 60
+
+// MongoDB Data API configuration
+const MONGODB_API_KEY = process.env.MONGODB_API_KEY
+const MONGODB_CLUSTER = process.env.MONGODB_CLUSTER
+const MONGODB_DATABASE = process.env.MONGODB_DATABASE
+const MONGODB_DATA_API_URL = `https://data.mongodb-api.com/app/data-${MONGODB_CLUSTER}/endpoint/data/v1`
+
+// MongoDB Data API helper functions
+async function mongoFindOne<T>(collection: string, filter: MongoFilter): Promise<MongoResponse<T>> {
+  const response = await fetch(`${MONGODB_DATA_API_URL}/action/findOne`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': MONGODB_API_KEY!,
+    },
+    body: JSON.stringify({
+      collection,
+      database: MONGODB_DATABASE,
+      dataSource: 'Cluster0',
+      filter,
+    }),
+  })
+  return response.json()
+}
+
+async function mongoFind<T>(collection: string, filter: MongoFilter): Promise<MongoResponse<T>> {
+  const response = await fetch(`${MONGODB_DATA_API_URL}/action/find`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': MONGODB_API_KEY!,
+    },
+    body: JSON.stringify({
+      collection,
+      database: MONGODB_DATABASE,
+      dataSource: 'Cluster0',
+      filter,
+    }),
+  })
+  return response.json()
+}
+
+async function mongoInsertOne<T>(collection: string, document: T): Promise<MongoResponse<T>> {
+  const response = await fetch(`${MONGODB_DATA_API_URL}/action/insertOne`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': MONGODB_API_KEY!,
+    },
+    body: JSON.stringify({
+      collection,
+      database: MONGODB_DATABASE,
+      dataSource: 'Cluster0',
+      document,
+    }),
+  })
+  return response.json()
+}
+
+async function mongoUpdateOne<T>(collection: string, filter: MongoFilter, update: MongoUpdate): Promise<MongoResponse<T>> {
+  const response = await fetch(`${MONGODB_DATA_API_URL}/action/updateOne`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': MONGODB_API_KEY!,
+    },
+    body: JSON.stringify({
+      collection,
+      database: MONGODB_DATABASE,
+      dataSource: 'Cluster0',
+      filter,
+      update,
+    }),
+  })
+  return response.json()
+}
 
 // Verify Shopify webhook signature using Web Crypto API
 async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolean; body: string }> {
@@ -77,7 +166,6 @@ async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolea
 }
 
 export async function POST(request: Request) {
-  let client: MongoClient | null = null
   let webhookId: string | null = null
   let topic: string | null = null
   
@@ -98,26 +186,19 @@ export async function POST(request: Request) {
     const body = JSON.parse(rawBody) as ShopifyWebhookBody
     const orderId = body.id.toString()
 
-    // Connect to MongoDB using Edge-compatible configuration
-    const uri = process.env.MONGODB_URI
-    if (!uri) throw new Error('Missing MONGODB_URI')
-
-    client = new MongoClient(uri)
-    const db = client.db()
-
     // First, check if we've already processed this webhook
-    const existingWebhook = await db.collection('webhook_processing').findOne({ webhookId })
-    if (existingWebhook) {
+    const existingWebhook = await mongoFindOne<{ status: string }>('webhook_processing', { webhookId })
+    if (existingWebhook?.document) {
       return NextResponse.json({ 
         success: true, 
         message: 'Webhook already processed',
-        status: existingWebhook.status 
+        status: existingWebhook.document.status 
       })
     }
 
     // Create webhook processing record
     const now = new Date()
-    await db.collection('webhook_processing').insertOne({
+    await mongoInsertOne('webhook_processing', {
       platform: 'shopify',
       orderId,
       topic,
@@ -133,34 +214,20 @@ export async function POST(request: Request) {
     // Process order data
     if (topic === 'orders/create' || topic === 'orders/updated') {
       // Get existing transaction and products in parallel
-      const [existingTransaction, rawProducts] = await Promise.all([
-        db.collection('transactions').findOne({
+      const [existingTransaction, productsResult] = await Promise.all([
+        mongoFindOne<{ _id: string }>('transactions', {
           'platformMetadata.orderId': orderId,
           'platformMetadata.platform': 'shopify'
         }),
-        db.collection('products').find({
+        mongoFind<Product>('products', {
           'platformMetadata.platform': 'shopify',
           'platformMetadata.productId': { 
             $in: body.line_items.map(item => item.product_id.toString()) 
           }
-        }).toArray()
+        })
       ])
 
-      // Type assertion for products after validation
-      const products = rawProducts.filter((p): p is Product => 
-        p !== null && 
-        typeof p === 'object' && 
-        '_id' in p && 
-        p._id instanceof ObjectId &&
-        'name' in p && 
-        'category' in p && 
-        'platformMetadata' in p &&
-        typeof p.platformMetadata === 'object' &&
-        p.platformMetadata !== null &&
-        'platform' in p.platformMetadata &&
-        'productId' in p.platformMetadata
-      )
-
+      const products = productsResult?.documents || []
       const productMap = new Map(products.map(p => [p.platformMetadata.productId, p]))
       const processingFee = Number(body.total_price) * 0.029 + 0.30
       const taxAmount = Number(body.total_tax) || 0
@@ -179,7 +246,7 @@ export async function POST(request: Request) {
         lineItems: body.line_items.map(item => {
           const product = productMap.get(item.product_id.toString())
           return {
-            productId: product?._id.toString(), // Convert ObjectId to string
+            productId: product?._id,
             name: item.title,
             quantity: item.quantity,
             price: item.price,
@@ -192,18 +259,20 @@ export async function POST(request: Request) {
       }
 
       // Save transaction
-      if (existingTransaction) {
-        await db.collection('transactions').updateOne(
-          { _id: existingTransaction._id },
+      if (existingTransaction?.document) {
+        await mongoUpdateOne(
+          'transactions',
+          { _id: existingTransaction.document._id },
           { $set: transaction }
         )
       } else {
-        await db.collection('transactions').insertOne(transaction)
+        await mongoInsertOne('transactions', transaction)
       }
     }
 
     // Mark webhook as completed
-    await db.collection('webhook_processing').updateOne(
+    await mongoUpdateOne(
+      'webhook_processing',
       { webhookId },
       { $set: { status: 'completed', updatedAt: new Date() } }
     )
@@ -213,9 +282,10 @@ export async function POST(request: Request) {
     console.error('Shopify webhook error:', error)
     
     // Try to mark webhook as failed if we have the ID
-    if (webhookId && client) {
+    if (webhookId) {
       try {
-        await client.db().collection('webhook_processing').updateOne(
+        await mongoUpdateOne(
+          'webhook_processing',
           { webhookId },
           { 
             $set: { 
