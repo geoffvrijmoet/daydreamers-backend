@@ -124,16 +124,24 @@ export async function POST(request: Request) {
 
     // Now wait for DB connection
     await dbConnection
+    console.log('Connected to database, checking for existing webhook processing record...')
 
     // Check if we've already processed this webhook
     webhookProcessing = await WebhookProcessingModel.findOne({ webhookId })
+    console.log('Existing webhook processing record:', webhookProcessing ? {
+      id: webhookProcessing._id,
+      status: webhookProcessing.status,
+      attemptCount: webhookProcessing.attemptCount
+    } : 'None found')
 
     if (webhookProcessing?.status === 'completed') {
+      console.log('Webhook already processed successfully, skipping')
       return NextResponse.json({ message: 'Webhook already processed' })
     }
 
     // If no existing record, create one
     if (!webhookProcessing) {
+      console.log('Creating new webhook processing record...')
       webhookProcessing = await WebhookProcessingModel.create({
         webhookId,
         platform: 'shopify',
@@ -143,12 +151,23 @@ export async function POST(request: Request) {
         attemptCount: 1,
         lastAttempt: new Date()
       })
+      console.log('Created webhook processing record:', webhookProcessing ? {
+        id: webhookProcessing._id,
+        status: webhookProcessing.status,
+        attemptCount: webhookProcessing.attemptCount
+      } : 'Failed to create')
     } else {
       // Update existing record
+      console.log('Updating existing webhook processing record...')
       webhookProcessing.attemptCount += 1
       webhookProcessing.lastAttempt = new Date()
       webhookProcessing.status = 'processing'
       await webhookProcessing.save()
+      console.log('Updated webhook processing record:', {
+        id: webhookProcessing._id,
+        status: webhookProcessing.status,
+        attemptCount: webhookProcessing.attemptCount
+      })
     }
 
     const body = JSON.parse(rawBody) as ShopifyOrder
