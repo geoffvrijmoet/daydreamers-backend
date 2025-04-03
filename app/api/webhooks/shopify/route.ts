@@ -5,6 +5,7 @@ import ProductModel from '@/lib/models/Product'
 import WebhookProcessingModel from '@/lib/models/webhook-processing'
 import crypto from 'crypto'
 import { IWebhookProcessing } from '@/lib/models/webhook-processing'
+import mongoose from 'mongoose'
 
 // Explicitly set runtime to nodejs
 export const runtime = 'nodejs'
@@ -94,6 +95,29 @@ async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolea
   }
 }
 
+// Helper function to ensure database connection
+async function ensureConnection() {
+  await connectToDatabase()
+  
+  // Wait for actual connection to be ready
+  if (mongoose.connection.readyState !== 1) {
+    console.log('Waiting for connection to be ready...')
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Database connection timeout'))
+      }, 5000) // 5 second timeout
+
+      mongoose.connection.once('connected', () => {
+        clearTimeout(timeout)
+        console.log('Connection is now ready')
+        resolve()
+      })
+    })
+  }
+  
+  return mongoose.connection.db
+}
+
 export async function POST(request: Request) {
   let body: ShopifyOrder | undefined
   let topic: string | null = null
@@ -112,13 +136,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing webhook ID or topic' }, { status: 400 })
     }
 
-    // Start DB connection, signature verification, and processing record check in parallel
-    console.log('Starting parallel operations: DB connection, signature verification, and record check')
-    const [, verificationResult] = await Promise.all([
-      connectToDatabase().then(() => console.log('Database connected')),
+    // Start signature verification and database connection in parallel
+    console.log('Starting parallel operations...')
+    const [db, verificationResult] = await Promise.all([
+      ensureConnection(),
       verifyShopifyWebhook(request)
     ])
     console.log('Initial parallel operations completed')
+
+    if (!db) {
+      throw new Error('Database connection failed')
+    }
 
     const { isValid, body: rawBody } = verificationResult
 
@@ -131,31 +159,10 @@ export async function POST(request: Request) {
     const orderId = body.id.toString()
     console.log(`Processing webhook for order ${orderId} with topic ${topic} and webhook ID ${webhookId}`)
 
-    // Try to create a new processing record with a unique index on webhookId
+    // Try to create a new processing record using native MongoDB operation
     console.log('Attempting to create webhook processing record...')
     try {
-      const mongoose = (await import('mongoose')).default
-      console.log('Connection state:', mongoose.connection.readyState)
-      
-      // Wait for connection to be ready
-      if (mongoose.connection.readyState !== 1) {
-        console.log('Waiting for connection to be ready...')
-        await new Promise<void>((resolve) => {
-          mongoose.connection.once('connected', () => {
-            console.log('Connection is now ready')
-            resolve()
-          })
-        })
-      }
-
-      // Get the native MongoDB collection
-      const db = mongoose.connection.db
-      if (!db) {
-        throw new Error('Database not initialized')
-      }
       const collection = db.collection('webhook_processing')
-      console.log('Got native collection:', collection.collectionName)
-
       const now = new Date()
       const result = await collection.insertOne({
         platform: 'shopify',
