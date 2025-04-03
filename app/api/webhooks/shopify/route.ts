@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
-import crypto from 'crypto'
-import { MongoClient } from 'mongodb'
+import { MongoClient, ObjectId } from 'mongodb'
 
 // Types
 interface ShopifyLineItem {
@@ -20,11 +19,21 @@ interface ShopifyWebhookBody {
   [key: string]: unknown
 }
 
+interface Product {
+  _id: ObjectId
+  name: string
+  category: string
+  platformMetadata: {
+    platform: string
+    productId: string
+  }
+}
+
 // Use edge runtime with 60s timeout (Hobby plan limit)
 export const runtime = 'edge'
 export const maxDuration = 60
 
-// Verify Shopify webhook signature
+// Verify Shopify webhook signature using Web Crypto API
 async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolean; body: string }> {
   const hmac = request.headers.get('x-shopify-hmac-sha256')
   const secret = process.env.SHOPIFY_WEBHOOK_SECRET
@@ -35,34 +44,36 @@ async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolea
 
   try {
     const clonedRequest = request.clone()
-    const bodyBuffer = Buffer.from(await clonedRequest.arrayBuffer())
-    const rawBody = bodyBuffer.toString('utf8')
-    const calculatedHmac = crypto
-      .createHmac('sha256', secret)
-      .update(bodyBuffer)
-      .digest('base64')
+    const bodyBuffer = await clonedRequest.arrayBuffer()
+    const rawBody = new TextDecoder().decode(bodyBuffer)
+
+    // Convert secret to Uint8Array
+    const encoder = new TextEncoder()
+    const keyData = encoder.encode(secret)
+    const key = await crypto.subtle.importKey(
+      'raw',
+      keyData,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    )
+
+    // Sign the body
+    const signature = await crypto.subtle.sign(
+      'HMAC',
+      key,
+      bodyBuffer
+    )
+
+    // Convert signature to base64 using array spread for compatibility
+    const signatureArray = Array.from(new Uint8Array(signature))
+    const calculatedHmac = btoa(String.fromCharCode.apply(null, signatureArray))
 
     return { isValid: hmac === calculatedHmac, body: rawBody }
   } catch (error) {
     console.error('Error verifying Shopify webhook:', error)
     return { isValid: false, body: '' }
   }
-}
-
-// Get MongoDB client
-async function getMongoClient() {
-  const uri = process.env.MONGODB_URI
-  if (!uri) throw new Error('Missing MONGODB_URI')
-  
-  const client = new MongoClient(uri, {
-    maxPoolSize: 1,
-    minPoolSize: 0,
-    maxIdleTimeMS: 10000,
-    connectTimeoutMS: 5000
-  })
-
-  await client.connect()
-  return client
 }
 
 export async function POST(request: Request) {
@@ -87,8 +98,11 @@ export async function POST(request: Request) {
     const body = JSON.parse(rawBody) as ShopifyWebhookBody
     const orderId = body.id.toString()
 
-    // Connect to MongoDB
-    client = await getMongoClient()
+    // Connect to MongoDB using Edge-compatible configuration
+    const uri = process.env.MONGODB_URI
+    if (!uri) throw new Error('Missing MONGODB_URI')
+
+    client = new MongoClient(uri)
     const db = client.db()
 
     // First, check if we've already processed this webhook
@@ -119,7 +133,7 @@ export async function POST(request: Request) {
     // Process order data
     if (topic === 'orders/create' || topic === 'orders/updated') {
       // Get existing transaction and products in parallel
-      const [existingTransaction, products] = await Promise.all([
+      const [existingTransaction, rawProducts] = await Promise.all([
         db.collection('transactions').findOne({
           'platformMetadata.orderId': orderId,
           'platformMetadata.platform': 'shopify'
@@ -131,6 +145,21 @@ export async function POST(request: Request) {
           }
         }).toArray()
       ])
+
+      // Type assertion for products after validation
+      const products = rawProducts.filter((p): p is Product => 
+        p !== null && 
+        typeof p === 'object' && 
+        '_id' in p && 
+        p._id instanceof ObjectId &&
+        'name' in p && 
+        'category' in p && 
+        'platformMetadata' in p &&
+        typeof p.platformMetadata === 'object' &&
+        p.platformMetadata !== null &&
+        'platform' in p.platformMetadata &&
+        'productId' in p.platformMetadata
+      )
 
       const productMap = new Map(products.map(p => [p.platformMetadata.productId, p]))
       const processingFee = Number(body.total_price) * 0.029 + 0.30
@@ -150,7 +179,7 @@ export async function POST(request: Request) {
         lineItems: body.line_items.map(item => {
           const product = productMap.get(item.product_id.toString())
           return {
-            productId: product?._id,
+            productId: product?._id.toString(), // Convert ObjectId to string
             name: item.title,
             quantity: item.quantity,
             price: item.price,
@@ -202,9 +231,5 @@ export async function POST(request: Request) {
     }
     
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  } finally {
-    if (client) {
-      await client.close()
-    }
   }
 } 
