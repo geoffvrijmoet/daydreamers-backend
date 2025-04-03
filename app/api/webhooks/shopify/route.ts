@@ -4,6 +4,7 @@ import mongoose from 'mongoose'
 import TransactionModel from '@/lib/models/transaction'
 import { IProduct } from '@/lib/models/Product'
 import crypto from 'crypto'
+import { MongoClient, Db } from 'mongodb'
 
 interface ShopifyTransaction {
   status: string
@@ -91,38 +92,28 @@ async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolea
 }
 
 export async function POST(request: Request) {
+  let dbConnection: Promise<{ client: MongoClient; db: Db }> | undefined
+
   try {
-    console.log('Received Shopify webhook:', {
-      hmacPresent: !!request.headers.get('x-shopify-hmac-sha256'),
-      contentLength: request.headers.get('content-length'),
-      topic: request.headers.get('x-shopify-topic'),
-      orderId: request.headers.get('x-shopify-order-id')
-    })
+    // Start DB connection early but don't await it yet
+    dbConnection = connectToDatabase()
 
     // Verify webhook signature and get body
     const { isValid, body: rawBody } = await verifyShopifyWebhook(request)
 
     if (!isValid) {
-      console.error('Invalid Shopify webhook signature', {
-        hmacPresent: !!request.headers.get('x-shopify-hmac-sha256'),
-        secretPresent: !!process.env.SHOPIFY_WEBHOOK_SECRET,
-        secretKeyPreview: process.env.SHOPIFY_WEBHOOK_SECRET ? 
-          `${process.env.SHOPIFY_WEBHOOK_SECRET.substring(0, 4)}...` : 'not set',
-        headers: Object.fromEntries(request.headers)
-      })
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
 
     const body = JSON.parse(rawBody) as ShopifyOrder
-
-    // Handle different event types
     const topic = request.headers.get('x-shopify-topic')
+
     if (!topic) {
       return NextResponse.json({ error: 'Missing topic' }, { status: 400 })
     }
 
-    // Connect to database
-    await connectToDatabase()
+    // Now wait for DB connection
+    await dbConnection
 
     switch (topic) {
       case 'orders/create':
@@ -130,11 +121,30 @@ export async function POST(request: Request) {
         const order = body
         const orderId = order.id.toString()
 
-        // Check if transaction already exists
-        const existingTransaction = await TransactionModel.findOne({
-          'platformMetadata.orderId': orderId,
-          'platformMetadata.platform': 'shopify'
-        })
+        // Start these queries in parallel
+        const [existingTransaction, lineItems] = await Promise.all([
+          // Check if transaction exists
+          TransactionModel.findOne({
+            'platformMetadata.orderId': orderId,
+            'platformMetadata.platform': 'shopify'
+          }),
+          // Look up all products in parallel
+          Promise.all(
+            order.line_items.map(async (item: ShopifyLineItem) => {
+              const product = await mongoose.model<IProduct>('Product').findOne({
+                'platformMetadata.shopifyId': item.product_id.toString()
+              })
+              return {
+                productId: product?._id,
+                name: item.title,
+                quantity: item.quantity,
+                price: Number(item.price),
+                sku: item.sku,
+                variantId: item.variant_id?.toString()
+              }
+            })
+          )
+        ])
 
         // Determine transaction status
         let status: 'completed' | 'cancelled' | 'refunded' = 'completed'
@@ -151,23 +161,6 @@ export async function POST(request: Request) {
         const processingFees = order.transactions
           ?.filter((t: ShopifyTransaction) => t.status === 'success')
           .reduce((sum: number, t: ShopifyTransaction) => sum + Number(t.receipt?.processing_fee || 0), 0) || 0
-
-        // Look up products
-        const lineItems = await Promise.all(
-          order.line_items.map(async (item: ShopifyLineItem) => {
-            const product = await mongoose.model<IProduct>('Product').findOne({
-              'platformMetadata.shopifyId': item.product_id.toString()
-            })
-            return {
-              productId: product?._id,
-              name: item.title,
-              quantity: item.quantity,
-              price: Number(item.price),
-              sku: item.sku,
-              variantId: item.variant_id?.toString()
-            }
-          })
-        )
 
         const transaction = {
           date: new Date(order.created_at),
@@ -191,17 +184,23 @@ export async function POST(request: Request) {
           status
         }
 
-        if (existingTransaction) {
-          // Update existing transaction
-          await TransactionModel.findByIdAndUpdate(existingTransaction._id, transaction)
-          console.log('Updated Shopify transaction:', orderId)
-        } else {
-          // Create new transaction
-          await TransactionModel.create(transaction)
-          console.log('Created new Shopify transaction:', orderId)
-        }
+        // Fire and forget the database operation
+        const dbOperation = existingTransaction
+          ? TransactionModel.findByIdAndUpdate(existingTransaction._id, transaction).exec()
+          : TransactionModel.create(transaction)
 
-        return NextResponse.json({ success: true })
+        // Don't wait for the operation to complete
+        dbOperation.then(() => {
+          console.log(existingTransaction ? 'Updated' : 'Created', 'Shopify transaction:', orderId)
+        }).catch(error => {
+          console.error('Error saving transaction:', error)
+        })
+
+        // Return success immediately
+        return NextResponse.json({ 
+          success: true,
+          message: `${existingTransaction ? 'Updating' : 'Creating'} transaction ${orderId}`
+        })
       }
 
       default:
