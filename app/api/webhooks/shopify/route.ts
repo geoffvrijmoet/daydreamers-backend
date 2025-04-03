@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import TransactionModel from '@/lib/models/transaction'
 import ProductModel from '@/lib/models/Product'
+import WebhookProcessingModel from '@/lib/models/webhook-processing'
 import crypto from 'crypto'
 
 interface ShopifyTransaction {
@@ -90,6 +91,8 @@ async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolea
 }
 
 export async function POST(request: Request) {
+  let body: ShopifyOrder | undefined
+  let topic: string | null = null
   try {
     // Start DB connection and signature verification in parallel
     const [, verificationResult] = await Promise.all([
@@ -103,27 +106,65 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
 
-    const body = JSON.parse(rawBody) as ShopifyOrder
-    const topic = request.headers.get('x-shopify-topic')
+    body = JSON.parse(rawBody) as ShopifyOrder
+    topic = request.headers.get('x-shopify-topic')
 
     if (!topic) {
       return NextResponse.json({ error: 'Missing topic' }, { status: 400 })
     }
 
+    const orderId = body.id.toString()
+
+    // Check if we've already processed this webhook
+    const existingProcessing = await WebhookProcessingModel.findOne({
+      platform: 'shopify',
+      orderId,
+      topic,
+      status: { $in: ['completed', 'processing'] }
+    })
+
+    if (existingProcessing) {
+      // If it's still processing, it might have timed out
+      if (existingProcessing.status === 'processing' && 
+          Date.now() - existingProcessing.lastAttempt.getTime() > 30000) { // 30 seconds
+        // Reset the status to pending for retry
+        await WebhookProcessingModel.findByIdAndUpdate(existingProcessing._id, {
+          status: 'pending',
+          $inc: { attemptCount: 1 },
+          lastAttempt: new Date()
+        })
+      } else {
+        // Already processed or still processing
+        return NextResponse.json({ 
+          success: true,
+          message: `Webhook already ${existingProcessing.status}`
+        })
+      }
+    }
+
+    // Create or update webhook processing record
+    const webhookProcessing = await WebhookProcessingModel.findOneAndUpdate(
+      { platform: 'shopify', orderId, topic },
+      {
+        status: 'processing',
+        $inc: { attemptCount: 1 },
+        lastAttempt: new Date(),
+        data: body
+      },
+      { upsert: true, new: true }
+    )
+
     switch (topic) {
       case 'orders/create':
       case 'orders/updated': {
         const order = body
-        const orderId = order.id.toString()
 
         // Start all database operations in parallel
         const [existingTransaction, products] = await Promise.all([
-          // Check if transaction exists
           TransactionModel.findOne({
             'platformMetadata.orderId': orderId,
             'platformMetadata.platform': 'shopify'
           }),
-          // Look up all products in a single query
           ProductModel.find({
             'platformMetadata.platform': 'shopify',
             'platformMetadata.productId': { 
@@ -146,7 +187,7 @@ export async function POST(request: Request) {
             quantity,
             unitPrice,
             totalPrice: unitPrice * quantity,
-            isTaxable: true, // Shopify orders are always taxable
+            isTaxable: true,
             sku: item.sku,
             variantId: item.variant_id?.toString()
           }
@@ -180,7 +221,7 @@ export async function POST(request: Request) {
           processingFees,
           type: 'sale',
           source: 'shopify',
-          isTaxable: true, // Shopify orders are always taxable
+          isTaxable: true,
           platformMetadata: {
             platform: 'shopify' as const,
             orderId,
@@ -208,10 +249,19 @@ export async function POST(request: Request) {
           : TransactionModel.create(transaction)
 
         // Don't wait for the operation to complete
-        dbOperation.then(() => {
+        dbOperation.then(async () => {
           console.log(existingTransaction ? 'Updated' : 'Created', 'Shopify transaction:', orderId)
-        }).catch(error => {
+          // Update webhook processing status to completed
+          await WebhookProcessingModel.findByIdAndUpdate(webhookProcessing._id, {
+            status: 'completed'
+          })
+        }).catch(async (error) => {
           console.error('Error saving transaction:', error)
+          // Update webhook processing status to failed
+          await WebhookProcessingModel.findByIdAndUpdate(webhookProcessing._id, {
+            status: 'failed',
+            error: error.message
+          })
         })
 
         // Return success immediately
@@ -222,10 +272,24 @@ export async function POST(request: Request) {
       }
 
       default:
+        // Mark unhandled topics as completed
+        await WebhookProcessingModel.findByIdAndUpdate(webhookProcessing._id, {
+          status: 'completed'
+        })
         return NextResponse.json({ message: 'Unhandled webhook topic' })
     }
   } catch (error) {
     console.error('Shopify webhook error:', error)
+    // If we have a webhook processing record, mark it as failed
+    if (error instanceof Error && body && topic) {
+      await WebhookProcessingModel.findOneAndUpdate(
+        { platform: 'shopify', orderId: body.id.toString(), topic },
+        {
+          status: 'failed',
+          error: error.message
+        }
+      )
+    }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 } 
