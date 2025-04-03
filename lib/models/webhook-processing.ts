@@ -30,7 +30,8 @@ const WebhookProcessingSchema = new Schema<IWebhookProcessing>({
   error: { type: String },
   data: { type: Schema.Types.Mixed, required: true }
 }, {
-  timestamps: true
+  timestamps: true,
+  collection: 'webhook_processing'
 })
 
 // Index for efficient lookups

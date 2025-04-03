@@ -97,10 +97,12 @@ export async function POST(request: Request) {
     console.log('Starting Shopify webhook processing...')
     
     // Start DB connection and signature verification in parallel
+    console.log('Starting parallel operations: DB connection and signature verification')
     const [, verificationResult] = await Promise.all([
       connectToDatabase().then(() => console.log('Database connected')),
       verifyShopifyWebhook(request)
     ])
+    console.log('Parallel operations completed')
 
     const { isValid, body: rawBody } = verificationResult
 
@@ -121,12 +123,14 @@ export async function POST(request: Request) {
     console.log(`Processing webhook for order ${orderId} with topic ${topic}`)
 
     // Check if we've already processed this webhook
+    console.log('Checking for existing webhook processing record...')
     const existingProcessing = await WebhookProcessingModel.findOne({
       platform: 'shopify',
       orderId,
       topic,
       status: { $in: ['completed', 'processing'] }
     })
+    console.log('Existing record check completed')
 
     if (existingProcessing) {
       console.log(`Found existing webhook processing record: ${existingProcessing.status}`)
@@ -140,6 +144,7 @@ export async function POST(request: Request) {
           $inc: { attemptCount: 1 },
           lastAttempt: new Date()
         })
+        console.log('Reset completed')
       } else {
         // Already processed or still processing
         console.log(`Webhook already ${existingProcessing.status}, skipping`)
@@ -148,10 +153,12 @@ export async function POST(request: Request) {
           message: `Webhook already ${existingProcessing.status}`
         })
       }
+    } else {
+      console.log('No existing webhook processing record found')
     }
 
     // Create or update webhook processing record
-    console.log('Creating/updating webhook processing record')
+    console.log('Creating/updating webhook processing record...')
     const webhookProcessing = await WebhookProcessingModel.findOneAndUpdate(
       { platform: 'shopify', orderId, topic },
       {
@@ -168,9 +175,10 @@ export async function POST(request: Request) {
       case 'orders/create':
       case 'orders/updated': {
         const order = body
+        console.log('Processing order data...')
 
         // Start all database operations in parallel
-        console.log('Starting parallel database operations')
+        console.log('Starting parallel database operations...')
         const [existingTransaction, products] = await Promise.all([
           TransactionModel.findOne({
             'platformMetadata.orderId': orderId,
@@ -187,75 +195,43 @@ export async function POST(request: Request) {
 
         // Create a map of product IDs to products for faster lookups
         const productMap = new Map(products.map(p => [p.platformMetadata.productId, p]))
+        console.log('Product map created')
 
-        // Process line items using the product map
-        const lineItems = order.line_items.map(item => {
-          const product = productMap.get(item.product_id.toString())
-          const unitPrice = Number(item.price)
-          const quantity = item.quantity
-          return {
-            productId: product?._id,
-            name: item.title,
-            quantity,
-            unitPrice,
-            totalPrice: unitPrice * quantity,
-            isTaxable: true,
-            sku: item.sku,
-            variantId: item.variant_id?.toString()
-          }
-        })
+        // Calculate processing fees and tax amounts
+        const processingFee = Number(order.total_price) * 0.029 + 0.30 // 2.9% + $0.30
+        const taxAmount = Number(order.total_tax) || 0
+        console.log(`Calculated processing fee: ${processingFee}, tax amount: ${taxAmount}`)
 
-        // Determine transaction status
-        let status: 'completed' | 'cancelled' | 'refunded' = 'completed'
-        if (order.cancelled_at) {
-          status = 'cancelled'
-        } else if (order.refunds && order.refunds.length > 0) {
-          status = 'refunded'
-        }
-
-        // Calculate tax amount and processing fees
-        const taxAmount = Number(order.total_tax || 0)
-        const processingFees = order.transactions
-          ?.filter((t: ShopifyTransaction) => t.status === 'success')
-          .reduce((sum: number, t: ShopifyTransaction) => sum + Number(t.receipt?.processing_fee || 0), 0) || 0
-
-        const totalAmount = Number(order.total_price)
-        const preTaxAmount = totalAmount - taxAmount
-
+        // Create transaction object
         const transaction = {
-          date: new Date(order.created_at),
-          customerName: `${order.customer?.first_name || ''} ${order.customer?.last_name || ''}`.trim() || 'Anonymous',
-          description: `Shopify Order #${order.name}`,
-          products: lineItems,
-          amount: totalAmount,
-          preTaxAmount,
-          taxAmount,
-          processingFees,
-          type: 'sale',
           source: 'shopify',
-          isTaxable: true,
+          type: 'sale',
+          amount: order.total_price,
+          processingFee,
+          taxAmount,
           platformMetadata: {
-            platform: 'shopify' as const,
-            orderId,
-            orderNumber: order.name,
-            status: order.financial_status,
-            data: {
-              orderId: orderId,
-              orderNumber: order.name,
-              gateway: order.financial_status,
-              createdAt: order.created_at,
-              updatedAt: new Date().toISOString()
-            },
-            refunds: order.refunds?.map((refund: ShopifyRefund) => ({
-              id: refund.id,
-              amount: Number(refund.transactions[0]?.amount || 0),
-              reason: refund.note || 'No reason provided'
-            }))
+            platform: 'shopify',
+            orderId: orderId,
+            data: order
           },
-          status
+          lineItems: order.line_items.map(item => {
+            const product = productMap.get(item.product_id.toString())
+            return {
+              productId: product?._id,
+              name: item.title,
+              quantity: item.quantity,
+              price: item.price,
+              sku: item.sku,
+              variantId: item.variant_id?.toString(),
+              productName: product?.name || item.title,
+              category: product?.category || 'Uncategorized'
+            }
+          })
         }
+        console.log('Transaction object created')
 
         // Fire and forget the database operation
+        console.log('Starting transaction save operation...')
         const dbOperation = existingTransaction
           ? TransactionModel.findByIdAndUpdate(existingTransaction._id, transaction).exec()
           : TransactionModel.create(transaction)
@@ -279,6 +255,7 @@ export async function POST(request: Request) {
         })
 
         // Return success immediately
+        console.log('Returning success response')
         return NextResponse.json({ 
           success: true,
           message: `${existingTransaction ? 'Updating' : 'Creating'} transaction ${orderId}`
