@@ -9,32 +9,70 @@ const __dirname = path.dirname(__filename)
 // Load environment variables from .env.local
 config({ path: path.resolve(__dirname, '../.env.local') })
 
-if (!process.env.MONGODB_URI) {
-  throw new Error('Please define the MONGODB_URI environment variable inside .env.local')
+const MONGODB_URI = process.env.MONGODB_URI
+
+if (!MONGODB_URI) {
+  throw new Error('Please define the MONGODB_URI environment variable')
 }
 
-const uri = process.env.MONGODB_URI
-const options = {}
+// After validation, MONGODB_URI is guaranteed to be a string
+const uri: string = MONGODB_URI
 
-let client: MongoClient
-let clientPromise: Promise<MongoClient>
+interface ConnectionPool {
+  client: MongoClient | null
+  promise: Promise<MongoClient> | null
+  lastUsed: number
+}
 
-if (process.env.NODE_ENV === 'development') {
-  // In development mode, use a global variable so that the value
-  // is preserved across module reloads caused by HMR (Hot Module Replacement).
-  const globalWithMongo = global as typeof globalThis & {
-    _mongoClientPromise?: Promise<MongoClient>
+const pool: ConnectionPool = {
+  client: null,
+  promise: null,
+  lastUsed: 0
+}
+
+const options = {
+  maxPoolSize: 10,
+  minPoolSize: 5,
+  maxIdleTimeMS: 270000, // 4.5 minutes (below Vercel's 10s timeout)
+  waitQueueTimeoutMS: 5000,
+  connectTimeoutMS: 5000,
+}
+
+async function getClient(): Promise<MongoClient> {
+  const now = Date.now()
+
+  // If we have a client and it was used recently, reuse it
+  if (pool.client && (now - pool.lastUsed) < 270000) { // 4.5 minutes
+    pool.lastUsed = now
+    return pool.client
   }
 
-  if (!globalWithMongo._mongoClientPromise) {
-    client = new MongoClient(uri, options)
-    globalWithMongo._mongoClientPromise = client.connect()
+  // If we're already connecting, wait for that connection
+  if (pool.promise) {
+    console.log('Waiting for existing connection...')
+    const client = await pool.promise
+    pool.lastUsed = now
+    return client
   }
-  clientPromise = globalWithMongo._mongoClientPromise
-} else {
-  // In production mode, it's best to not use a global variable.
-  client = new MongoClient(uri, options)
-  clientPromise = client.connect()
+
+  console.log('Creating new MongoDB connection...')
+  // Create new connection
+  pool.promise = MongoClient.connect(uri, options)
+    .then(client => {
+      console.log('New MongoDB connection established')
+      pool.client = client
+      return client
+    })
+    .catch(err => {
+      console.error('MongoDB connection error:', err)
+      pool.promise = null
+      pool.client = null
+      throw err
+    })
+
+  const client = await pool.promise
+  pool.lastUsed = now
+  return client
 }
 
 /**
@@ -42,7 +80,7 @@ if (process.env.NODE_ENV === 'development') {
  * @returns Promise<Db> The database instance
  */
 export async function getDb(): Promise<Db> {
-  const client = await clientPromise
+  const client = await getClient()
   const dbName = process.env.MONGODB_DB
   
   if (!dbName) {
@@ -57,22 +95,16 @@ export async function getDb(): Promise<Db> {
  * @returns Promise<{ client: MongoClient, db: Db }> The client and database instances
  */
 export async function connectToDatabase() {
-  try {
-    const client = await clientPromise
-    const dbName = process.env.MONGODB_DB
-    
-    if (!dbName) {
-      throw new Error('MONGODB_DB environment variable is not defined')
-    }
-    
-    const db = client.db(dbName)
-    return { client, db }
-  } catch (error) {
-    console.error('Error connecting to the database:', error)
-    throw error
+  const client = await getClient()
+  const dbName = process.env.MONGODB_DB
+  
+  if (!dbName) {
+    throw new Error('MONGODB_DB environment variable is not defined')
   }
+  
+  return { client, db: client.db(dbName) }
 }
 
 // Export a module-scoped MongoClient promise. By doing this in a
 // separate module, the client can be shared across functions.
-export default clientPromise 
+export default getClient() 
