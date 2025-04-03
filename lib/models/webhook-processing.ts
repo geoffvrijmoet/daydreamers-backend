@@ -1,5 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose'
 
+type WebhookData = Record<string, unknown>
+
 export interface IWebhookProcessing extends Document {
   platform: 'shopify' | 'square'
   orderId: string
@@ -8,7 +10,7 @@ export interface IWebhookProcessing extends Document {
   attemptCount: number
   lastAttempt: Date
   error?: string
-  data: any
+  data: WebhookData
   createdAt: Date
   updatedAt: Date
 }
