@@ -170,11 +170,20 @@ export async function POST(request: Request) {
           amount: Number(order.total_price),
           taxAmount,
           processingFees,
+          type: 'sale',
+          source: 'shopify',
           platformMetadata: {
             platform: 'shopify' as const,
             orderId,
             orderNumber: order.name,
             status: order.financial_status,
+            data: {
+              orderId: orderId,
+              orderNumber: order.name,
+              gateway: order.financial_status,
+              createdAt: order.created_at,
+              updatedAt: new Date().toISOString()
+            },
             refunds: order.refunds?.map((refund: ShopifyRefund) => ({
               id: refund.id,
               amount: Number(refund.transactions[0]?.amount || 0),
