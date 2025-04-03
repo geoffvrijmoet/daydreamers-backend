@@ -24,6 +24,7 @@ interface ShopifyWebhookBody {
 
 // Explicitly set runtime to nodejs
 export const runtime = 'nodejs'
+export const maxDuration = 300 // 5 minute timeout
 
 // Verify Shopify webhook signature
 async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolean; body: string }> {
@@ -50,104 +51,100 @@ async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolea
   }
 }
 
-// Process webhook data in the background
+// Process webhook data
 async function processWebhookData(webhookId: string, topic: string, orderId: string, body: ShopifyWebhookBody) {
-  try {
-    const { db } = await connectToDatabase()
-    
-    // Create webhook processing record
-    const now = new Date()
-    await db.collection('webhook_processing').insertOne({
-      platform: 'shopify',
-      orderId,
-      topic,
-      webhookId,
-      status: 'processing',
-      attemptCount: 1,
-      lastAttempt: now,
-      data: body,
-      createdAt: now,
-      updatedAt: now
-    })
+  const { db } = await connectToDatabase()
+  console.log('Processing webhook data...')
+  
+  // Create webhook processing record
+  const now = new Date()
+  await db.collection('webhook_processing').insertOne({
+    platform: 'shopify',
+    orderId,
+    topic,
+    webhookId,
+    status: 'processing',
+    attemptCount: 1,
+    lastAttempt: now,
+    data: body,
+    createdAt: now,
+    updatedAt: now
+  })
 
-    // Process order data
-    if (topic === 'orders/create' || topic === 'orders/updated') {
-      const [existingTransaction, products] = await Promise.all([
-        TransactionModel.findOne({
-          'platformMetadata.orderId': orderId,
-          'platformMetadata.platform': 'shopify'
-        }),
-        ProductModel.find({
-          'platformMetadata.platform': 'shopify',
-          'platformMetadata.productId': { 
-            $in: body.line_items.map(item => item.product_id.toString()) 
-          }
-        }).lean()
-      ])
+  // Process order data
+  if (topic === 'orders/create' || topic === 'orders/updated') {
+    console.log('Processing order:', orderId)
+    const [existingTransaction, products] = await Promise.all([
+      TransactionModel.findOne({
+        'platformMetadata.orderId': orderId,
+        'platformMetadata.platform': 'shopify'
+      }),
+      ProductModel.find({
+        'platformMetadata.platform': 'shopify',
+        'platformMetadata.productId': { 
+          $in: body.line_items.map(item => item.product_id.toString()) 
+        }
+      }).lean()
+    ])
 
-      const productMap = new Map(products.map(p => [p.platformMetadata.productId, p]))
-      const processingFee = Number(body.total_price) * 0.029 + 0.30
-      const taxAmount = Number(body.total_tax) || 0
+    console.log(`Found ${products.length} products`)
+    const productMap = new Map(products.map(p => [p.platformMetadata.productId, p]))
+    const processingFee = Number(body.total_price) * 0.029 + 0.30
+    const taxAmount = Number(body.total_tax) || 0
 
-      const transaction = {
-        source: 'shopify',
-        type: 'sale',
-        amount: body.total_price,
-        processingFee,
-        taxAmount,
-        platformMetadata: {
-          platform: 'shopify',
-          orderId: orderId,
-          data: body
-        },
-        lineItems: body.line_items.map(item => {
-          const product = productMap.get(item.product_id.toString())
-          return {
-            productId: product?._id,
-            name: item.title,
-            quantity: item.quantity,
-            price: item.price,
-            sku: item.sku,
-            variantId: item.variant_id?.toString(),
-            productName: product?.name || item.title,
-            category: product?.category || 'Uncategorized'
-          }
-        })
-      }
-
-      if (existingTransaction) {
-        await TransactionModel.findByIdAndUpdate(existingTransaction._id, transaction)
-      } else {
-        await TransactionModel.create(transaction)
-      }
+    const transaction = {
+      source: 'shopify',
+      type: 'sale',
+      amount: body.total_price,
+      processingFee,
+      taxAmount,
+      platformMetadata: {
+        platform: 'shopify',
+        orderId: orderId,
+        data: body
+      },
+      lineItems: body.line_items.map(item => {
+        const product = productMap.get(item.product_id.toString())
+        return {
+          productId: product?._id,
+          name: item.title,
+          quantity: item.quantity,
+          price: item.price,
+          sku: item.sku,
+          variantId: item.variant_id?.toString(),
+          productName: product?.name || item.title,
+          category: product?.category || 'Uncategorized'
+        }
+      })
     }
 
-    // Mark webhook as completed
-    await db.collection('webhook_processing').updateOne(
-      { webhookId },
-      { $set: { status: 'completed', updatedAt: new Date() } }
-    )
-  } catch (error) {
-    console.error('Error processing webhook:', error)
-    // Mark webhook as failed
-    const { db } = await connectToDatabase()
-    await db.collection('webhook_processing').updateOne(
-      { webhookId },
-      { 
-        $set: { 
-          status: 'failed', 
-          error: error instanceof Error ? error.message : 'Unknown error',
-          updatedAt: new Date()
-        }
-      }
-    )
+    console.log('Saving transaction...')
+    if (existingTransaction) {
+      await TransactionModel.findByIdAndUpdate(existingTransaction._id, transaction)
+      console.log('Updated existing transaction')
+    } else {
+      await TransactionModel.create(transaction)
+      console.log('Created new transaction')
+    }
   }
+
+  // Mark webhook as completed
+  console.log('Marking webhook as completed')
+  await db.collection('webhook_processing').updateOne(
+    { webhookId },
+    { $set: { status: 'completed', updatedAt: new Date() } }
+  )
+  console.log('Webhook processing completed')
 }
 
 export async function POST(request: Request) {
+  let webhookId: string | null = null
+  let topic: string | null = null
+  let orderId: string | null = null
+  
   try {
-    const webhookId = request.headers.get('x-shopify-webhook-id')
-    const topic = request.headers.get('x-shopify-topic')
+    webhookId = request.headers.get('x-shopify-webhook-id')
+    topic = request.headers.get('x-shopify-topic')
     
     if (!webhookId || !topic) {
       return NextResponse.json({ error: 'Missing webhook ID or topic' }, { status: 400 })
@@ -159,15 +156,56 @@ export async function POST(request: Request) {
     }
 
     const body = JSON.parse(rawBody) as ShopifyWebhookBody
-    const orderId = body.id.toString()
+    orderId = body.id.toString()
 
-    // Start processing in the background without waiting
-    processWebhookData(webhookId, topic, orderId, body).catch(console.error)
+    // Create early response
+    const response = NextResponse.json({ success: true })
 
-    // Respond immediately after validation
-    return NextResponse.json({ success: true })
+    // Process webhook after sending response
+    processWebhookData(webhookId, topic, orderId, body)
+      .then(() => {
+        console.log('Webhook processing completed successfully')
+      })
+      .catch(async (error) => {
+        console.error('Error processing webhook:', error)
+        try {
+          const { db } = await connectToDatabase()
+          await db.collection('webhook_processing').updateOne(
+            { webhookId },
+            { 
+              $set: { 
+                status: 'failed', 
+                error: error instanceof Error ? error.message : 'Unknown error',
+                updatedAt: new Date()
+              }
+            }
+          )
+        } catch (dbError) {
+          console.error('Error updating webhook status:', dbError)
+        }
+      })
+
+    return response
   } catch (error) {
     console.error('Shopify webhook error:', error)
+    // Try to mark webhook as failed if we have the ID
+    if (webhookId) {
+      try {
+        const { db } = await connectToDatabase()
+        await db.collection('webhook_processing').updateOne(
+          { webhookId },
+          { 
+            $set: { 
+              status: 'failed', 
+              error: error instanceof Error ? error.message : 'Unknown error',
+              updatedAt: new Date()
+            }
+          }
+        )
+      } catch (dbError) {
+        console.error('Error updating webhook status:', dbError)
+      }
+    }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 } 
