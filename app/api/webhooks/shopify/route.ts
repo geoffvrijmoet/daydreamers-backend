@@ -126,48 +126,83 @@ export async function POST(request: Request) {
     await dbConnection
     console.log('Connected to database, checking for existing webhook processing record...')
 
-    // Check if we've already processed this webhook
-    webhookProcessing = await WebhookProcessingModel.findOne({ webhookId })
-    console.log('Existing webhook processing record:', webhookProcessing ? {
-      id: webhookProcessing._id,
-      status: webhookProcessing.status,
-      attemptCount: webhookProcessing.attemptCount
-    } : 'None found')
+    // Add timeout to database operations
+    const DB_TIMEOUT = 5000; // 5 seconds
 
-    if (webhookProcessing?.status === 'completed') {
-      console.log('Webhook already processed successfully, skipping')
-      return NextResponse.json({ message: 'Webhook already processed' })
-    }
+    try {
+      // Check if we've already processed this webhook with timeout
+      webhookProcessing = await Promise.race([
+        WebhookProcessingModel.findOne({ webhookId }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Database query timeout')), DB_TIMEOUT)
+        )
+      ]) as IWebhookProcessing | null;
 
-    // If no existing record, create one
-    if (!webhookProcessing) {
-      console.log('Creating new webhook processing record...')
-      webhookProcessing = await WebhookProcessingModel.create({
-        webhookId,
-        platform: 'shopify',
-        topic,
-        rawBody,
-        status: 'processing',
-        attemptCount: 1,
-        lastAttempt: new Date()
-      })
-      console.log('Created webhook processing record:', webhookProcessing ? {
+      console.log('Existing webhook processing record:', webhookProcessing ? {
         id: webhookProcessing._id,
         status: webhookProcessing.status,
         attemptCount: webhookProcessing.attemptCount
-      } : 'Failed to create')
-    } else {
-      // Update existing record
-      console.log('Updating existing webhook processing record...')
-      webhookProcessing.attemptCount += 1
-      webhookProcessing.lastAttempt = new Date()
-      webhookProcessing.status = 'processing'
-      await webhookProcessing.save()
-      console.log('Updated webhook processing record:', {
-        id: webhookProcessing._id,
-        status: webhookProcessing.status,
-        attemptCount: webhookProcessing.attemptCount
-      })
+      } : 'None found')
+
+      if (webhookProcessing?.status === 'completed') {
+        console.log('Webhook already processed successfully, skipping')
+        return NextResponse.json({ message: 'Webhook already processed' })
+      }
+
+      // If no existing record, create one with timeout
+      if (!webhookProcessing) {
+        console.log('Creating new webhook processing record...')
+        webhookProcessing = await Promise.race([
+          WebhookProcessingModel.create({
+            webhookId,
+            platform: 'shopify',
+            topic,
+            rawBody,
+            status: 'processing',
+            attemptCount: 1,
+            lastAttempt: new Date()
+          }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Database create timeout')), DB_TIMEOUT)
+          )
+        ]) as IWebhookProcessing;
+
+        console.log('Created webhook processing record:', webhookProcessing ? {
+          id: webhookProcessing._id,
+          status: webhookProcessing.status,
+          attemptCount: webhookProcessing.attemptCount
+        } : 'Failed to create')
+      } else {
+        // Update existing record with timeout
+        console.log('Updating existing webhook processing record...')
+        webhookProcessing.attemptCount += 1
+        webhookProcessing.lastAttempt = new Date()
+        webhookProcessing.status = 'processing'
+        await Promise.race([
+          webhookProcessing.save(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Database save timeout')), DB_TIMEOUT)
+          )
+        ])
+        console.log('Updated webhook processing record:', {
+          id: webhookProcessing._id,
+          status: webhookProcessing.status,
+          attemptCount: webhookProcessing.attemptCount
+        })
+      }
+    } catch (dbError) {
+      console.error('Database operation failed:', dbError)
+      // If we have a webhook processing record, update its status
+      if (webhookProcessing) {
+        webhookProcessing.status = 'failed'
+        webhookProcessing.error = dbError instanceof Error ? dbError.message : 'Database operation failed'
+        try {
+          await webhookProcessing.save()
+        } catch (saveError) {
+          console.error('Failed to save error status:', saveError)
+        }
+      }
+      return NextResponse.json({ error: 'Database operation failed' }, { status: 500 })
     }
 
     const body = JSON.parse(rawBody) as ShopifyOrder
