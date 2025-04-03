@@ -134,10 +134,29 @@ export async function POST(request: Request) {
     // Try to create a new processing record with a unique index on webhookId
     console.log('Attempting to create webhook processing record...')
     try {
-      const collection = WebhookProcessingModel.collection
-      console.log('Collection:', collection)
+      const mongoose = (await import('mongoose')).default
+      console.log('Connection state:', mongoose.connection.readyState)
+      
+      // Wait for connection to be ready
+      if (mongoose.connection.readyState !== 1) {
+        console.log('Waiting for connection to be ready...')
+        await new Promise<void>((resolve) => {
+          mongoose.connection.once('connected', () => {
+            console.log('Connection is now ready')
+            resolve()
+          })
+        })
+      }
+
+      // Get the native MongoDB collection
+      const db = mongoose.connection.db
+      if (!db) {
+        throw new Error('Database not initialized')
+      }
+      const collection = db.collection('webhook_processing')
+      console.log('Got native collection:', collection.collectionName)
+
       const now = new Date()
-      console.log('Now:', now)
       const result = await collection.insertOne({
         platform: 'shopify',
         orderId,
