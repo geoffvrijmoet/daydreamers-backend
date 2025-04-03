@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { HomeSyncButton } from './home-sync-button'
-import { toEasternTime, formatInEasternTime } from '@/lib/utils/dates'
+import { formatInEasternTime } from '@/lib/utils/dates'
 
 interface Transaction {
   _id: string
@@ -69,17 +69,23 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
 
   // Group transactions by date
   const groupedTransactions = transactions.reduce((groups, transaction) => {
-    const date = formatInEasternTime(toEasternTime(transaction.date), 'yyyy-MM-dd')
-    if (!groups[date]) {
-      groups[date] = []
+    // Format the date once and store both the display format and the group key
+    const easternDate = formatInEasternTime(transaction.date, 'yyyy-MM-dd')
+    const displayDate = formatInEasternTime(transaction.date, 'MMMM d, yyyy')
+    
+    if (!groups[easternDate]) {
+      groups[easternDate] = {
+        displayDate,
+        transactions: []
+      }
     }
-    groups[date].push(transaction)
+    groups[easternDate].transactions.push(transaction)
     return groups
-  }, {} as Record<string, Transaction[]>)
+  }, {} as Record<string, { displayDate: string, transactions: Transaction[] }>)
 
   // Calculate daily totals
-  const dailyTotals = Object.entries(groupedTransactions).reduce((totals, [date, transactions]) => {
-    const dayStats = transactions.reduce((acc, t) => {
+  const dailyTotals = Object.entries(groupedTransactions).reduce((totals, [date, group]) => {
+    const dayStats = group.transactions.reduce((acc, t) => {
       acc.revenue += t.amount
       acc.preTaxAmount += t.preTaxAmount || 0
       acc.salesTax += t.taxAmount || 0
@@ -110,11 +116,11 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
           <div className="space-y-8">
             {Object.entries(groupedTransactions)
               .sort((a, b) => b[0].localeCompare(a[0]))
-              .map(([date, transactions]) => (
+              .map(([date, group]) => (
                 <div key={date} className="space-y-4">
                   <div className="flex justify-between items-center">
                     <h3 className="text-lg font-semibold">
-                      {formatInEasternTime(toEasternTime(date), 'MMMM d, yyyy')}
+                      {group.displayDate}
                     </h3>
                     <div className="text-right text-sm">
                       <div className="text-gray-900">
@@ -138,7 +144,7 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                     </div>
                   </div>
                   <div className="space-y-2">
-                    {transactions.map((transaction) => (
+                    {group.transactions.map((transaction) => (
                       <div
                         key={transaction._id}
                         className="flex justify-between items-start p-3 bg-gray-50 rounded-lg"
@@ -153,7 +159,7 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                                 : 'Training'}
                             </span>
                             <span className="text-sm text-gray-500">
-                              {formatInEasternTime(toEasternTime(transaction.date), 'h:mm a')}
+                              {formatInEasternTime(transaction.date, 'h:mm a')}
                             </span>
                           </div>
                           {transaction.description && (
