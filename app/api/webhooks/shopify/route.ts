@@ -2,8 +2,10 @@ import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
 import TransactionModel from '@/lib/models/transaction'
 import ProductModel from '@/lib/models/Product'
+import WebhookProcessingModel, { IWebhookProcessing } from '@/lib/models/webhook-processing'
 import crypto from 'crypto'
 import { MongoClient, Db } from 'mongodb'
+import mongoose from 'mongoose'
 
 interface ShopifyTransaction {
   status: string
@@ -90,8 +92,17 @@ async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolea
   }
 }
 
+// Generate a unique webhook ID
+function generateWebhookId(request: Request): string {
+  const hmac = request.headers.get('x-shopify-hmac-sha256')
+  const topic = request.headers.get('x-shopify-topic')
+  const timestamp = Date.now()
+  return crypto.createHash('sha256').update(`${hmac}-${topic}-${timestamp}`).digest('hex')
+}
+
 export async function POST(request: Request) {
   let dbConnection: Promise<{ client: MongoClient; db: Db }> | undefined
+  let webhookProcessing: IWebhookProcessing | null = null
 
   try {
     // Start DB connection early but don't await it yet
@@ -104,7 +115,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
 
-    const body = JSON.parse(rawBody) as ShopifyOrder
+    const webhookId = generateWebhookId(request)
     const topic = request.headers.get('x-shopify-topic')
 
     if (!topic) {
@@ -113,6 +124,34 @@ export async function POST(request: Request) {
 
     // Now wait for DB connection
     await dbConnection
+
+    // Check if we've already processed this webhook
+    webhookProcessing = await WebhookProcessingModel.findOne({ webhookId })
+
+    if (webhookProcessing?.status === 'completed') {
+      return NextResponse.json({ message: 'Webhook already processed' })
+    }
+
+    // If no existing record, create one
+    if (!webhookProcessing) {
+      webhookProcessing = await WebhookProcessingModel.create({
+        webhookId,
+        platform: 'shopify',
+        topic,
+        rawBody,
+        status: 'processing',
+        attemptCount: 1,
+        lastAttempt: new Date()
+      })
+    } else {
+      // Update existing record
+      webhookProcessing.attemptCount += 1
+      webhookProcessing.lastAttempt = new Date()
+      webhookProcessing.status = 'processing'
+      await webhookProcessing.save()
+    }
+
+    const body = JSON.parse(rawBody) as ShopifyOrder
 
     switch (topic) {
       case 'orders/create':
@@ -126,7 +165,7 @@ export async function POST(request: Request) {
           TransactionModel.findOne({
             'platformMetadata.orderId': orderId,
             'platformMetadata.platform': 'shopify'
-          }),
+          }).lean() as Promise<{ _id: mongoose.Types.ObjectId } | null>,
           // Look up all products in parallel
           Promise.all(
             order.line_items.map(async (item: ShopifyLineItem) => {
@@ -145,6 +184,16 @@ export async function POST(request: Request) {
             })
           )
         ])
+
+        // Save progress
+        if (webhookProcessing) {
+          webhookProcessing.processedData = {
+            orderId,
+            existingTransaction: existingTransaction?._id,
+            lineItems
+          }
+          await webhookProcessing.save()
+        }
 
         // Determine transaction status
         let status: 'completed' | 'cancelled' | 'refunded' = 'completed'
@@ -199,10 +248,21 @@ export async function POST(request: Request) {
           : TransactionModel.create(transaction)
 
         // Don't wait for the operation to complete
-        dbOperation.then(() => {
+        dbOperation.then(async () => {
           console.log(existingTransaction ? 'Updated' : 'Created', 'Shopify transaction:', orderId)
-        }).catch(error => {
+          // Update webhook processing status
+          if (webhookProcessing) {
+            webhookProcessing.status = 'completed'
+            await webhookProcessing.save()
+          }
+        }).catch(async (error: unknown) => {
           console.error('Error saving transaction:', error)
+          // Update webhook processing status
+          if (webhookProcessing) {
+            webhookProcessing.status = 'failed'
+            webhookProcessing.error = error instanceof Error ? error.message : 'Unknown error occurred'
+            await webhookProcessing.save()
+          }
         })
 
         // Return success immediately
@@ -217,6 +277,14 @@ export async function POST(request: Request) {
     }
   } catch (error) {
     console.error('Shopify webhook error:', error)
+    
+    // If we have a webhook processing record, update its status
+    if (webhookProcessing) {
+      webhookProcessing.status = 'failed'
+      webhookProcessing.error = error instanceof Error ? error.message : 'Unknown error occurred'
+      await webhookProcessing.save()
+    }
+
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 } 
