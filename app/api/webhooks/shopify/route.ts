@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongodb'
-import mongoose from 'mongoose'
 import TransactionModel from '@/lib/models/transaction'
-import { IProduct } from '@/lib/models/Product'
+import ProductModel from '@/lib/models/Product'
 import crypto from 'crypto'
 import { MongoClient, Db } from 'mongodb'
 
@@ -131,8 +130,9 @@ export async function POST(request: Request) {
           // Look up all products in parallel
           Promise.all(
             order.line_items.map(async (item: ShopifyLineItem) => {
-              const product = await mongoose.model<IProduct>('Product').findOne({
-                'platformMetadata.shopifyId': item.product_id.toString()
+              const product = await ProductModel.findOne({
+                'platformMetadata.platform': 'shopify',
+                'platformMetadata.productId': item.product_id.toString()
               })
               return {
                 productId: product?._id,
