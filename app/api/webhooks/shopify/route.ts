@@ -102,6 +102,7 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
     console.error('MONGODB_URI environment variable is not defined!');
   }
   
+  console.log(`[processWebhookData] Starting processing for webhook ${webhookId}, order ${orderId}`);
   console.log('Connecting to database...');
   let client = null;
   try {
@@ -109,10 +110,11 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
     client = mongoClient;
     console.log('Connected to database successfully!');
     
-    console.log('Processing webhook data...')
+    console.log(`[processWebhookData] Processing webhook data for ${topic}...`);
     
     // Create webhook processing record
     const now = new Date()
+    console.log(`[processWebhookData] Creating webhook_processing record for ${webhookId}`);
     await db.collection('webhook_processing').insertOne({
       platform: 'shopify',
       orderId,
@@ -125,28 +127,49 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
       createdAt: now,
       updatedAt: now
     })
+    console.log(`[processWebhookData] Created webhook_processing record`);
 
     // Process order data
     if (topic === 'orders/create' || topic === 'orders/updated') {
-      console.log('Processing order:', orderId)
+      console.log(`[processWebhookData] Processing order: ${orderId}`);
       
       // Use the direct db connection for these operations
+      console.log(`[processWebhookData] Looking for existing transaction with orderId: ${orderId}`);
       const existingTransaction = await db.collection('transactions').findOne({
         'platformMetadata.orderId': orderId,
         'platformMetadata.platform': 'shopify'
       });
       
+      if (existingTransaction) {
+        console.log(`[processWebhookData] Found existing transaction with _id: ${existingTransaction._id}`);
+      } else {
+        console.log(`[processWebhookData] No existing transaction found, will create new`);
+      }
+      
+      console.log(`[processWebhookData] Looking for products for line items`);
+      const productIds = body.line_items.map(item => item.product_id.toString());
+      console.log(`[processWebhookData] Product IDs to look for: ${productIds.join(', ')}`);
+      
       const products = await db.collection('products').find({
         'platformMetadata.platform': 'shopify',
         'platformMetadata.productId': { 
-          $in: body.line_items.map(item => item.product_id.toString()) 
+          $in: productIds
         }
       }).toArray();
 
-      console.log(`Found ${products.length} products`)
-      const productMap = new Map(products.map(p => [p.platformMetadata.productId, p]))
-      const processingFee = Number(body.total_price) * 0.029 + 0.30
-      const taxAmount = Number(body.total_tax) || 0
+      console.log(`[processWebhookData] Found ${products.length} products out of ${productIds.length} product IDs`);
+      
+      if (products.length < productIds.length) {
+        console.log(`[processWebhookData] Missing products: ${productIds.filter(id => 
+          !products.some(p => p.platformMetadata.productId === id)
+        ).join(', ')}`);
+      }
+      
+      const productMap = new Map(products.map(p => [p.platformMetadata.productId, p]));
+      const processingFee = Number(body.total_price) * 0.029 + 0.30;
+      const taxAmount = Number(body.total_tax) || 0;
+
+      console.log(`[processWebhookData] Preparing transaction object with amount: ${body.total_price}, tax: ${taxAmount}`);
 
       const transaction = {
         source: 'shopify',
@@ -160,8 +183,8 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
           data: body
         },
         lineItems: body.line_items.map(item => {
-          const product = productMap.get(item.product_id.toString())
-          return {
+          const product = productMap.get(item.product_id.toString());
+          const lineItem = {
             productId: product?._id,
             name: item.title,
             quantity: item.quantity,
@@ -170,46 +193,51 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
             variantId: item.variant_id?.toString(),
             productName: product?.name || item.title,
             category: product?.category || 'Uncategorized'
-          }
+          };
+          console.log(`[processWebhookData] Line item: ${lineItem.quantity}x ${lineItem.name} (${lineItem.sku}), product ID: ${lineItem.productId || 'not mapped'}`);
+          return lineItem;
         }),
-        updatedAt: new Date()
+        updatedAt: new Date() // Explicitly set updatedAt field
       }
 
-      console.log('Saving transaction...')
+      console.log(`[processWebhookData] Saving transaction...`);
       if (existingTransaction) {
-        await db.collection('transactions').updateOne(
+        console.log(`[processWebhookData] Updating existing transaction ${existingTransaction._id}`);
+        const updateResult = await db.collection('transactions').updateOne(
           { _id: existingTransaction._id },
           { 
             $set: transaction,
-            $currentDate: { updatedAt: true }
+            $currentDate: { updatedAt: true } // Ensure updatedAt is set to the current date
           }
         );
-        console.log('Updated existing transaction')
+        console.log(`[processWebhookData] Updated existing transaction. ModifiedCount: ${updateResult.modifiedCount}`);
       } else {
+        // Include createdAt for new transactions
         const newTransaction = {
           ...transaction,
           createdAt: new Date()
         };
-        await db.collection('transactions').insertOne(newTransaction);
-        console.log('Created new transaction')
+        console.log(`[processWebhookData] Inserting new transaction`);
+        const insertResult = await db.collection('transactions').insertOne(newTransaction);
+        console.log(`[processWebhookData] Created new transaction with _id: ${insertResult.insertedId}`);
       }
     }
 
     // Mark webhook as completed
-    console.log('Marking webhook as completed')
+    console.log(`[processWebhookData] Marking webhook ${webhookId} as completed`);
     await db.collection('webhook_processing').updateOne(
       { webhookId },
       { $set: { status: 'completed', updatedAt: new Date() } }
-    )
-    console.log('Webhook processing completed')
+    );
+    console.log(`[processWebhookData] Webhook processing completed`);
   } catch (error) {
-    console.error('Error in processWebhookData:', error)
-    throw error
+    console.error(`[processWebhookData] Error in processWebhookData:`, error);
+    throw error;
   } finally {
     if (client) {
-      console.log('Closing MongoDB connection')
-      await client.close(true)
-      console.log('MongoDB connection closed')
+      console.log(`[processWebhookData] Closing MongoDB connection`);
+      await client.close(true);
+      console.log(`[processWebhookData] MongoDB connection closed`);
     }
   }
 }
@@ -228,6 +256,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing webhook ID or topic' }, { status: 400 })
     }
 
+    console.log(`Processing webhook ID: ${webhookId}, topic: ${topic}`);
+    
     const { isValid, body: rawBody } = await verifyShopifyWebhook(request)
     if (!isValid) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
@@ -235,6 +265,7 @@ export async function POST(request: Request) {
 
     const body = JSON.parse(rawBody) as ShopifyWebhookBody
     orderId = body.id.toString()
+    console.log(`Verified Shopify webhook for order ID: ${orderId}`);
 
     // Verify MongoDB connection BEFORE returning success
     // This ensures we only return 200 if we can actually connect
@@ -267,42 +298,49 @@ export async function POST(request: Request) {
     // Only now do we return success and process in the background
     const response = NextResponse.json({ success: true })
 
-    // Process webhook after sending response
-    processWebhookData(webhookId, topic, orderId, body)
-      .then(() => {
-        console.log('Webhook processing completed successfully')
-      })
-      .catch(async (error) => {
-        console.error('Error processing webhook:', error)
-        try {
-          // Log MongoDB URI preview before connecting
-          if (process.env.MONGODB_URI) {
-            console.log('MongoDB URI preview (error handler):', maskMongoURI(process.env.MONGODB_URI));
-          }
-          
-          console.log('Connecting to database for error handling...');
-          const { client, db } = await connectToMongoDBDirect();
-          console.log('Connected to database successfully in error handler!');
-          
+    // Process webhook after sending response - make sure this executes
+    console.log('Starting asynchronous webhook processing...');
+    
+    // Use setTimeout to make sure this runs asynchronously
+    setTimeout(() => {
+      console.log(`Beginning async processing of webhook ${webhookId || 'unknown'} for order ${orderId || 'unknown'}`);
+      processWebhookData(webhookId!, topic!, orderId!, body)
+        .then(() => {
+          console.log(`Webhook processing completed successfully for order ${orderId || 'unknown'}`)
+        })
+        .catch(async (error) => {
+          console.error(`Error processing webhook for order ${orderId || 'unknown'}:`, error)
           try {
-            await db.collection('webhook_processing').updateOne(
-              { webhookId },
-              { 
-                $set: { 
-                  status: 'failed', 
-                  error: error instanceof Error ? error.message : 'Unknown error',
-                  updatedAt: new Date()
+            // Log MongoDB URI preview before connecting
+            if (process.env.MONGODB_URI) {
+              console.log('MongoDB URI preview (error handler):', maskMongoURI(process.env.MONGODB_URI));
+            }
+            
+            console.log('Connecting to database for error handling...');
+            const { client, db } = await connectToMongoDBDirect();
+            console.log('Connected to database successfully in error handler!');
+            
+            try {
+              await db.collection('webhook_processing').updateOne(
+                { webhookId },
+                { 
+                  $set: { 
+                    status: 'failed', 
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    updatedAt: new Date()
+                  }
                 }
-              }
-            )
-          } finally {
-            await client.close(true)
-            console.log('MongoDB connection closed in error handler')
+              )
+              console.log(`Updated webhook_processing record to failed status for webhook ${webhookId}`);
+            } finally {
+              await client.close(true)
+              console.log('MongoDB connection closed in error handler')
+            }
+          } catch (dbError) {
+            console.error('Error updating webhook status:', dbError)
           }
-        } catch (dbError) {
-          console.error('Error updating webhook status:', dbError)
-        }
-      })
+        });
+    }, 10); // tiny delay to ensure response is sent first
 
     return response
   } catch (error) {
