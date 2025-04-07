@@ -112,22 +112,38 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
     
     console.log(`[processWebhookData] Processing webhook data for ${topic}...`);
     
-    // Create webhook processing record
+    // Create or update webhook processing record
     const now = new Date()
-    console.log(`[processWebhookData] Creating webhook_processing record for ${webhookId}`);
-    await db.collection('webhook_processing').insertOne({
+    console.log(`[processWebhookData] Upserting webhook_processing record for ${webhookId}`);
+    
+    const webhookFilter = {
       platform: 'shopify',
       orderId,
-      topic,
-      webhookId,
-      status: 'processing',
-      attemptCount: 1,
-      lastAttempt: now,
-      data: body,
-      createdAt: now,
-      updatedAt: now
-    })
-    console.log(`[processWebhookData] Created webhook_processing record`);
+      topic
+    };
+    
+    const webhookUpdate = {
+      $set: {
+        webhookId,
+        status: 'processing',
+        data: body,
+        updatedAt: now,
+        lastAttempt: now
+      },
+      $setOnInsert: {
+        createdAt: now
+      },
+      $inc: {
+        attemptCount: 1
+      }
+    };
+    
+    await db.collection('webhook_processing').updateOne(
+      webhookFilter,
+      webhookUpdate,
+      { upsert: true }
+    );
+    console.log(`[processWebhookData] Upserted webhook_processing record`);
 
     // Process order data
     if (topic === 'orders/create' || topic === 'orders/updated') {
@@ -226,12 +242,41 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
     // Mark webhook as completed
     console.log(`[processWebhookData] Marking webhook ${webhookId} as completed`);
     await db.collection('webhook_processing').updateOne(
-      { webhookId },
-      { $set: { status: 'completed', updatedAt: new Date() } }
+      webhookFilter,
+      { 
+        $set: { 
+          status: 'completed', 
+          updatedAt: new Date(),
+          completedAt: new Date()
+        }
+      }
     );
     console.log(`[processWebhookData] Webhook processing completed`);
   } catch (error) {
     console.error(`[processWebhookData] Error in processWebhookData:`, error);
+    
+    // Try to mark the webhook as failed if we have a connection
+    if (client) {
+      try {
+        await client.db().collection('webhook_processing').updateOne(
+          {
+            platform: 'shopify',
+            orderId,
+            topic
+          },
+          {
+            $set: {
+              status: 'failed',
+              error: error instanceof Error ? error.message : 'Unknown error',
+              updatedAt: new Date()
+            }
+          }
+        );
+      } catch (updateError) {
+        console.error('[processWebhookData] Failed to update webhook status to failed:', updateError);
+      }
+    }
+    
     throw error;
   } finally {
     if (client) {
