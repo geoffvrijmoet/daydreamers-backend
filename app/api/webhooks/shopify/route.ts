@@ -105,6 +105,14 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
   console.log(`[processWebhookData] Starting processing for webhook ${webhookId}, order ${orderId}`);
   console.log('Connecting to database...');
   let client = null;
+  
+  // Define webhook filter at the top level so it's available throughout the function
+  const webhookFilter = {
+    platform: 'shopify' as const,
+    orderId,
+    topic
+  };
+  
   try {
     const { client: mongoClient, db } = await connectToMongoDBDirect();
     client = mongoClient;
@@ -113,30 +121,25 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
     console.log(`[processWebhookData] Processing webhook data for ${topic}...`);
     
     // Create or update webhook processing record
-    const now = new Date()
     console.log(`[processWebhookData] Upserting webhook_processing record for ${webhookId}`);
-    
-    const webhookFilter = {
-      platform: 'shopify',
-      orderId,
-      topic
-    };
     
     const webhookUpdate = {
       $set: {
         webhookId,
         status: 'processing',
-        data: body,
-        updatedAt: now,
-        lastAttempt: now
+        data: body
       },
       $setOnInsert: {
-        createdAt: now
+        createdAt: new Date()
+      },
+      $currentDate: {
+        lastAttempt: { $type: "date" as const },
+        updatedAt: { $type: "date" as const }
       },
       $inc: {
         attemptCount: 1
       }
-    };
+    } as const;
     
     await db.collection('webhook_processing').updateOne(
       webhookFilter,
@@ -212,8 +215,7 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
           };
           console.log(`[processWebhookData] Line item: ${lineItem.quantity}x ${lineItem.name} (${lineItem.sku}), product ID: ${lineItem.productId || 'not mapped'}`);
           return lineItem;
-        }),
-        updatedAt: new Date() // Explicitly set updatedAt field
+        })
       }
 
       console.log(`[processWebhookData] Saving transaction...`);
@@ -223,7 +225,7 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
           { _id: existingTransaction._id },
           { 
             $set: transaction,
-            $currentDate: { updatedAt: true } // Ensure updatedAt is set to the current date
+            $currentDate: { updatedAt: { $type: "date" } }
           }
         );
         console.log(`[processWebhookData] Updated existing transaction. ModifiedCount: ${updateResult.modifiedCount}`);
@@ -231,7 +233,8 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
         // Include createdAt for new transactions
         const newTransaction = {
           ...transaction,
-          createdAt: new Date()
+          createdAt: new Date(),
+          updatedAt: new Date()
         };
         console.log(`[processWebhookData] Inserting new transaction`);
         const insertResult = await db.collection('transactions').insertOne(newTransaction);
@@ -245,9 +248,11 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
       webhookFilter,
       { 
         $set: { 
-          status: 'completed', 
-          updatedAt: new Date(),
-          completedAt: new Date()
+          status: 'completed'
+        },
+        $currentDate: { 
+          updatedAt: { $type: "date" as const },
+          completedAt: { $type: "date" as const }
         }
       }
     );
@@ -259,16 +264,14 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
     if (client) {
       try {
         await client.db().collection('webhook_processing').updateOne(
-          {
-            platform: 'shopify',
-            orderId,
-            topic
-          },
+          webhookFilter,
           {
             $set: {
               status: 'failed',
-              error: error instanceof Error ? error.message : 'Unknown error',
-              updatedAt: new Date()
+              error: error instanceof Error ? error.message : 'Unknown error'
+            },
+            $currentDate: {
+              updatedAt: { $type: "date" as const }
             }
           }
         );
