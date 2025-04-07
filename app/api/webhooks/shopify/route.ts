@@ -210,6 +210,7 @@ export async function POST(request: Request) {
   let webhookId: string | null = null
   let topic: string | null = null
   let orderId: string | null = null
+  let mongoClient = null
   
   try {
     webhookId = request.headers.get('x-shopify-webhook-id')
@@ -227,7 +228,35 @@ export async function POST(request: Request) {
     const body = JSON.parse(rawBody) as ShopifyWebhookBody
     orderId = body.id.toString()
 
-    // Create early response
+    // Verify MongoDB connection BEFORE returning success
+    // This ensures we only return 200 if we can actually connect
+    try {
+      // Log MongoDB URI preview before connecting
+      if (process.env.MONGODB_URI) {
+        console.log('MongoDB URI preview:', maskMongoURI(process.env.MONGODB_URI));
+      } else {
+        console.error('MONGODB_URI environment variable is not defined!');
+        return NextResponse.json({ error: 'MongoDB URI not configured' }, { status: 500 })
+      }
+      
+      console.log('Connecting to database for connection test...');
+      const { client } = await connectToMongoDBDirect();
+      mongoClient = client;
+      console.log('MongoDB connection test successful');
+      
+      // NOW we can return a success response
+      // Close this test connection since we'll create a new one for the actual processing
+      await client.close(true);
+      console.log('Test connection closed, returning 200 success');
+    } catch (connectionError) {
+      console.error('MongoDB connection test failed:', connectionError);
+      return NextResponse.json(
+        { error: 'Failed to connect to database', details: connectionError instanceof Error ? connectionError.message : 'Unknown error' }, 
+        { status: 503 }
+      );
+    }
+
+    // Only now do we return success and process in the background
     const response = NextResponse.json({ success: true })
 
     // Process webhook after sending response
@@ -302,5 +331,14 @@ export async function POST(request: Request) {
       }
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  } finally {
+    if (mongoClient) {
+      try {
+        await mongoClient.close(true)
+        console.log('Cleaned up test MongoDB connection')
+      } catch (err) {
+        console.error('Error closing MongoDB client:', err)
+      }
+    }
   }
 } 
