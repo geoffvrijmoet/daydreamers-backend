@@ -26,6 +26,25 @@ interface ShopifyWebhookBody {
 export const runtime = 'nodejs'
 export const maxDuration = 60 // 1 minute timeout
 
+// Helper function to mask MongoDB URI for logging
+function maskMongoURI(uri: string): string {
+  try {
+    // Extract just enough information for debugging without exposing credentials
+    const urlObj = new URL(uri);
+    const host = urlObj.host;
+    const protocol = urlObj.protocol;
+    const dbName = urlObj.pathname.substring(1); // Remove leading slash
+    
+    // Mask the username and password
+    const hasCredentials = urlObj.username.length > 0;
+    
+    return `${protocol}//${hasCredentials ? '***:***@' : ''}${host}/${dbName.length > 0 ? dbName : '(no database specified)'}`;
+  } catch (error) {
+    console.error('Error parsing MongoDB URI:', error);
+    return 'Invalid MongoDB URI format';
+  }
+}
+
 // Verify Shopify webhook signature
 async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolean; body: string }> {
   const hmac = request.headers.get('x-shopify-hmac-sha256')
@@ -53,7 +72,17 @@ async function verifyShopifyWebhook(request: Request): Promise<{ isValid: boolea
 
 // Process webhook data
 async function processWebhookData(webhookId: string, topic: string, orderId: string, body: ShopifyWebhookBody) {
+  // Log MongoDB URI preview before connecting
+  if (process.env.MONGODB_URI) {
+    console.log('MongoDB URI preview:', maskMongoURI(process.env.MONGODB_URI));
+  } else {
+    console.error('MONGODB_URI environment variable is not defined!');
+  }
+  
+  console.log('Connecting to database...');
   const { db } = await connectToDatabase()
+  console.log('Connected to database successfully!');
+  
   console.log('Processing webhook data...')
   
   // Create webhook processing record
@@ -169,7 +198,15 @@ export async function POST(request: Request) {
       .catch(async (error) => {
         console.error('Error processing webhook:', error)
         try {
+          // Log MongoDB URI preview before connecting
+          if (process.env.MONGODB_URI) {
+            console.log('MongoDB URI preview (error handler):', maskMongoURI(process.env.MONGODB_URI));
+          }
+          
+          console.log('Connecting to database (error handler)...');
           const { db } = await connectToDatabase()
+          console.log('Connected to database successfully in error handler!');
+          
           await db.collection('webhook_processing').updateOne(
             { webhookId },
             { 
@@ -191,7 +228,15 @@ export async function POST(request: Request) {
     // Try to mark webhook as failed if we have the ID
     if (webhookId) {
       try {
+        // Log MongoDB URI preview before connecting
+        if (process.env.MONGODB_URI) {
+          console.log('MongoDB URI preview (main error handler):', maskMongoURI(process.env.MONGODB_URI));
+        }
+        
+        console.log('Connecting to database (main error handler)...');
         const { db } = await connectToDatabase()
+        console.log('Connected to database successfully in main error handler!');
+        
         await db.collection('webhook_processing').updateOne(
           { webhookId },
           { 
