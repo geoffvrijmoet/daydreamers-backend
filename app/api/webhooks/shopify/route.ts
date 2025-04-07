@@ -246,7 +246,6 @@ export async function POST(request: Request) {
   let webhookId: string | null = null
   let topic: string | null = null
   let orderId: string | null = null
-  let mongoClient = null
   
   try {
     webhookId = request.headers.get('x-shopify-webhook-id')
@@ -267,124 +266,46 @@ export async function POST(request: Request) {
     orderId = body.id.toString()
     console.log(`Verified Shopify webhook for order ID: ${orderId}`);
 
-    // Verify MongoDB connection BEFORE returning success
-    // This ensures we only return 200 if we can actually connect
+    // Process the webhook data before sending response
     try {
-      // Log MongoDB URI preview before connecting
-      if (process.env.MONGODB_URI) {
-        console.log('MongoDB URI preview:', maskMongoURI(process.env.MONGODB_URI));
-      } else {
-        console.error('MONGODB_URI environment variable is not defined!');
-        return NextResponse.json({ error: 'MongoDB URI not configured' }, { status: 500 })
+      console.log('Processing webhook data synchronously...');
+      await processWebhookData(webhookId, topic, orderId, body);
+      console.log('Webhook processing completed successfully');
+      
+      return NextResponse.json({ success: true });
+    } catch (processingError) {
+      console.error('Error processing webhook:', processingError);
+      
+      // If we have a connection error, return 503
+      if (processingError instanceof Error && 
+          (processingError.message.includes('connect') || 
+           processingError.message.includes('timeout'))) {
+        return NextResponse.json(
+          { 
+            error: 'Database connection failed', 
+            details: processingError.message 
+          }, 
+          { status: 503 }
+        );
       }
       
-      console.log('Connecting to database for connection test...');
-      const { client } = await connectToMongoDBDirect();
-      mongoClient = client;
-      console.log('MongoDB connection test successful');
-      
-      // NOW we can return a success response
-      // Close this test connection since we'll create a new one for the actual processing
-      await client.close(true);
-      console.log('Test connection closed, returning 200 success');
-    } catch (connectionError) {
-      console.error('MongoDB connection test failed:', connectionError);
+      // For other errors, return 500
       return NextResponse.json(
-        { error: 'Failed to connect to database', details: connectionError instanceof Error ? connectionError.message : 'Unknown error' }, 
-        { status: 503 }
+        { 
+          error: 'Webhook processing failed', 
+          details: processingError instanceof Error ? processingError.message : 'Unknown error'
+        }, 
+        { status: 500 }
       );
     }
-
-    // Only now do we return success and process in the background
-    const response = NextResponse.json({ success: true })
-
-    // Process webhook after sending response - make sure this executes
-    console.log('Starting asynchronous webhook processing...');
-    
-    // Use setTimeout to make sure this runs asynchronously
-    setTimeout(() => {
-      console.log(`Beginning async processing of webhook ${webhookId || 'unknown'} for order ${orderId || 'unknown'}`);
-      processWebhookData(webhookId!, topic!, orderId!, body)
-        .then(() => {
-          console.log(`Webhook processing completed successfully for order ${orderId || 'unknown'}`)
-        })
-        .catch(async (error) => {
-          console.error(`Error processing webhook for order ${orderId || 'unknown'}:`, error)
-          try {
-            // Log MongoDB URI preview before connecting
-            if (process.env.MONGODB_URI) {
-              console.log('MongoDB URI preview (error handler):', maskMongoURI(process.env.MONGODB_URI));
-            }
-            
-            console.log('Connecting to database for error handling...');
-            const { client, db } = await connectToMongoDBDirect();
-            console.log('Connected to database successfully in error handler!');
-            
-            try {
-              await db.collection('webhook_processing').updateOne(
-                { webhookId },
-                { 
-                  $set: { 
-                    status: 'failed', 
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    updatedAt: new Date()
-                  }
-                }
-              )
-              console.log(`Updated webhook_processing record to failed status for webhook ${webhookId}`);
-            } finally {
-              await client.close(true)
-              console.log('MongoDB connection closed in error handler')
-            }
-          } catch (dbError) {
-            console.error('Error updating webhook status:', dbError)
-          }
-        });
-    }, 10); // tiny delay to ensure response is sent first
-
-    return response
   } catch (error) {
-    console.error('Shopify webhook error:', error)
-    // Try to mark webhook as failed if we have the ID
-    if (webhookId) {
-      try {
-        // Log MongoDB URI preview before connecting
-        if (process.env.MONGODB_URI) {
-          console.log('MongoDB URI preview (main error handler):', maskMongoURI(process.env.MONGODB_URI));
-        }
-        
-        console.log('Connecting to database (main error handler)...');
-        const { client, db } = await connectToMongoDBDirect();
-        console.log('Connected to database successfully in main error handler!');
-        
-        try {
-          await db.collection('webhook_processing').updateOne(
-            { webhookId },
-            { 
-              $set: { 
-                status: 'failed', 
-                error: error instanceof Error ? error.message : 'Unknown error',
-                updatedAt: new Date()
-              }
-            }
-          )
-        } finally {
-          await client.close(true)
-          console.log('MongoDB connection closed in main error handler')
-        }
-      } catch (dbError) {
-        console.error('Error updating webhook status:', dbError)
-      }
-    }
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
-  } finally {
-    if (mongoClient) {
-      try {
-        await mongoClient.close(true)
-        console.log('Cleaned up test MongoDB connection')
-      } catch (err) {
-        console.error('Error closing MongoDB client:', err)
-      }
-    }
+    console.error('Shopify webhook error:', error);
+    return NextResponse.json(
+      { 
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 
+      { status: 500 }
+    );
   }
 } 
