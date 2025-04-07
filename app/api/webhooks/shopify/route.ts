@@ -171,18 +171,26 @@ async function processWebhookData(webhookId: string, topic: string, orderId: str
             productName: product?.name || item.title,
             category: product?.category || 'Uncategorized'
           }
-        })
+        }),
+        updatedAt: new Date()
       }
 
       console.log('Saving transaction...')
       if (existingTransaction) {
         await db.collection('transactions').updateOne(
           { _id: existingTransaction._id },
-          { $set: transaction }
+          { 
+            $set: transaction,
+            $currentDate: { updatedAt: true }
+          }
         );
         console.log('Updated existing transaction')
       } else {
-        await db.collection('transactions').insertOne(transaction);
+        const newTransaction = {
+          ...transaction,
+          createdAt: new Date()
+        };
+        await db.collection('transactions').insertOne(newTransaction);
         console.log('Created new transaction')
       }
     }
