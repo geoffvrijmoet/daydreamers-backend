@@ -139,7 +139,7 @@ function ProductList({ products, matches, onSearch }: {
                       <div>
                         <h4 className="font-medium">{product.name}</h4>
                         <p className="text-sm text-gray-500">SKU: {product.sku}</p>
-                        <p className="text-sm text-gray-500">Price: ${product.price.toFixed(2)}</p>
+                        <p className="text-sm text-gray-500">Price: ${product.price?.toFixed(2)}</p>
                       </div>
                       {Object.values(matches).includes(product._id || product.id) && (
                         <div className="text-sm text-green-600">

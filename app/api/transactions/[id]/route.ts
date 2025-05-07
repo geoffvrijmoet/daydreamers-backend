@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
+import { ObjectId } from 'mongodb'
 
 export async function PUT(
   request: NextRequest,
@@ -139,6 +140,44 @@ export async function PATCH(
     console.error('Error updating transaction:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to update transaction' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    await connectToDatabase();
+    const { id } = params;
+
+    if (!id || !ObjectId.isValid(id)) {
+      return NextResponse.json(
+        { error: 'Invalid transaction ID format' },
+        { status: 400 }
+      );
+    }
+
+    const result = await mongoose.model('Transaction').deleteOne({ 
+      _id: new ObjectId(id)
+    });
+
+    if (result.deletedCount === 0) {
+      console.log(`[API] Transaction not found for deletion: ${id}`);
+      return NextResponse.json(
+        { error: 'Transaction not found' },
+        { status: 404 }
+      );
+    }
+
+    console.log(`[API] Successfully deleted transaction: ${id}`);
+    return NextResponse.json({ success: true, message: 'Transaction deleted successfully' });
+  } catch (error) {
+    console.error('[API] Error deleting transaction:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to delete transaction' },
       { status: 500 }
     );
   }

@@ -20,6 +20,7 @@ interface IBaseTransaction extends Document {
   createdAt: Date;
   updatedAt: Date;
   platformMetadata?: IPlatformMetadata;
+  emailId?: string; // Gmail message ID for Amex transactions
 }
 
 interface ILineItem {
@@ -84,11 +85,17 @@ interface ISaleTransaction extends IBaseTransaction {
 // Expense-specific interface
 interface IExpenseTransaction extends IBaseTransaction {
   type: 'expense';
-  expenseType: string;
-  expenseLabel: string;
-  supplier?: string;
-  supplierOrderNumber?: string;
-  paymentProcessing?: IPaymentProcessing;
+  merchant: string;
+  category?: string;
+  isRecurring?: boolean;
+  // Optional products from parsed invoice emails
+  products?: Array<{
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+    costDiscount: number;
+  }>;
 }
 
 // Training-specific interface
@@ -121,6 +128,7 @@ const BaseTransactionSchema = new Schema<IBaseTransaction>({
   paymentMethod: { type: String },
   notes: { type: String },
   platformMetadata: PlatformMetadataSchema,
+  emailId: { type: String }, // Gmail message ID for Amex transactions
 }, {
   timestamps: true,
   discriminatorKey: 'type'
@@ -134,6 +142,15 @@ const LineItemSchema = new Schema<ILineItem>({
   unitPrice: { type: Number, required: true },
   totalPrice: { type: Number, required: true },
   isTaxable: { type: Boolean, required: true }
+});
+
+// Schema for products from emails
+const EmailProductSchema = new Schema({
+  name: { type: String, required: true },
+  quantity: { type: Number, required: true },
+  unitPrice: { type: Number, required: true },
+  totalPrice: { type: Number, required: true },
+  costDiscount: { type: Number, default: 0 }
 });
 
 // Payment processing schema
@@ -165,11 +182,11 @@ const SaleTransactionSchema = new Schema<ISaleTransaction>({
 
 // Expense transaction schema
 const ExpenseTransactionSchema = new Schema<IExpenseTransaction>({
-  expenseType: { type: String, required: true },
-  expenseLabel: { type: String, required: true },
-  supplier: { type: String },
-  supplierOrderNumber: { type: String },
-  paymentProcessing: PaymentProcessingSchema
+  merchant: { type: String, required: true },
+  category: { type: String },
+  isRecurring: { type: Boolean },
+  // Add products field for invoice email products
+  products: [EmailProductSchema]
 });
 
 // Training transaction schema

@@ -12,8 +12,15 @@ export async function GET(
     
     console.log('[API] Looking up product by Square ID:', params.id);
     
-    // Try to find the product by squareId
-    const product = await (mongoose.connection.db as Db).collection('products').findOne({ squareId: params.id })
+    // Try to find the product by squareId inside platformMetadata 
+    const product = await (mongoose.connection.db as Db).collection('products').findOne({
+      'platformMetadata': {
+        $elemMatch: {
+          'platform': 'square',
+          'productId': params.id
+        }
+      }
+    })
     
     if (!product) {
       console.log('[API] No product found with Square ID:', params.id);
@@ -23,11 +30,16 @@ export async function GET(
       )
     }
 
+    // Find the Square metadata entry
+    const squareMetadata = product.platformMetadata?.find(
+      (meta: { platform: string }) => meta.platform === 'square'
+    )
+
     console.log('[API] Found product:', {
       id: product._id,
       name: product.name,
       sku: product.sku,
-      squareId: product.squareId
+      squareId: squareMetadata?.productId
     });
 
     return NextResponse.json({ product })

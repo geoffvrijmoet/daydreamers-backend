@@ -42,7 +42,7 @@ interface RevenueBreakdown {
 }
 
 export default function ProfitLossPage() {
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [totalAmount, setTotalAmount] = useState(0)
@@ -58,10 +58,18 @@ export default function ProfitLossPage() {
   const [activeRange, setActiveRange] = useState<string>('allTime')
   const [categoryGroups, setCategoryGroups] = useState<CategoryGroup[]>([])
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['all']))
+  const [loadingProgress, setLoadingProgress] = useState<string>('')
+  const [isClient, setIsClient] = useState(false)
 
   useEffect(() => {
-    fetchTransactions()
-  }, [startDate, endDate])
+    setIsClient(true)
+  }, [])
+
+  useEffect(() => {
+    if (isClient) {
+      fetchTransactions()
+    }
+  }, [startDate, endDate, isClient])
 
   // Process transactions into category groups and calculate revenue breakdown
   useEffect(() => {
@@ -82,17 +90,6 @@ export default function ProfitLossPage() {
     
     // Calculate revenue breakdown
     const breakdown = transactions.reduce((acc, t) => {
-      // Debug logging
-      console.log('Processing transaction:', {
-        id: t._id,
-        type: t.type,
-        amount: t.amount,
-        preTaxAmount: t.preTaxAmount,
-        taxAmount: t.taxAmount,
-        source: t.source,
-        date: t.date
-      })
-
       if (t.type === 'sale') {
         // For sales, always use preTaxAmount
         acc.sales += t.preTaxAmount || 0
@@ -108,9 +105,6 @@ export default function ProfitLossPage() {
       
       return acc
     }, { sales: 0, training: 0, totalPreTax: 0, totalTax: 0, totalRevenue: 0 })
-    
-    // Debug logging
-    console.log('Final revenue breakdown:', breakdown)
     
     setRevenueBreakdown(breakdown)
     
@@ -145,45 +139,94 @@ export default function ProfitLossPage() {
   const fetchTransactions = async () => {
     try {
       setLoading(true)
+      setLoadingProgress('Initializing...')
+      setError(null)
       
-      // Construct the query URL with date parameters if present
-      let url = '/api/transactions'
+      // Construct the base query URL with date parameters if present
+      let baseUrl = '/api/transactions'
       if (startDate) {
-        url += `?startDate=${startDate.toISOString()}`
+        baseUrl += `?startDate=${startDate.toISOString()}`
       }
       if (endDate) {
-        url += `${startDate ? '&' : '?'}endDate=${endDate.toISOString()}`
+        baseUrl += `${startDate ? '&' : '?'}endDate=${endDate.toISOString()}`
       }
       
-      const response = await fetch(url)
+      // Determine appropriate limit based on date range
+      let limit = 100; // Default limit
       
-      if (!response.ok) {
-        throw new Error('Failed to fetch transactions')
+      // Calculate date range in days
+      if (startDate && endDate) {
+        const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        // Adjust limit based on date range
+        if (diffDays > 365) {
+          limit = 500; // For year+ ranges
+        } else if (diffDays > 90) {
+          limit = 300; // For quarter+ ranges
+        } else if (diffDays > 30) {
+          limit = 200; // For month+ ranges
+        }
+      } else if (activeRange === 'allTime') {
+        limit = 500; // For all time
       }
       
-      const data = await response.json()
-      const allTransactions = data.transactions as Transaction[]
+      // Add limit parameter to base URL
+      baseUrl += `${baseUrl.includes('?') ? '&' : '?'}limit=${limit}`
       
-      // Debug logging
-      console.log('Fetched transactions:', {
-        total: allTransactions.length,
-        sales: allTransactions.filter(t => t.type === 'sale').length,
-        training: allTransactions.filter(t => t.type === 'training').length,
-        expenses: allTransactions.filter(t => t.type === 'expense').length
-      })
+      // Initialize variables for pagination
+      let allTransactions: Transaction[] = [];
+      let hasMore = true;
+      let page = 0;
+      
+      // Fetch all pages of transactions
+      while (hasMore) {
+        setLoadingProgress(`Fetching page ${page + 1}...`);
+        
+        // Add skip parameter for pagination
+        const url = `${baseUrl}&skip=${page * limit}`;
+        
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch transactions');
+        }
+        
+        const data = await response.json();
+        const pageTransactions = data.transactions as Transaction[];
+        
+        // Add transactions from this page to our collection
+        allTransactions = [...allTransactions, ...pageTransactions];
+        
+        // If we got fewer transactions than the limit, we've reached the end
+        if (pageTransactions.length < limit) {
+          hasMore = false;
+        } else {
+          page++;
+        }
+        
+        // Safety check to prevent infinite loops
+        if (page > 20) {
+          console.warn('Reached maximum page limit (20), stopping pagination');
+          hasMore = false;
+        }
+      }
+      
+      setLoadingProgress('Processing transactions...');
       
       // Calculate total expenses
       const totalExpenses = allTransactions
         .filter(t => t.type === 'expense')
-        .reduce((sum, t) => sum + t.amount, 0)
+        .reduce((sum, t) => sum + t.amount, 0);
       
-      setTransactions(allTransactions)
-      setTotalAmount(totalExpenses)
+      setTransactions(allTransactions);
+      setTotalAmount(totalExpenses);
+      setLoadingProgress('');
     } catch (err) {
-      console.error('Error fetching transactions:', err)
-      setError(err instanceof Error ? err.message : 'An unknown error occurred')
+      console.error('Error fetching transactions:', err);
+      setError(err instanceof Error ? err.message : 'An unknown error occurred');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
@@ -303,7 +346,7 @@ export default function ProfitLossPage() {
               <CardTitle>Revenue Breakdown</CardTitle>
               <CardDescription>
                 Summary of all revenue streams
-                {startDate && endDate && (
+                {isClient && startDate && endDate && (
                   <span className="ml-1">
                     ({format(startDate, "MMM d, yyyy")} - {format(endDate, "MMM d, yyyy")})
                   </span>
@@ -342,7 +385,7 @@ export default function ProfitLossPage() {
               <CardTitle>Total Expenses</CardTitle>
               <CardDescription>
                 Total amount of all expenses
-                {startDate && endDate && (
+                {isClient && startDate && endDate && (
                   <span className="ml-1">
                     ({format(startDate, "MMM d, yyyy")} - {format(endDate, "MMM d, yyyy")})
                   </span>
@@ -373,7 +416,9 @@ export default function ProfitLossPage() {
                     variant="outline" 
                     size="sm" 
                     onClick={() => handleQuickSelect(range.id)}
-                    className={activeRange === range.id ? "bg-primary-50 text-primary-700 border-primary-200" : ""}
+                    className={cn(
+                      isClient && activeRange === range.id ? "bg-primary-50 text-primary-700 border-primary-200" : ""
+                    )}
                   >
                     {range.label}
                   </Button>
@@ -389,11 +434,11 @@ export default function ProfitLossPage() {
                       size="sm"
                       className={cn(
                         "w-[240px] justify-start text-left font-normal",
-                        !startDate && "text-muted-foreground"
+                        (!isClient || !startDate) && "text-muted-foreground"
                       )}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {startDate ? format(startDate, "PPP") : <span>Pick start date</span>}
+                      {isClient && startDate ? format(startDate, "PPP") : <span>Pick start date</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
@@ -420,11 +465,11 @@ export default function ProfitLossPage() {
                       size="sm"
                       className={cn(
                         "w-[240px] justify-start text-left font-normal",
-                        !endDate && "text-muted-foreground"
+                        (!isClient || !endDate) && "text-muted-foreground"
                       )}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {endDate ? format(endDate, "PPP") : <span>Pick end date</span>}
+                      {isClient && endDate ? format(endDate, "PPP") : <span>Pick end date</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
@@ -450,7 +495,7 @@ export default function ProfitLossPage() {
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-8 w-8 text-blue-500 animate-spin mr-2" />
-              <p>Loading expenses...</p>
+              <p>Loading expenses...{loadingProgress ? ` ${loadingProgress}` : ''}</p>
             </div>
           ) : error ? (
             <div className="text-red-500 py-4">

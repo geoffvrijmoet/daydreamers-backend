@@ -1,15 +1,12 @@
 import {
   ClerkProvider,
-  SignInButton,
-  SignedIn,
-  SignedOut,
-  UserButton
 } from '@clerk/nextjs'
 import './globals.css'
 import type { Metadata } from 'next'
 import { Quicksand } from 'next/font/google'
-import { Header } from '@/components/header'
 import { Toaster } from '@/components/ui/toaster'
+import { cn } from '@/lib/utils'
+import ClientLayout from '../components/client-layout'
 
 const quicksand = Quicksand({ subsets: ['latin'] })
 
@@ -29,22 +26,11 @@ export default function RootLayout({
         <head>
           {/* ... existing head content ... */}
         </head>
-        <body className={`${quicksand.className} flex flex-col min-h-screen`}>
-          <div className="min-h-screen flex flex-col">
-            <div className="flex justify-end p-4">
-              <SignedOut>
-                <SignInButton />
-              </SignedOut>
-              <SignedIn>
-                <UserButton />
-              </SignedIn>
-            </div>
-            <SignedIn>
-              <Header />
-            </SignedIn>
-            <main className="flex-1">
+        <body className={cn(quicksand.className, "flex flex-col min-h-screen")}>
+          <div className="flex flex-col flex-1 w-full">
+            <ClientLayout>
               {children}
-            </main>
+            </ClientLayout>
             <Toaster />
           </div>
         </body>

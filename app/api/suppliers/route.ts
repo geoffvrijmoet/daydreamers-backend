@@ -6,10 +6,18 @@ import { Db } from 'mongodb'
 export async function GET() {
   try {
     await connectToDatabase()
-    const suppliers = await (mongoose.connection.db as Db).collection('suppliers')
+    
+    const suppliers = await (mongoose.connection.db as Db)
+      .collection('suppliers')
       .find({})
       .sort({ name: 1 })
       .toArray()
+    
+    console.log('Found suppliers:', suppliers.map(s => ({
+      id: s._id.toString(),
+      name: s.name,
+      invoiceEmail: s.invoiceEmail
+    })))
 
     return NextResponse.json({ suppliers })
   } catch (error) {
@@ -37,7 +45,10 @@ export async function POST(request: Request) {
     await connectToDatabase()
 
     // Check if supplier with same name already exists
-    const existing = await (mongoose.connection.db as Db).collection('suppliers').findOne({ name })
+    const existing = await (mongoose.connection.db as Db)
+      .collection('suppliers')
+      .findOne({ name })
+      
     if (existing) {
       return NextResponse.json(
         { error: 'A supplier with this name already exists' },
@@ -47,15 +58,17 @@ export async function POST(request: Request) {
 
     // Create new supplier
     const now = new Date()
-    const result = await (mongoose.connection.db as Db).collection('suppliers').insertOne({
-      name,
-      aliases: aliases || [],
-      invoiceEmail,
-      invoiceSubjectPattern,
-      skuPrefix,
-      createdAt: now,
-      updatedAt: now
-    })
+    const result = await (mongoose.connection.db as Db)
+      .collection('suppliers')
+      .insertOne({
+        name,
+        aliases: aliases || [],
+        invoiceEmail,
+        invoiceSubjectPattern,
+        skuPrefix,
+        createdAt: now,
+        updatedAt: now
+      })
 
     return NextResponse.json({ 
       success: true,

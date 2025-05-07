@@ -12,7 +12,8 @@
     "create-customers": "node scripts/create-customers.js",
     "dedupe": "ts-node -r tsconfig-paths/register -r dotenv/config scripts/dedupe-transactions.ts",
     "create-suppliers": "ts-node -r tsconfig-paths/register -r dotenv/config scripts/create-suppliers.ts",
-    "update-monica": "node -r dotenv/config scripts/update-monica-transactions.js"
+    "update-monica": "node -r dotenv/config scripts/update-monica-transactions.js",
+    "download-amex": "ts-node -r tsconfig-paths/register -r dotenv/config scripts/download-amex-emails.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.9.6",
@@ -38,7 +39,7 @@
     "googleapis": "^144.0.0",
     "graphql": "^16.10.0",
     "graphql-request": "^7.1.2",
-    "jsdom": "^26.0.0",
+    "jsdom": "^24.0.0",
     "lucide-react": "^0.460.0",
     "mongodb": "^6.11.0",
     "mongoose": "^8.12.1",

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
-import mongoose from 'mongoose'
-import { ObjectId, Db } from 'mongodb'
+import { ObjectId } from 'mongodb'
+import SupplierModel from '@/lib/models/Supplier'
 
 export async function GET(
   request: Request,
@@ -9,18 +9,28 @@ export async function GET(
 ) {
   try {
     await connectToDatabase()
-    const supplier = await (mongoose.connection.db as Db).collection('suppliers').findOne({
-      _id: new ObjectId(params.id)
-    })
-
+    
+    const id = params.id
+    
+    // Validate id format
+    if (!ObjectId.isValid(id)) {
+      return NextResponse.json(
+        { error: 'Invalid supplier ID format' },
+        { status: 400 }
+      )
+    }
+    
+    // Get the supplier
+    const supplier = await SupplierModel.findById(id).lean()
+    
     if (!supplier) {
       return NextResponse.json(
         { error: 'Supplier not found' },
         { status: 404 }
       )
     }
-
-    return NextResponse.json(supplier)
+    
+    return NextResponse.json({ supplier })
   } catch (error) {
     console.error('Error fetching supplier:', error)
     return NextResponse.json(
@@ -35,59 +45,83 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const body = await request.json()
-    const { name, aliases, invoiceEmail, invoiceSubjectPattern, skuPrefix } = body
-
-    // Validate required fields
-    if (!name || !invoiceEmail || !invoiceSubjectPattern || !skuPrefix) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      )
-    }
-
     await connectToDatabase()
-
-    // Check if another supplier with the same name exists (excluding current supplier)
-    const existing = await (mongoose.connection.db as Db).collection('suppliers').findOne({
-      _id: { $ne: new ObjectId(params.id) },
-      name
-    })
-    if (existing) {
+    
+    const id = params.id
+    
+    // Validate id format
+    if (!ObjectId.isValid(id)) {
       return NextResponse.json(
-        { error: 'A supplier with this name already exists' },
+        { error: 'Invalid supplier ID format' },
         { status: 400 }
       )
     }
-
-    // Update supplier
-    const result = await (mongoose.connection.db as Db).collection('suppliers').findOneAndUpdate(
-      { _id: new ObjectId(params.id) },
-      {
-        $set: {
-          name,
-          aliases: aliases || [],
-          invoiceEmail,
-          invoiceSubjectPattern,
-          skuPrefix,
-          updatedAt: new Date()
-        }
-      },
-      { returnDocument: 'after' }
-    )
-
-    if (!result) {
+    
+    // Get request body
+    const body = await request.json()
+    
+    // Update the supplier
+    const updatedSupplier = await SupplierModel.findByIdAndUpdate(
+      id,
+      { $set: body },
+      { new: true, runValidators: true }
+    ).lean()
+    
+    if (!updatedSupplier) {
       return NextResponse.json(
         { error: 'Supplier not found' },
         { status: 404 }
       )
     }
-
-    return NextResponse.json(result)
+    
+    return NextResponse.json({ 
+      success: true,
+      supplier: updatedSupplier 
+    })
   } catch (error) {
     console.error('Error updating supplier:', error)
     return NextResponse.json(
       { error: 'Failed to update supplier' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    await connectToDatabase()
+    
+    const id = params.id
+    
+    // Validate id format
+    if (!ObjectId.isValid(id)) {
+      return NextResponse.json(
+        { error: 'Invalid supplier ID format' },
+        { status: 400 }
+      )
+    }
+    
+    // Delete the supplier
+    const deletedSupplier = await SupplierModel.findByIdAndDelete(id).lean()
+    
+    if (!deletedSupplier) {
+      return NextResponse.json(
+        { error: 'Supplier not found' },
+        { status: 404 }
+      )
+    }
+    
+    return NextResponse.json({ 
+      success: true,
+      message: 'Supplier deleted successfully' 
+    })
+  } catch (error) {
+    console.error('Error deleting supplier:', error)
+    return NextResponse.json(
+      { error: 'Failed to delete supplier' },
       { status: 500 }
     )
   }

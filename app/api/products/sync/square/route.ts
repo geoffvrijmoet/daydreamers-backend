@@ -15,6 +15,15 @@ type ReviewedProduct = {
   category: string
 }
 
+interface PlatformMetadata {
+  platform: 'shopify' | 'square';
+  productId: string;
+  parentId?: string;
+  lastSyncedAt: Date;
+  syncStatus: 'success' | 'failed' | 'pending';
+  lastError?: string;
+}
+
 export async function POST(request: Request) {
   try {
     await connectToDatabase()
@@ -41,24 +50,44 @@ export async function POST(request: Request) {
 
     // Process each reviewed product
     const updates = await Promise.all(products.map(async (reviewedProduct) => {
-      // Look for existing product by Square ID
+      // Look for existing product by Square ID in platformMetadata
       const existingProduct = await (mongoose.connection.db as Db).collection('products').findOne({
-        squareId: reviewedProduct.id
+        'platformMetadata': {
+          $elemMatch: {
+            'platform': 'square',
+            'productId': reviewedProduct.id
+          }
+        }
       })
 
+      // Create platform metadata for Square
+      const squareMetadata: PlatformMetadata = {
+        platform: 'square',
+        productId: reviewedProduct.id,
+        parentId: parentIdMap.get(reviewedProduct.id),
+        lastSyncedAt: new Date(),
+        syncStatus: 'success'
+      }
+
+      // Split the name into baseProductName and variantName
+      // For simplicity, we'll use the whole name as baseProductName if there's no variant indicated
+      const nameParts = reviewedProduct.name.split(' - ')
+      const baseProductName = nameParts[0]
+      const variantName = nameParts.length > 1 ? nameParts.slice(1).join(' - ') : 'Default'
+
       const productData = {
+        baseProductName,
+        variantName,
         name: reviewedProduct.name,
         description: reviewedProduct.description || '',
         sku: reviewedProduct.sku,
         price: reviewedProduct.price,
-        currentStock: 0, // Will be updated from inventory
+        stock: 0, // Will be updated from inventory
         minimumStock: reviewedProduct.minimumStock,
         lastPurchasePrice: existingProduct?.lastPurchasePrice || 0,
         averageCost: existingProduct?.averageCost || 0,
         supplier: reviewedProduct.supplier,
         category: reviewedProduct.category,
-        squareId: reviewedProduct.id,
-        squareParentId: parentIdMap.get(reviewedProduct.id),
         active: true,
         costHistory: existingProduct?.costHistory || [],
         totalSpent: existingProduct?.totalSpent || 0,
@@ -67,12 +96,31 @@ export async function POST(request: Request) {
       }
 
       if (existingProduct) {
+        // For existing products, update fields but keep platformMetadata array
+        // If there's existing Square metadata, update it; otherwise add new
+        const platformMetadata = existingProduct.platformMetadata || []
+        const squareMetadataIndex = platformMetadata.findIndex(
+          (meta: PlatformMetadata) => meta.platform === 'square'
+        )
+        
+        if (squareMetadataIndex >= 0) {
+          // Update existing Square metadata
+          platformMetadata[squareMetadataIndex] = {
+            ...platformMetadata[squareMetadataIndex],
+            ...squareMetadata
+          }
+        } else {
+          // Add new Square metadata
+          platformMetadata.push(squareMetadata)
+        }
+
         // Update existing product
         await (mongoose.connection.db as Db).collection('products').updateOne(
           { _id: existingProduct._id },
           { 
             $set: {
               ...productData,
+              platformMetadata,
               lastPurchasePrice: existingProduct.lastPurchasePrice,
               averageCost: existingProduct.averageCost,
               costHistory: existingProduct.costHistory,
@@ -83,9 +131,10 @@ export async function POST(request: Request) {
         )
         return { action: 'updated', id: existingProduct._id, name: reviewedProduct.name }
       } else {
-        // Create new product
+        // Create new product with platformMetadata
         const result = await (mongoose.connection.db as Db).collection('products').insertOne({
           ...productData,
+          platformMetadata: [squareMetadata],
           createdAt: new Date().toISOString()
         })
         return { action: 'created', id: result.insertedId, name: reviewedProduct.name }
@@ -104,11 +153,19 @@ export async function POST(request: Request) {
       await Promise.all(inventoryResult.counts.map(async (count) => {
         if (!count.catalogObjectId || !count.quantity) return
 
+        // Update stock for products where the Square ID matches in platformMetadata
         await (mongoose.connection.db as Db).collection('products').updateOne(
-          { squareId: count.catalogObjectId },
+          {
+            'platformMetadata': {
+              $elemMatch: {
+                'platform': 'square',
+                'productId': count.catalogObjectId
+              }
+            }
+          },
           { 
             $set: { 
-              currentStock: Number(count.quantity),
+              stock: Number(count.quantity),
               updatedAt: new Date().toISOString()
             }
           }

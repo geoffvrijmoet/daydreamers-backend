@@ -9,6 +9,7 @@ export interface IInvoiceEmail extends Document {
   status: 'pending' | 'processed' | 'ignored';
   processedAt?: Date;
   transactionId?: mongoose.Types.ObjectId;
+  supplierId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -26,7 +27,8 @@ const InvoiceEmailSchema = new Schema<IInvoiceEmail>({
     default: 'pending'
   },
   processedAt: { type: Date },
-  transactionId: { type: Schema.Types.ObjectId, ref: 'Transaction' }
+  transactionId: { type: Schema.Types.ObjectId, ref: 'Transaction' },
+  supplierId: { type: Schema.Types.ObjectId, ref: 'Supplier' }
 }, {
   timestamps: true
 });
@@ -35,6 +37,7 @@ const InvoiceEmailSchema = new Schema<IInvoiceEmail>({
 InvoiceEmailSchema.index({ status: 1 });
 InvoiceEmailSchema.index({ emailId: 1 });
 InvoiceEmailSchema.index({ date: -1 });
+InvoiceEmailSchema.index({ supplierId: 1 });
 
 const InvoiceEmailModel = mongoose.models.InvoiceEmail || mongoose.model<IInvoiceEmail>('InvoiceEmail', InvoiceEmailSchema);
 

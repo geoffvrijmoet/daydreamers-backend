@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { ShoppingCart, Receipt, GraduationCap, LineChart } from "lucide-react"
+import { ShoppingCart, Receipt, GraduationCap, LineChart, Package } from "lucide-react"
 import { NewSaleModal } from '@/components/new-transaction-modal'
 import { TransactionsModal } from '@/components/transactions-modal'
 import { useRouter } from 'next/navigation'
@@ -94,21 +94,35 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Profit/Loss Button */}
+          {/* Bottom Cards Section (Profit/Loss and Products) */}
           <div 
             className={`transition-opacity duration-1000 ${
               showProfitLoss ? 'opacity-100' : 'opacity-0'
             }`}
           >
-            <Card 
-              className="p-4 sm:p-6 hover:shadow-lg transition-shadow cursor-pointer mt-6 sm:mt-8"
-              onClick={() => router.push('/profit-loss')}
-            >
-              <Button variant="ghost" className="w-full h-full flex flex-col gap-3 sm:gap-4">
-                <LineChart className="h-6 w-6 sm:h-8 sm:w-8" />
-                <span className="text-sm sm:text-base">Profit/Loss</span>
-              </Button>
-            </Card>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-6 sm:mt-8">
+              {/* Profit/Loss Card */}
+              <Card 
+                className="p-4 sm:p-6 hover:shadow-lg transition-shadow cursor-pointer"
+                onClick={() => router.push('/profit-loss')}
+              >
+                <Button variant="ghost" className="w-full h-full flex flex-col gap-3 sm:gap-4">
+                  <LineChart className="h-6 w-6 sm:h-8 sm:w-8" />
+                  <span className="text-sm sm:text-base">Profit/Loss</span>
+                </Button>
+              </Card>
+
+              {/* Products Card */}
+              <Card 
+                className="p-4 sm:p-6 hover:shadow-lg transition-shadow cursor-pointer"
+                onClick={() => router.push('/products')}
+              >
+                <Button variant="ghost" className="w-full h-full flex flex-col gap-3 sm:gap-4">
+                  <Package className="h-6 w-6 sm:h-8 sm:w-8" />
+                  <span className="text-sm sm:text-base">Products</span>
+                </Button>
+              </Card>
+            </div>
           </div>
         </div>
       </div>

@@ -8,6 +8,7 @@ import { ProductList } from '@/components/product-list'
 import { PurchaseInvoiceForm } from '@/components/purchase-invoice-form'
 import { SquareSyncReview } from '@/components/square-sync-review'
 import { ShopifySyncReview } from '@/components/shopify-sync-review'
+import Link from 'next/link'
 
 
 export default function ProductsPage() {
@@ -73,6 +74,13 @@ export default function ProductsPage() {
           <p className="mt-2 text-gray-600 dark:text-gray-400">
             Manage your products, costs, and inventory
           </p>
+          <div className="mt-4">
+            <Link href="/">
+              <button className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-black bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
+                &larr; Back to Dashboard
+              </button>
+            </Link>
+          </div>
         </div>
 
         {/* Tabs */}

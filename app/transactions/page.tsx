@@ -1,657 +1,1414 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
 
-type TransactionType = 'sale' | 'expense' | 'training';
-
-interface Product {
+interface Transaction {
   _id: string;
-  name: string;
-  baseProductName: string;
-  variantName: string;
-  price: number;
-  sku: string;
-  stock: number;
-  active: boolean;
-  category: string;
-}
-
-interface LineItem {
-  productId: string;
-  name: string;
-  quantity: number;
-  unitPrice: number;
-  totalPrice: number;
-  isTaxable: boolean;
-}
-
-interface TransactionFormData {
-  type: TransactionType;
   date: string;
   amount: number;
+  type: 'sale' | 'expense' | 'training';
   source: 'manual' | 'shopify' | 'square' | 'amex';
-  paymentMethod?: string;
-  notes?: string;
-  // Sale specific fields
-  customer?: string;
-  email?: string;
-  isTaxable?: boolean;
-  preTaxAmount?: number;
-  taxAmount?: number;
-  products?: LineItem[];
-  tip?: number;
-  discount?: number;
-  shipping?: number;
-  // Expense specific fields
-  expenseType?: string;
-  expenseLabel?: string;
+  merchant?: string;
   supplier?: string;
-  supplierOrderNumber?: string;
-  // Training specific fields
-  trainer?: string;
-  clientName?: string;
-  dogName?: string;
-  sessionNotes?: string;
-  revenue?: number;
-  trainingAgency?: string;
+  customer?: string;
+  emailId?: string;
 }
 
-export default function NewTransactionPage() {
-  const router = useRouter();
-  const [products, setProducts] = useState<Product[]>([]);
-  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
+interface Supplier {
+  id: string;
+  name: string;
+  invoiceEmail?: string;
+  invoiceSubjectPattern?: string;
+  emailParsing?: EmailParsingConfig;
+}
+
+interface EmailParsingPattern {
+  pattern: string;
+  flags?: string;
+  groupIndex: number;
+  transform?: string;
+}
+
+interface EmailParsingConfig {
+  orderNumber?: EmailParsingPattern;
+  total?: EmailParsingPattern;
+  subtotal?: EmailParsingPattern;
+  shipping?: EmailParsingPattern;
+  tax?: EmailParsingPattern;
+  discount?: EmailParsingPattern;
+  products?: {
+    items: {
+      name: EmailParsingPattern;
+      quantity: EmailParsingPattern;
+      total: EmailParsingPattern;
+    },
+    wholesaleDiscount?: number;
+  };
+}
+
+interface InvoiceEmail {
+  _id: string;
+  emailId: string;
+  date: string;
+  subject: string;
+  from: string;
+  body: string;
+  status: string;
+  supplierId?: string;
+  supplier?: Supplier;
+  createdAt: string;
+  updatedAt: Date;
+}
+
+// Combined type for list items
+type ListItem = {
+  type: 'transaction' | 'invoice';
+  date: string;
+  data: Transaction | InvoiceEmail;
+};
+
+// Add this interface to track expanded state for each email
+interface ExpandedState {
+  [key: string]: boolean;
+}
+
+// Define the data fields we can extract
+type ParsingField = 'orderNumber' | 'total' | 'subtotal' | 'shipping' | 'tax' | 'discount' | 'products';
+
+// Define a product from email parsing
+interface ParsedProduct {
+  name: string;
+  quantity: number;
+  total: number;
+  costDiscount?: number; // User input for cost discount (e.g., 0.20 for 20% off)
+}
+
+// Define the parsing result structure
+interface ParsingResult {
+  value: string | null;
+  match: string | null;
+  pattern?: string;
+  products?: ParsedProduct[]; // Array of parsed products
+}
+
+// Helper to format currency values
+const formatCurrency = (value: string | null): string => {
+  if (!value) return '$0.00';
+  
+  // Remove any existing $ signs
+  const numericValue = value.replace(/[$,]/g, '');
+  
+  try {
+    return new Intl.NumberFormat('en-US', { 
+      style: 'currency', 
+      currency: 'USD',
+      minimumFractionDigits: 2
+    }).format(parseFloat(numericValue));
+  } catch {
+    return `$${value}`;
+  }
+};
+
+// Function to determine color class based on value type
+const getValueColorClass = (field: ParsingField, value: string | null): string => {
+  if (!value) return '';
+  
+  switch (field) {
+    case 'shipping':
+    case 'tax':
+      return parseFloat(value) > 0 ? 'text-amber-700 bg-amber-50' : 'text-green-700 bg-green-50';
+    case 'discount':
+      return 'text-green-700 bg-green-50';
+    case 'total':
+      return 'text-purple-700 bg-purple-50 font-medium';
+    case 'subtotal':
+      return 'text-indigo-700 bg-indigo-50';
+    default:
+      return 'text-gray-700 bg-gray-50';
+  }
+};
+
+// Highlight matched patterns in email body
+const renderEmailBodyWithHighlights = (
+  body: string,
+  parsingResults: Record<ParsingField, ParsingResult>
+): React.ReactNode => {
+  // If no results to highlight, return plain body
+  if (!Object.values(parsingResults).some(r => r.match)) {
+    return body;
+  }
+  
+  // Get all matches with their field types
+  const highlights: { 
+    field: ParsingField; 
+    match: string; 
+    index: number;
+    length: number;
+    color: string;
+  }[] = [];
+  
+  Object.entries(parsingResults).forEach(([fieldName, result]) => {
+    if (result.match) {
+      const field = fieldName as ParsingField;
+      const matchText = result.match;
+      const index = body.indexOf(matchText);
+      
+      if (index >= 0) {
+        let color;
+        switch (field) {
+          case 'orderNumber':
+            color = 'bg-blue-100 text-blue-800';
+            break;
+          case 'total':
+            color = 'bg-purple-100 text-purple-800';
+            break;
+          case 'subtotal':
+            color = 'bg-indigo-100 text-indigo-800';
+            break;
+          case 'shipping':
+            color = 'bg-amber-100 text-amber-800';
+            break;
+          case 'tax':
+            color = 'bg-green-100 text-green-800';
+            break;
+          case 'discount':
+            color = 'bg-pink-100 text-pink-800';
+            break;
+          default:
+            color = 'bg-gray-100';
+        }
+        
+        highlights.push({
+          field,
+          match: matchText,
+          index,
+          length: matchText.length,
+          color
+        });
+      }
+    }
+  });
+  
+  // Sort highlights by index
+  highlights.sort((a, b) => a.index - b.index);
+  
+  // Only highlight if we have valid matches
+  if (highlights.length === 0) {
+    return body;
+  }
+  
+  // Create highlighted segments
+  const segments: React.ReactNode[] = [];
+  let lastIndex = 0;
+  
+  highlights.forEach(({ index, length, match, color }, i) => {
+    // Add text before the highlight
+    if (index > lastIndex) {
+      segments.push(body.substring(lastIndex, index));
+    }
+    
+    // Add the highlighted part
+    segments.push(
+      <span key={i} className={`px-1 rounded ${color}`} title={`Matched pattern for ${match}`}>
+        {body.substring(index, index + length)}
+      </span>
+    );
+    
+    lastIndex = index + length;
+  });
+  
+  // Add any remaining text
+  if (lastIndex < body.length) {
+    segments.push(body.substring(lastIndex));
+  }
+  
+  return segments;
+};
+
+export default function TransactionsPage() {
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [invoiceEmails, setInvoiceEmails] = useState<InvoiceEmail[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [formData, setFormData] = useState<TransactionFormData>({
-    type: 'sale',
-    date: new Date().toISOString().split('T')[0],
-    amount: 0,
-    source: 'manual',
-    isTaxable: true,
-    preTaxAmount: 0,
-    taxAmount: 0,
-    products: [],
+  const [expandedEmails, setExpandedEmails] = useState<ExpandedState>({});
+  const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
+  const [selectedText, setSelectedText] = useState<string>('');
+  const [selectedField, setSelectedField] = useState<ParsingField | null>(null);
+  const [isParsingMode, setIsParsingMode] = useState(false);
+  
+  // Keep track of parsed field results
+  const [parsingResults, setParsingResults] = useState<Record<string, Record<ParsingField, ParsingResult>>>({});
+  // Keep track of parsing stats
+  const [parsingStats, setParsingStats] = useState({
+    totalEmails: 0,
+    parsedEmails: 0,
+    parsedFields: 0
   });
 
-  // Fetch products on component mount
+  const [productParsingState, setProductParsingState] = useState<{
+    sectionPattern?: string;
+    namePattern?: string;
+    quantityPattern?: string;
+    totalPattern?: string;
+    wholesaleDiscount?: number;
+    parsingMode?: 'section' | 'name' | 'quantity' | 'total';
+  }>({});
+
   useEffect(() => {
-    const fetchProducts = async () => {
+    const fetchData = async () => {
       try {
         setIsLoading(true);
-        setError(null);
-        console.log('Fetching products...');
-        const response = await fetch('/api/products?limit=1000'); // Set high limit to get all products
-        console.log('Response status:', response.status);
         
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('API Error:', response.status, errorText);
-          throw new Error(`Failed to fetch products: ${response.status} ${errorText.substring(0, 100)}`);
+        const [transactionsRes, invoiceEmailsRes] = await Promise.all([
+          fetch('/api/transactions'),
+          fetch('/api/invoiceemails')
+        ]);
+
+        if (!transactionsRes.ok || !invoiceEmailsRes.ok) {
+          throw new Error('Failed to fetch data');
         }
+
+        const [transactionsData, invoiceEmailsData] = await Promise.all([
+          transactionsRes.json(),
+          invoiceEmailsRes.json()
+        ]);
+
+        setTransactions(transactionsData.transactions);
         
-        console.log('Parsing response...');
-        const data = await response.json();
-        console.log('API response:', data);
-        
-        if (!data.products || !Array.isArray(data.products)) {
-          console.error('Invalid response format:', data);
-          throw new Error('Invalid response format');
+        // TEMPORARY: Add test parsing config to first invoice email for testing
+        const emails = invoiceEmailsData.invoiceEmails;
+        if (emails && emails.length > 0 && emails[0].supplier) {
+          // Make a deep copy to avoid reference issues
+          const enhancedEmails = [...emails];
+          
+          // Add test parsing config to first email
+          if (enhancedEmails[0].supplier) {
+            console.log('Adding test parsing config to first email');
+            enhancedEmails[0].supplier = {
+              ...enhancedEmails[0].supplier,
+              emailParsing: {
+                total: {
+                  pattern: 'Total:\\s*\\$(\\d+\\.\\d+)',
+                  flags: 'm',
+                  groupIndex: 1,
+                  transform: 'parseFloat'
+                },
+                orderNumber: {
+                  pattern: 'ORDER NUMBER:\\s*#(\\d+)',
+                  flags: 'm',
+                  groupIndex: 1,
+                  transform: 'parseInt'
+                }
+              }
+            };
+          }
+          
+          setInvoiceEmails(enhancedEmails);
+        } else {
+          setInvoiceEmails(invoiceEmailsData.invoiceEmails);
         }
-        
-        const activeProducts = data.products.filter((p: Product) => p.active);
-        setProducts(activeProducts);
-        setFilteredProducts(activeProducts);
-        console.log('Products loaded:', activeProducts.length);
-      } catch (error) {
-        console.error('Error fetching products:', error);
-        setError(`Failed to load products: ${error instanceof Error ? error.message : String(error)}`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load data');
       } finally {
         setIsLoading(false);
       }
     };
-    
-    fetchProducts();
+
+    fetchData();
   }, []);
 
-  // Calculate totals whenever products change
+  // Process emails to extract values based on supplier's parsing config
   useEffect(() => {
-    if (formData.type === 'sale' && formData.products) {
-      const TAX_RATE = 0.08875; // 8.875%
+    const newParsingResults: Record<string, Record<ParsingField, ParsingResult>> = {};
+    let parsedEmails = 0;
+    let parsedFields = 0;
+
+    console.log('Starting to parse invoice emails...');
+    console.log('Number of emails to process:', invoiceEmails.length);
+
+    invoiceEmails.forEach(email => {
+      // Log email info
+      console.log(`Processing email ${email._id} - Subject: ${email.subject}`);
+      console.log(`Email has supplier: ${!!email.supplier}`);
       
-      // Since retail prices include tax, we need to back it out
-      const totalWithTax = formData.products.reduce((sum, item) => sum + item.totalPrice, 0);
-      
-      let subtotal, tax;
-      if (formData.isTaxable) {
-        // Back out tax from the total: total = subtotal * (1 + TAX_RATE)
-        subtotal = totalWithTax / (1 + TAX_RATE);
-        tax = totalWithTax - subtotal;
-      } else {
-        subtotal = totalWithTax;
-        tax = 0;
+      if (email.supplier) {
+        console.log(`Supplier name: ${email.supplier.name}`);
+        console.log(`Supplier has emailParsing: ${!!email.supplier.emailParsing}`);
+        
+        if (email.supplier.emailParsing) {
+          console.log('Email parsing config:', JSON.stringify(email.supplier.emailParsing, null, 2));
+        }
       }
-      
-      const total = subtotal + tax + (formData.tip || 0) + (formData.shipping || 0) - (formData.discount || 0);
-      
-      setFormData(prev => ({
+
+      if (email.supplier?.emailParsing) {
+        const results: Record<ParsingField, ParsingResult> = {
+          orderNumber: { value: null, match: null },
+          total: { value: null, match: null },
+          subtotal: { value: null, match: null },
+          shipping: { value: null, match: null },
+          tax: { value: null, match: null },
+          discount: { value: null, match: null },
+          products: { value: null, match: null, products: [] }
+        };
+        
+        let emailHasResults = false;
+
+        // Process each field in the config
+        Object.entries(email.supplier.emailParsing).forEach(([field, config]) => {
+          if (config && field in results) {
+            const fieldName = field as ParsingField;
+            try {
+              console.log(`Trying to parse field: ${field}`);
+              console.log(`Pattern: ${config.pattern}`);
+              console.log(`Flags: ${config.flags || 'none'}`);
+              
+              const regex = new RegExp(config.pattern, config.flags || '');
+              const match = email.body.match(regex);
+              
+              console.log(`Match result: ${match ? 'Found match' : 'No match'}`);
+              
+              if (match && match[config.groupIndex]) {
+                let value = match[config.groupIndex];
+                console.log(`Raw value: ${value}`);
+                
+                // Apply transformation if specified
+                if (config.transform === 'parseFloat') {
+                  value = parseFloat(value).toString();
+                } else if (config.transform === 'parseInt') {
+                  value = parseInt(value).toString();
+                } else if (config.transform === 'trim') {
+                  value = value.trim();
+                }
+                
+                console.log(`Transformed value: ${value}`);
+                
+                results[fieldName] = { 
+                  value: value, 
+                  match: match[0],
+                  pattern: config.pattern 
+                };
+                
+                emailHasResults = true;
+                parsedFields++;
+              }
+            } catch (e) {
+              console.error(`Error parsing ${field}:`, e);
+            }
+          }
+        });
+        
+        if (emailHasResults) {
+          parsedEmails++;
+        }
+        
+        newParsingResults[email._id] = results;
+      } else {
+        // Create empty results for emails with no parsing config
+        newParsingResults[email._id] = {
+          orderNumber: { value: null, match: null },
+          total: { value: null, match: null },
+          subtotal: { value: null, match: null },
+          shipping: { value: null, match: null },
+          tax: { value: null, match: null },
+          discount: { value: null, match: null },
+          products: { value: null, match: null, products: [] }
+        };
+      }
+    });
+
+    console.log(`Parsed results:`, newParsingResults);
+    console.log(`Stats: ${parsedEmails} emails parsed, ${parsedFields} fields extracted`);
+
+    setParsingResults(newParsingResults);
+    setParsingStats({
+      totalEmails: invoiceEmails.length,
+      parsedEmails,
+      parsedFields
+    });
+  }, [invoiceEmails]);
+
+  const toggleEmailBody = (emailId: string, e: React.MouseEvent) => {
+    // Only toggle if clicking on the header, not the body
+    if (!(e.target as HTMLElement).closest('.email-body')) {
+      setExpandedEmails(prev => ({
         ...prev,
-        preTaxAmount: parseFloat(subtotal.toFixed(2)),
-        taxAmount: parseFloat(tax.toFixed(2)),
-        amount: parseFloat(total.toFixed(2)),
+        [emailId]: !prev[emailId]
       }));
     }
-  }, [formData.products, formData.isTaxable, formData.tip, formData.shipping, formData.discount]);
+  };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const toggleParsingMode = (emailId: string) => {
+    setIsParsingMode(prev => !prev);
+    setSelectedEmail(emailId);
+    setSelectedField(null);
+    setSelectedText('');
+  };
+
+  const handleTextSelection = () => {
+    if (!isParsingMode || !selectedEmail || !selectedField) return;
+    
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) return;
+    
+    const text = selection.toString().trim();
+    if (text) {
+      setSelectedText(text);
+    }
+  };
+
+  const handleFieldSelect = (field: ParsingField) => {
+    setSelectedField(field);
+  };
+
+  const createRegexFromSelection = () => {
+    if (!selectedText || !selectedEmail || !selectedField) return;
+    
+    // Get the email body
+    const email = invoiceEmails.find(e => e._id === selectedEmail);
+    if (!email) return;
+    
+    // Create a pattern that will match the text plus capture the relevant part
+    let pattern = '';
+    let groupIndex = 1;
+    
+    // First, escape regex special characters in the selected text
+    const escapedText = selectedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    if (selectedField === 'orderNumber') {
+      // For order numbers, look for numbers after "#" or "ORDER NUMBER:" or similar patterns
+      if (/\d+/.test(selectedText)) {
+        // If the selection has numbers, extract just the numbers
+        const numberMatch = selectedText.match(/(\d+)/);
+        if (numberMatch) {
+          // Find where the number is within the selected text
+          const numberIndex = selectedText.indexOf(numberMatch[1]);
+          const beforeNumber = selectedText.substring(0, numberIndex);
+          
+          // Create pattern that matches the text before number + captures the number
+          pattern = `${beforeNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)`;
+        } else {
+          // Fallback pattern
+          pattern = `${escapedText.replace(/(\d+)/, '(\\d+)')}`;
+        }
+      } else {
+        // If no numbers in selection, make it look for numbers after this text
+        pattern = `${escapedText}\\s*(#?\\d+)`;
+      }
+    } else if (['total', 'subtotal', 'shipping', 'tax'].includes(selectedField)) {
+      // For monetary values, look for dollar amounts
+      if (/\$\s*[\d,.]+/.test(selectedText)) {
+        // If selection has dollar sign, capture the amount
+        const moneyMatch = selectedText.match(/\$\s*([\d,.]+)/);
+        if (moneyMatch) {
+          const valueIndex = selectedText.indexOf(moneyMatch[1]);
+          const beforeValue = selectedText.substring(0, valueIndex - 1); // -1 for the $ sign
+          
+          // Create pattern that matches text + $ + captures the number
+          pattern = `${beforeValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\$\\s*([\\d,.]+)`;
+        } else {
+          // Fallback pattern
+          pattern = `${escapedText.replace(/(\$\s*[\d,.]+)/, '(\\$\\s*[\\d,.]+)')}`;
+        }
+      } else {
+        // If no $ sign, look for it after this text
+        pattern = `${escapedText}\\s*\\$?\\s*([\\d,.]+)`;
+      }
+    } else if (selectedField === 'discount') {
+      // For discounts, look for negative dollar amounts
+      if (/\$\s*-[\d,.]+/.test(selectedText) || /-\$\s*[\d,.]+/.test(selectedText)) {
+        // If selection has negative dollar value, capture it
+        const moneyMatch = selectedText.match(/(-?\$\s*[\d,.]+|-\$\s*[\d,.]+|\$\s*-[\d,.]+)/);
+        if (moneyMatch) {
+          // Extract just the numeric part without $ or - signs
+          pattern = `${escapedText.replace(moneyMatch[0], `(${moneyMatch[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`)}`;
+        } else {
+          // Fallback
+          pattern = `${escapedText.replace(/(-?\$\s*[\d,.]+|-\$\s*[\d,.]+|\$\s*-[\d,.]+)/, '(\\$\\s*-[\\d,.]+)')}`;
+        }
+      } else {
+        // Look for it after this text
+        pattern = `${escapedText}\\s*(-\\$\\s*[\\d,.]+|\\$\\s*-[\\d,.]+)`;
+      }
+    } else {
+      // For other fields, just create a basic pattern
+      pattern = escapedText;
+      groupIndex = 0; // The whole match
+    }
+    
+    console.log(`Created pattern for ${selectedField}: ${pattern}`);
+    
+    // Save the pattern
+    savePattern(pattern, groupIndex);
+  };
+
+  const savePattern = async (pattern: string, groupIndex: number) => {
+    if (!selectedEmail || !selectedField) return;
+    
+    const email = invoiceEmails.find(e => e._id === selectedEmail);
+    if (!email || !email.supplier?.id) return;
+    
+    // Construct the email parsing configuration
+    const emailParsing = {
+      ...email.supplier.emailParsing || {},
+      [selectedField]: {
+        pattern,
+        flags: 'm', // Multiline flag
+        groupIndex,
+        transform: ['total', 'subtotal', 'shipping', 'tax', 'discount'].includes(selectedField) 
+          ? 'parseFloat' 
+          : selectedField === 'orderNumber' ? 'parseInt' : 'trim'
+      }
+    };
+    
     try {
+      const response = await fetch(`/api/suppliers/${email.supplier.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ emailParsing }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to update supplier');
+      }
+      
+      // Update the UI
+      setInvoiceEmails(emails => 
+        emails.map(e => 
+          e._id === selectedEmail 
+            ? { 
+                ...e, 
+                supplier: { 
+                  ...e.supplier!, 
+                  emailParsing 
+                } 
+              } 
+            : e
+        )
+      );
+      
+      // Reset selection state
+      setSelectedField(null);
+      setSelectedText('');
+      
+      // Exit parsing mode
+      setIsParsingMode(false);
+      
+    } catch (error) {
+      console.error('Error saving pattern:', error);
+      alert('Failed to save pattern. Please try again.');
+    }
+  };
+
+  // Handle product pattern action
+  const handleProductPatternAction = (action: 'name' | 'quantity' | 'total') => {
+    if (!selectedText || !selectedEmail) return;
+    
+    setProductParsingState(prev => ({
+      ...prev,
+      parsingMode: action
+    }));
+    
+    // Create pattern based on the selected action
+    let pattern = '';
+    
+    // First, escape regex special characters in the selected text
+    const escapedText = selectedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    switch (action) {
+      case 'name':
+        // For product name, just capture the text as is
+        pattern = `(${escapedText})`;
+        break;
+      
+      case 'quantity':
+        // For quantity, look for numbers
+        if (/\d+/.test(selectedText)) {
+          const numberMatch = selectedText.match(/(\d+)/);
+          if (numberMatch) {
+            const numberIndex = selectedText.indexOf(numberMatch[1]);
+            const beforeNumber = selectedText.substring(0, numberIndex);
+            pattern = `${beforeNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)`;
+          } else {
+            pattern = `${escapedText.replace(/(\d+)/, '(\\d+)')}`;
+          }
+        } else {
+          pattern = `${escapedText}\\s*(\\d+)`;
+        }
+        break;
+      
+      case 'total':
+        // For total, look for money amounts
+        if (/\$?\d+(\.\d+)?/.test(selectedText)) {
+          const priceMatch = selectedText.match(/\$?(\d+(\.\d+)?)/);
+          if (priceMatch) {
+            const priceIndex = selectedText.indexOf(priceMatch[0]);
+            const beforePrice = selectedText.substring(0, priceIndex);
+            pattern = `${beforePrice.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\$?(\\d+(\\.\\d+)?)`;
+          } else {
+            pattern = `${escapedText.replace(/\$?(\d+(\.\d+)?)/, '\\$?(\\d+(\\.\\d+)?)')}`;
+          }
+        } else {
+          pattern = `${escapedText}\\s*\\$?(\\d+(\\.\\d+)?)`;
+        }
+        break;
+    }
+    
+    // Save the pattern to state
+    setProductParsingState(prev => ({
+      ...prev,
+      [`${action}Pattern`]: pattern
+    }));
+    
+    // Clear the selected text
+    setSelectedText('');
+  };
+
+  // Save product patterns to supplier
+  const saveProductPatterns = async () => {
+    if (!selectedEmail) return;
+    
+    const email = invoiceEmails.find(e => e._id === selectedEmail);
+    if (!email || !email.supplier?.id) return;
+    
+    const { namePattern, quantityPattern, totalPattern } = productParsingState;
+    const wholesaleDiscount = productParsingState.wholesaleDiscount || 0;
+    
+    // We need all three patterns
+    if (!namePattern || !quantityPattern || !totalPattern) {
+      alert('Please define patterns for product name, quantity, and total.');
+      return;
+    }
+    
+    // Construct the email parsing configuration for products
+    const emailParsing = {
+      ...email.supplier.emailParsing || {},
+      products: {
+        items: {
+          name: {
+            pattern: namePattern,
+            flags: 'gm', // Global and Multiline flags to match multiple occurrences
+            groupIndex: 1,
+            transform: 'trim'
+          },
+          quantity: {
+            pattern: quantityPattern,
+            flags: 'gm', // Global and Multiline flags to match multiple occurrences
+            groupIndex: 1,
+            transform: 'parseInt'
+          },
+          total: {
+            pattern: totalPattern,
+            flags: 'gm', // Global and Multiline flags to match multiple occurrences
+            groupIndex: 1,
+            transform: 'parseFloat'
+          }
+        },
+        wholesaleDiscount
+      }
+    };
+    
+    try {
+      const response = await fetch(`/api/suppliers/${email.supplier.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ emailParsing }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to update supplier');
+      }
+      
+      // Update the UI
+      setInvoiceEmails(emails => 
+        emails.map(e => 
+          e._id === selectedEmail 
+            ? { 
+                ...e, 
+                supplier: { 
+                  ...e.supplier!, 
+                  emailParsing 
+                } 
+              } 
+            : e
+        )
+      );
+      
+      // Try to parse products with the new patterns
+      const productMatches = extractProductsFromEmail(email.body, emailParsing.products);
+      
+      // Update parsing results with the products
+      if (productMatches) {
+        setParsingResults(prev => ({
+          ...prev,
+          [email._id]: {
+            ...prev[email._id],
+            products: {
+              value: String(productMatches.products.length),
+              match: 'Products found',
+              products: productMatches.products
+            }
+          }
+        }));
+      }
+      
+      // Reset state
+      setProductParsingState({});
+      setSelectedField(null);
+      setSelectedText('');
+      
+      // Exit parsing mode
+      setIsParsingMode(false);
+      
+    } catch (error) {
+      console.error('Error saving product patterns:', error);
+      alert('Failed to save product patterns. Please try again.');
+    }
+  };
+  
+  // Extract products from an email using parsing patterns
+  const extractProductsFromEmail = (emailBody: string, patterns: EmailParsingConfig['products']) => {
+    if (!patterns || !patterns.items || !patterns.items.name || !patterns.items.quantity || !patterns.items.total) {
+      return null;
+    }
+    
+    try {
+      const nameRegex = new RegExp(patterns.items.name.pattern, patterns.items.name.flags || 'g');
+      const quantityRegex = new RegExp(patterns.items.quantity.pattern, patterns.items.quantity.flags || 'g');
+      const totalRegex = new RegExp(patterns.items.total.pattern, patterns.items.total.flags || 'g');
+      
+      const nameMatches: string[] = [];
+      const quantityMatches: number[] = [];
+      const totalMatches: number[] = [];
+      
+      // Extract matches for each pattern
+      let match;
+      while ((match = nameRegex.exec(emailBody)) !== null) {
+        nameMatches.push(match[1] || match[0]);
+      }
+      
+      while ((match = quantityRegex.exec(emailBody)) !== null) {
+        const quantityStr = match[1] || match[0];
+        const quantity = parseFloat(quantityStr.replace(/[^\d.-]/g, ''));
+        if (!isNaN(quantity)) {
+          quantityMatches.push(quantity);
+        }
+      }
+      
+      while ((match = totalRegex.exec(emailBody)) !== null) {
+        const totalStr = match[1] || match[0];
+        const total = parseFloat(totalStr.replace(/[^\d.-]/g, ''));
+        if (!isNaN(total)) {
+          totalMatches.push(total);
+        }
+      }
+      
+      // Check if we have matches for all three patterns
+      if (nameMatches.length === 0 || quantityMatches.length === 0 || totalMatches.length === 0) {
+        return null;
+      }
+      
+      // Take the minimum length to ensure we have matching sets
+      const minLength = Math.min(nameMatches.length, quantityMatches.length, totalMatches.length);
+      
+      // Create product objects with wholesale discount applied if available
+      const wholesaleDiscount = patterns.wholesaleDiscount || 0;
+      const products: ParsedProduct[] = [];
+      
+      for (let i = 0; i < minLength; i++) {
+        products.push({
+          name: nameMatches[i],
+          quantity: quantityMatches[i],
+          total: totalMatches[i],
+          // Apply wholesale discount to each product
+          costDiscount: wholesaleDiscount
+        });
+      }
+      
+      return {
+        products,
+        wholesaleDiscount
+      };
+    } catch (error) {
+      console.error('Error extracting products from email:', error);
+      return null;
+    }
+  };
+
+  // Add a function to save products to a transaction
+  const saveProductsToTransaction = async (emailId: string) => {
+    if (!parsingResults[emailId]?.products?.products?.length) {
+      alert('No products found to save.');
+      return;
+    }
+    
+    // Find the email
+    const email = invoiceEmails.find(e => e._id === emailId);
+    if (!email) {
+      alert('Email not found.');
+      return;
+    }
+    
+    try {
+      // Prepare the products data with discounts applied
+      // The discount has already been applied from the wholesaleDiscount during product parsing
+      // These products will be saved to MongoDB in the transaction document
+      const products = parsingResults[emailId].products.products.map(product => ({
+        name: product.name,
+        quantity: product.quantity,
+        unitPrice: (product.total / product.quantity).toString(), // Convert to string
+        totalPrice: (product.total * (1 - (product.costDiscount || 0))).toString(), // Convert to string
+        costDiscount: product.costDiscount || 0
+      }));
+      
+      // Calculate the total after discounts
+      const totalAfterDiscounts = products.reduce((sum, p) => sum + parseFloat(p.totalPrice), 0);
+      
+      // Call API to create a transaction
+      // This transaction will be saved to MongoDB with the specified data
       const response = await fetch('/api/transactions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          date: new Date(email.date).toISOString(),
+          amount: totalAfterDiscounts,
+          merchant: email.supplier?.name || email.from.split('<')[0].trim(),
+          description: `Invoice from ${email.supplier?.name || 'unknown supplier'}`,
+          type: 'purchase',
+          source: 'email',
+          emailId: email.emailId,
+          products: products // These products will be saved to the transaction document in MongoDB
+        }),
       });
-
+      
       if (!response.ok) {
         throw new Error('Failed to create transaction');
       }
-
-      router.push('/transactions');
+      
+      const result = await response.json();
+      
+      // Update the UI to show the email is processed
+      setInvoiceEmails(prev => 
+        prev.map(e => 
+          e._id === emailId
+            ? { ...e, status: 'processed', transactionId: result.transaction.id }
+            : e
+        )
+      );
+      
+      // Show success message
+      alert('Products saved to transaction successfully!');
+      
     } catch (error) {
-      console.error('Error creating transaction:', error);
-      // TODO: Add proper error handling UI
+      console.error('Error saving products to transaction:', error);
+      alert('Failed to save products to transaction. Please try again.');
     }
   };
 
-  const handleTypeChange = (type: TransactionType) => {
-    setFormData(prev => ({
-      ...prev,
-      type,
-      // Reset type-specific fields
-      customer: undefined,
-      email: undefined,
-      isTaxable: undefined,
-      preTaxAmount: undefined,
-      taxAmount: undefined,
-      products: undefined,
-      tip: undefined,
-      discount: undefined,
-      shipping: undefined,
-      expenseType: undefined,
-      expenseLabel: undefined,
-      supplier: undefined,
-      supplierOrderNumber: undefined,
-      trainer: undefined,
-      clientName: undefined,
-      dogName: undefined,
-      sessionNotes: undefined,
-      revenue: undefined,
-      trainingAgency: undefined,
-    }));
+  // Add a function to handle the wholesale discount input
+  const handleWholesaleDiscountChange = (value: string) => {
+    // Convert percentage input to decimal (e.g., 20 -> 0.20)
+    const percentage = parseFloat(value);
+    if (!isNaN(percentage)) {
+      const decimalValue = percentage / 100;
+      setProductParsingState(prev => ({
+        ...prev,
+        wholesaleDiscount: decimalValue
+      }));
+    }
   };
 
-  const handleAddProduct = (product: Product) => {
-    setFormData(prev => ({
-      ...prev,
-      products: [
-        ...(prev.products || []),
-        {
-          productId: product._id,
-          name: product.name,
-          quantity: 1,
-          unitPrice: product.price,
-          totalPrice: product.price,
-          isTaxable: true,
-        },
-      ],
-    }));
-  };
+  // Combine and sort transactions and invoice emails
+  const combinedItems: ListItem[] = [
+    ...transactions.map(t => ({
+      type: 'transaction' as const,
+      date: t.date,
+      data: t
+    })),
+    ...invoiceEmails.map(e => ({
+      type: 'invoice' as const,
+      date: e.date,
+      data: e
+    }))
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const handleUpdateProductQuantity = (index: number, quantity: number) => {
-    setFormData(prev => ({
-      ...prev,
-      products: prev.products?.map((item, i) => 
-        i === index 
-          ? { ...item, quantity, totalPrice: item.unitPrice * quantity }
-          : item
-      ),
-    }));
-  };
+  if (isLoading) {
+    return <div className="p-4">Loading data...</div>;
+  }
 
-  const handleRemoveProduct = (index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      products: prev.products?.filter((_, i) => i !== index),
-    }));
-  };
+  if (error) {
+    return <div className="p-4 text-red-500">Error: {error}</div>;
+  }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-6">Create New Transaction</h1>
+    <div className="p-4">
+      <h1 className="text-2xl font-bold mb-4">Transactions & Invoices</h1>
       
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Transaction Type Selection */}
-        <div className="flex space-x-4 mb-6">
-          <button
-            type="button"
-            onClick={() => handleTypeChange('sale')}
-            className={`px-4 py-2 rounded ${
-              formData.type === 'sale'
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-200 text-gray-700'
-            }`}
-          >
-            Sale
-          </button>
-          <button
-            type="button"
-            onClick={() => handleTypeChange('expense')}
-            className={`px-4 py-2 rounded ${
-              formData.type === 'expense'
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-200 text-gray-700'
-            }`}
-          >
-            Expense
-          </button>
-          <button
-            type="button"
-            onClick={() => handleTypeChange('training')}
-            className={`px-4 py-2 rounded ${
-              formData.type === 'training'
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-200 text-gray-700'
-            }`}
-          >
-            Training
-          </button>
-        </div>
-
-        {/* Common Fields */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Date</label>
-            <input
-              type="date"
-              value={formData.date}
-              onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Amount</label>
-            <input
-              type="number"
-              step="0.01"
-              value={formData.amount}
-              onChange={(e) => setFormData(prev => ({ ...prev, amount: parseFloat(e.target.value) }))}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-              required
-              readOnly
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Source</label>
-            <select
-              value={formData.source}
-              onChange={(e) => setFormData(prev => ({ ...prev, source: e.target.value as 'manual' | 'shopify' | 'square' | 'amex' }))}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-              required
-            >
-              <option value="manual">Manual</option>
-              <option value="shopify">Shopify</option>
-              <option value="square">Square</option>
-              <option value="amex">Amex</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Payment Method</label>
-            <input
-              type="text"
-              value={formData.paymentMethod || ''}
-              onChange={(e) => setFormData(prev => ({ ...prev, paymentMethod: e.target.value }))}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            />
+      {/* Add parsing stats information */}
+      {parsingStats.totalEmails > 0 && (
+        <div className="mb-4 p-3 bg-gray-50 rounded-lg text-sm">
+          <p className="font-medium">Invoice Email Parsing Stats:</p>
+          <div className="flex flex-wrap gap-4 mt-1">
+            <span>Total Emails: {parsingStats.totalEmails}</span>
+            <span>Emails with Parsed Data: {parsingStats.parsedEmails}</span>
+            <span>Total Fields Parsed: {parsingStats.parsedFields}</span>
           </div>
         </div>
-
-        {/* Type-specific Fields */}
-        {formData.type === 'sale' && (
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Sale Details</h2>
-            
-            {/* Product Selection */}
-            <div className="space-y-4">
-              <h3 className="text-md font-medium">Add Products</h3>
-              <div>
-                <input
-                  type="text"
-                  placeholder="Search products by name or SKU..."
-                  onChange={(e) => {
-                    const searchTerm = e.target.value.toLowerCase();
-                    const filtered = products.filter(p => 
-                      p.name.toLowerCase().includes(searchTerm) ||
-                      p.sku.toLowerCase().includes(searchTerm)
-                    );
-                    setFilteredProducts(filtered);
-                  }}
-                  className="w-full px-4 py-2 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
+      )}
+      
+      <div className="space-y-4">
+        {combinedItems.map((item) => {
+          if (item.type === 'transaction') {
+            const transaction = item.data as Transaction;
+            return (
+              <div
+                key={transaction._id}
+                className="bg-white p-4 rounded-lg shadow hover:shadow-md transition-shadow"
+              >
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-lg font-semibold">
+                      {transaction.merchant || transaction.supplier || transaction.customer || 'Unknown'}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      {new Date(transaction.date).toLocaleDateString()} • {transaction.type} • {transaction.source}
+                    </p>
+                    {transaction.emailId && (
+                      <p className="text-xs text-gray-400 mt-1">Email ID: {transaction.emailId}</p>
+                    )}
+                  </div>
+                  <p className={`text-lg font-mono ${transaction.type === 'expense' ? 'text-red-500' : 'text-green-500'}`}>
+                    ${Math.abs(transaction.amount).toFixed(2)}
+                  </p>
+                </div>
               </div>
-
-              {isLoading ? (
-                <div className="p-4 border rounded bg-gray-50 text-center">
-                  <p>Loading products...</p>
-                </div>
-              ) : error ? (
-                <div className="p-4 border rounded bg-red-50 text-red-700">
-                  <p>{error}</p>
-                  <button 
-                    type="button"
-                    onClick={() => {
-                      setIsLoading(true);
-                      setError(null);
-                      fetch('/api/test')
-                        .then(res => res.json())
-                        .then(data => {
-                          console.log('Test API response:', data);
-                          fetch('/api/products')
-                            .then(res => {
-                              console.log('Products API status:', res.status);
-                              return res.json();
-                            })
-                            .then(data => {
-                              console.log('Products API data:', data);
-                              const activeProducts = data.products?.filter((p: Product) => p.active) || [];
-                              setProducts(activeProducts);
-                              setFilteredProducts(activeProducts);
-                              setIsLoading(false);
-                            })
-                            .catch(err => {
-                              console.error('Products API error:', err);
-                              setError('Failed to fetch products: ' + String(err));
-                              setIsLoading(false);
-                            });
-                        })
-                        .catch(err => {
-                          console.error('Test API error:', err);
-                          setError('Test API failed: ' + String(err));
-                          setIsLoading(false);
-                        });
-                    }}
-                    className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                  >
-                    Retry
-                  </button>
-                </div>
-              ) : filteredProducts.length === 0 ? (
-                <div className="p-4 border rounded bg-yellow-50 text-yellow-700">
-                  <p>No products found.</p>
-                </div>
-              ) : (
-                <div className="space-y-2 max-h-64 overflow-y-auto border rounded-lg">
-                  {filteredProducts.map(product => (
-                    <div
-                      key={product._id}
-                      className="p-4 hover:bg-gray-50 cursor-pointer transition-colors border-b last:border-b-0"
-                      onClick={() => handleAddProduct(product)}
-                    >
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <div className="font-medium">{product.name}</div>
-                          <div className="text-sm text-gray-500">SKU: {product.sku}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-sm font-medium">${(product.price || 0).toFixed(2)}</div>
-                          <div className="text-sm text-gray-500">Stock: {product.stock}</div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Selected Products */}
-              {formData.products && formData.products.length > 0 && (
-                <div className="mt-6">
-                  <h3 className="text-md font-medium mb-2">Selected Products</h3>
-                  <div className="space-y-2">
-                    {formData.products.map((product, index) => (
-                      <div key={index} className="flex items-center space-x-4 p-2 bg-gray-50 rounded">
-                        <div className="flex-1">
-                          <div className="font-medium">{product.name}</div>
-                          <div className="text-sm text-gray-500">${(product.unitPrice || 0).toFixed(2)} each</div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="number"
-                            min="1"
-                            value={product.quantity}
-                            onChange={(e) => handleUpdateProductQuantity(index, parseInt(e.target.value))}
-                            className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                          />
-                          <div className="font-medium">${(product.totalPrice || 0).toFixed(2)}</div>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveProduct(index)}
-                            className="text-red-500 hover:text-red-700"
+            );
+          } else {
+            const email = item.data as InvoiceEmail;
+            const isHtml = email.body.trim().toLowerCase().startsWith('<html');
+            const hasParsingResults = parsingResults[email._id];
+            
+            return (
+              <div
+                key={email._id}
+                className="bg-purple-50 p-4 rounded-lg shadow hover:shadow-md transition-shadow border-l-4 border-purple-500"
+              >
+                {/* Header - clicking this toggles expansion */}
+                <div 
+                  className="flex justify-between items-start cursor-pointer"
+                  onClick={(e) => toggleEmailBody(email._id, e)}
+                >
+                  <div>
+                    <p className="text-lg font-semibold">
+                      {email.supplier?.name || email.from.split('<')[0].trim()}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      {new Date(email.date).toLocaleDateString()} • Invoice Email • {email.status}
+                    </p>
+                    <p className="text-sm text-gray-700 mt-1">
+                      {email.subject}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">Email ID: {email.emailId}</p>
+                    
+                    {/* Always show key values in the header, even if undefined */}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {hasParsingResults && Object.entries(parsingResults[email._id]).map(([field, result]) => 
+                        result.value && (
+                          <span 
+                            key={field}
+                            className={`text-sm px-2 py-0.5 rounded ${
+                              field === 'orderNumber' ? 'bg-blue-100 text-blue-800' :
+                              field === 'total' ? 'bg-purple-100 text-purple-800 font-medium' :
+                              field === 'subtotal' ? 'bg-indigo-100 text-indigo-800' :
+                              field === 'shipping' || field === 'tax' ? 
+                                parseFloat(result.value) > 0 ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800' :
+                              field === 'discount' ? 'bg-green-100 text-green-800' :
+                              'bg-gray-100 text-gray-600'
+                            }`}
                           >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                            {field === 'orderNumber' ? (
+                              <>#${result.value}</>
+                            ) : (
+                              <>
+                                {field.charAt(0).toUpperCase() + field.slice(1)}: {
+                                  ['total', 'subtotal', 'shipping', 'tax'].includes(field) ?
+                                    formatCurrency(result.value) :
+                                    field === 'discount' ?
+                                      `-${formatCurrency(result.value.replace('-', ''))}` :
+                                      result.value
+                                }
+                              </>
+                            )}
+                          </span>
+                        )
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center">
+                    {email.supplier && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleParsingMode(email._id);
+                        }} 
+                        className={`mr-3 px-2 py-1 text-xs rounded ${isParsingMode && selectedEmail === email._id ? 'bg-purple-500 text-white' : 'bg-purple-200 text-purple-700'}`}
+                      >
+                        {isParsingMode && selectedEmail === email._id ? 'Exit Parsing Mode' : 'Parse Email'}
+                      </button>
+                    )}
+                    <div className="text-purple-600">
+                      {expandedEmails[email._id] ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      )}
+                    </div>
                   </div>
                 </div>
-              )}
-            </div>
+                
+                {/* Display all extracted values when expanded */}
+                {expandedEmails[email._id] && hasParsingResults && (
+                  <div className="mt-3 p-3 bg-white rounded-lg border border-purple-100 flex flex-wrap gap-2 text-sm">
+                    {Object.entries(parsingResults[email._id]).map(([field, result]) => 
+                      field !== 'products' && result.value && (
+                        <div 
+                          key={field} 
+                          className={`px-3 py-1 rounded-full flex items-center ${getValueColorClass(field as ParsingField, result.value)}`}
+                        >
+                          <span className="font-medium mr-1">{field}:</span> 
+                          <span>
+                            {field === 'orderNumber' ? 
+                              `#${result.value}` : 
+                              ['total', 'subtotal', 'shipping', 'tax'].includes(field) ? 
+                                formatCurrency(result.value) : 
+                                field === 'discount' ? 
+                                  `-${formatCurrency(result.value.replace('-', ''))}` : 
+                                  result.value
+                            }
+                          </span>
+                        </div>
+                      )
+                    )}
+                    {/* Display count of parsed products if any */}
+                    {(parsingResults[email._id]?.products?.products || []).length > 0 && (
+                      <div className="px-3 py-1 rounded-full flex items-center bg-blue-50 text-blue-700">
+                        <span className="font-medium mr-1">Products:</span>
+                        <span>{(parsingResults[email._id]?.products?.products || []).length} items</span>
+                      </div>
+                    )}
+                    {!Object.values(parsingResults[email._id] || {}).some(r => r?.value) && 
+                     !(parsingResults[email._id]?.products?.products || []).length && (
+                      <p className="text-gray-500 text-xs italic">No data extracted yet</p>
+                    )}
+                  </div>
+                )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Customer Name</label>
-                <input
-                  type="text"
-                  value={formData.customer || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, customer: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Email</label>
-                <input
-                  type="email"
-                  value={formData.email || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Pre-tax Amount</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.preTaxAmount || 0}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                  readOnly
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Tax Amount</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.taxAmount || 0}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                  readOnly
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Tip</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.tip || 0}
-                  onChange={(e) => setFormData(prev => ({ ...prev, tip: parseFloat(e.target.value) }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Shipping</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.shipping || 0}
-                  onChange={(e) => setFormData(prev => ({ ...prev, shipping: parseFloat(e.target.value) }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Discount</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.discount || 0}
-                  onChange={(e) => setFormData(prev => ({ ...prev, discount: parseFloat(e.target.value) }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Taxable</label>
-                <div className="mt-1">
-                  <label className="inline-flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={formData.isTaxable}
-                      onChange={(e) => setFormData(prev => ({ ...prev, isTaxable: e.target.checked }))}
-                      className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
-                    <span className="ml-2">Apply tax</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+                {/* Products Management UI */}
+                {expandedEmails[email._id] && 
+                  hasParsingResults && 
+                  (parsingResults[email._id]?.products?.products || []).length > 0 && (
+                    <div className="mt-3 p-3 bg-white rounded-lg border border-purple-100">
+                      <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-medium">Parsed Products</h3>
+                        <Button
+                          onClick={() => saveProductsToTransaction(email._id)}
+                          disabled={!email || !(parsingResults[email._id]?.products?.products || []).length}
+                          className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                        >
+                          Save Products to Transaction
+                        </Button>
+                      </div>
+                      
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-gray-50">
+                              <th className="px-3 py-2 text-left">Product</th>
+                              <th className="px-3 py-2 text-right">Quantity</th>
+                              <th className="px-3 py-2 text-right">Total</th>
+                              <th className="px-3 py-2 text-right">Cost Discount</th>
+                              <th className="px-3 py-2 text-right">Adjusted Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {parsingResults[email._id].products?.products?.map((product, index) => {
+                              // Calculate adjusted total based on discount
+                              const discount = product.costDiscount || 0;
+                              const adjustedTotal = product.total * (1 - discount);
+                              
+                              return (
+                                <tr key={index} className="border-b">
+                                  <td className="px-3 py-2">{product.name}</td>
+                                  <td className="px-3 py-2 text-right">{product.quantity}</td>
+                                  <td className="px-3 py-2 text-right">{formatCurrency(product.total.toString())}</td>
+                                  <td className="px-3 py-2 text-right">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max="1"
+                                      step="0.01"
+                                      value={product.costDiscount || 0}
+                                      onChange={(e) => {
+                                        // Update the cost discount for this product
+                                        const newDiscount = Math.min(1, Math.max(0, parseFloat(e.target.value) || 0));
+                                        
+                                        const currentEmailProducts = parsingResults[email._id]?.products?.products;
+                                        if (currentEmailProducts) {
+                                          const updatedProducts = [...currentEmailProducts]; // Now safe due to the check
+                                          updatedProducts[index] = {
+                                            ...updatedProducts[index],
+                                            costDiscount: newDiscount
+                                          };
+                                          
+                                          // Update the parsing results
+                                          const newParsingResultsForEmail = {
+                                            ...parsingResults[email._id],
+                                            products: {
+                                              ...(parsingResults[email._id]?.products),
+                                              products: updatedProducts
+                                            }
+                                          };
+                                          
+                                          setParsingResults(prevResults => ({
+                                            ...prevResults,
+                                            [email._id]: newParsingResultsForEmail as Record<ParsingField, ParsingResult> // Added type assertion
+                                          }));
+                                        }
+                                      }}
+                                      className="w-20 px-2 py-1 border rounded text-right"
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    {formatCurrency(adjustedTotal.toString())}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot>
+                            <tr className="bg-gray-50 font-medium">
+                              <td className="px-3 py-2" colSpan={2}>Total</td>
+                              <td className="px-3 py-2 text-right">
+                                {formatCurrency(
+                                  (parsingResults[email._id].products?.products || [])
+                                    .reduce((sum, p) => sum + p.total, 0)
+                                    .toString()
+                                )}
+                              </td>
+                              <td className="px-3 py-2"></td>
+                              <td className="px-3 py-2 text-right">
+                                {formatCurrency(
+                                  (parsingResults[email._id].products?.products || [])
+                                    .reduce((sum, p) => sum + (p.total * (1 - (p.costDiscount || 0))), 0)
+                                    .toString()
+                                )}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  )}
 
-        {formData.type === 'expense' && (
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Expense Details</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Expense Type</label>
-                <input
-                  type="text"
-                  value={formData.expenseType || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, expenseType: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                />
+                {/* Parsing UI */}
+                {expandedEmails[email._id] && isParsingMode && selectedEmail === email._id && (
+                  <div className="mt-3 p-3 bg-white rounded-lg border border-purple-300">
+                    <p className="text-sm font-medium mb-2">Select information to extract:</p>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {(['orderNumber', 'total', 'subtotal', 'shipping', 'tax', 'discount', 'products'] as ParsingField[]).map(field => (
+                        <button
+                          key={field}
+                          onClick={() => handleFieldSelect(field)}
+                          className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                            selectedField === field 
+                              ? 'bg-purple-600 text-white' 
+                              : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                          }`}
+                        >
+                          {field}
+                        </button>
+                      ))}
+                    </div>
+                    
+                    {selectedField === 'products' ? (
+                      <div className="border border-purple-200 rounded-lg p-3 mb-3">
+                        <p className="text-sm font-medium mb-2">Product Parsing:</p>
+                        <p className="text-xs text-gray-600 mb-3">
+                          For products, you&apos;ll need to define patterns for each part.
+                          First select the text for a product name or section, then click the appropriate button.
+                        </p>
+                        
+                        <div className="flex flex-wrap gap-2 mb-3">
+                          <button 
+                            className={`px-3 py-1 text-sm rounded-full ${
+                              productParsingState.namePattern 
+                                ? 'bg-blue-600 text-white' 
+                                : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                            } transition-colors`}
+                            onClick={() => handleProductPatternAction('name')}
+                          >
+                            Product Name Pattern
+                            {productParsingState.namePattern && ' ✓'}
+                          </button>
+                          <button 
+                            className={`px-3 py-1 text-sm rounded-full ${
+                              productParsingState.quantityPattern 
+                                ? 'bg-green-600 text-white' 
+                                : 'bg-green-100 text-green-700 hover:bg-green-200'
+                            } transition-colors`}
+                            onClick={() => handleProductPatternAction('quantity')}
+                          >
+                            Quantity Pattern
+                            {productParsingState.quantityPattern && ' ✓'}
+                          </button>
+                          <button 
+                            className={`px-3 py-1 text-sm rounded-full ${
+                              productParsingState.totalPattern 
+                                ? 'bg-amber-600 text-white' 
+                                : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                            } transition-colors`}
+                            onClick={() => handleProductPatternAction('total')}
+                          >
+                            Total Pattern
+                            {productParsingState.totalPattern && ' ✓'}
+                          </button>
+                        </div>
+                        
+                        {/* Add wholesale discount input */}
+                        <div className="mb-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Wholesale Discount Percentage
+                          </label>
+                          <div className="flex items-center">
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="1"
+                              value={productParsingState.wholesaleDiscount ? (productParsingState.wholesaleDiscount * 100) : ''}
+                              onChange={(e) => handleWholesaleDiscountChange(e.target.value)}
+                              placeholder="Enter %"
+                              className="w-24 px-3 py-2 border border-gray-300 rounded-md mr-2"
+                            />
+                            <span className="text-gray-600">%</span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Enter the wholesale discount percentage (e.g., 20 for 20%)
+                          </p>
+                        </div>
+                        
+                        <div className="mt-3">
+                          {selectedText && (
+                            <div className="p-2 bg-gray-50 rounded border text-sm mb-3">
+                              <p className="font-medium mb-1">Selected Text:</p>
+                              <p className="font-mono text-xs break-all">{selectedText}</p>
+                            </div>
+                          )}
+                          
+                          {(productParsingState.namePattern && productParsingState.quantityPattern && productParsingState.totalPattern) && (
+                            <button 
+                              onClick={saveProductPatterns}
+                              className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded transition-colors"
+                            >
+                              Save Product Patterns
+                            </button>
+                          )}
+                        </div>
+                        
+                        <p className="text-xs text-gray-600 mt-2">
+                          All products in this email will be parsed with these patterns.
+                        </p>
+                      </div>
+                    ) : (
+                      selectedText && selectedField && (
+                        <div className="space-y-3">
+                          <div className="p-2 bg-gray-50 rounded border text-sm">
+                            <p className="font-medium mb-1">Selected Text:</p>
+                            <p className="font-mono text-xs break-all">{selectedText}</p>
+                          </div>
+                          
+                          <button
+                            onClick={createRegexFromSelection}
+                            className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded transition-colors"
+                          >
+                            Create Pattern from Selection
+                          </button>
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
+                
+                {/* Email body */}
+                {expandedEmails[email._id] && (
+                  <div 
+                    className="email-body mt-4 p-4 bg-white rounded border border-purple-200 overflow-x-auto" 
+                    onMouseUp={handleTextSelection}
+                    onClick={(e) => e.stopPropagation()} // Prevent clicks in body from toggling expansion
+                  >
+                    {isHtml ? (
+                      <div className="prose max-w-none">
+                        {/* For HTML emails, just use dangerouslySetInnerHTML for now */}
+                        {/* In a production app, you might want to parse and highlight HTML too */}
+                        <div dangerouslySetInnerHTML={{ __html: email.body }} />
+                        
+                        {/* Add a parsed values summary at the top for HTML emails */}
+                        {hasParsingResults && Object.values(parsingResults[email._id]).some(r => r.value) && (
+                          <div className="mb-4 p-3 bg-gray-50 border rounded-md">
+                            <p className="font-medium text-sm mb-2">Extracted Values:</p>
+                            <div className="flex flex-wrap gap-2">
+                              {Object.entries(parsingResults[email._id]).map(([field, result]) => 
+                                result.value && (
+                                  <div 
+                                    key={field} 
+                                    className={`px-2 py-1 rounded text-xs ${getValueColorClass(field as ParsingField, result.value)}`}
+                                  >
+                                    <span className="font-medium mr-1">{field}:</span> 
+                                    <span>
+                                      {field === 'orderNumber' ? 
+                                        `#${result.value}` : 
+                                        ['total', 'subtotal', 'shipping', 'tax'].includes(field) ? 
+                                          formatCurrency(result.value) : 
+                                          field === 'discount' ? 
+                                            `-${formatCurrency(result.value.replace('-', ''))}` : 
+                                            result.value
+                                      }
+                                    </span>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <pre className="font-mono text-sm whitespace-pre-wrap">
+                        {hasParsingResults ? (
+                          <>
+                            {renderEmailBodyWithHighlights(email.body, parsingResults[email._id])}
+                          </>
+                        ) : (
+                          email.body
+                        )}
+                      </pre>
+                    )}
+                  </div>
+                )}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Expense Label</label>
-                <input
-                  type="text"
-                  value={formData.expenseLabel || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, expenseLabel: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Supplier</label>
-                <input
-                  type="text"
-                  value={formData.supplier || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, supplier: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Order Number</label>
-                <input
-                  type="text"
-                  value={formData.supplierOrderNumber || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, supplierOrderNumber: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {formData.type === 'training' && (
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Training Details</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Trainer</label>
-                <input
-                  type="text"
-                  value={formData.trainer || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, trainer: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Client Name</label>
-                <input
-                  type="text"
-                  value={formData.clientName || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, clientName: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Dog Name</label>
-                <input
-                  type="text"
-                  value={formData.dogName || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, dogName: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Training Agency</label>
-                <input
-                  type="text"
-                  value={formData.trainingAgency || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, trainingAgency: e.target.value }))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Notes Field */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Notes</label>
-          <textarea
-            value={formData.notes || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-            rows={3}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-          />
-        </div>
-
-        {/* Submit Button */}
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-          >
-            Create Transaction
-          </button>
-        </div>
-      </form>
+            );
+          }
+        })}
+      </div>
     </div>
   );
 } 

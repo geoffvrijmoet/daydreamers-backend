@@ -142,7 +142,8 @@ export async function GET(request: Request) {
           // Create a new invoice email record
           const invoiceEmail = new InvoiceEmailModel({
             ...parsedEmail,
-            status: 'pending'
+            status: 'pending',
+            supplierId: supplier._id
           })
 
           await invoiceEmail.save()

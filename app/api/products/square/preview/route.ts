@@ -18,14 +18,27 @@ export async function GET() {
     await connectToDatabase()
     console.log('Fetching Square catalog for preview...')
 
-    // First, get existing product IDs from MongoDB
+    // First, get existing product IDs from MongoDB using the new platformMetadata structure
     const existingProducts = await (mongoose.connection.db as Db).collection('products')
-      .find({ squareId: { $exists: true } })
-      .project({ squareId: 1 })
+      .find({ 
+        'platformMetadata': { 
+          $elemMatch: { 
+            'platform': 'square',
+            'productId': { $exists: true } 
+          } 
+        }
+      })
+      .project({ 'platformMetadata.$': 1 })
       .toArray()
     
-    const existingSquareIds = new Set(existingProducts.map(p => p.squareId))
-    console.log(`Found ${existingSquareIds.size} existing products in MongoDB`)
+    // Extract Square IDs from platformMetadata
+    const existingSquareIds = new Set(
+      existingProducts
+        .map(p => p.platformMetadata?.find((meta: { platform: string, productId?: string }) => meta.platform === 'square')?.productId)
+        .filter(Boolean)
+    )
+    
+    console.log(`Found ${existingSquareIds.size} existing products in MongoDB with Square IDs`)
 
     // Get all catalog items from Square with pagination
     const allProducts = []
