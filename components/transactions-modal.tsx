@@ -10,6 +10,17 @@ import {
 import { HomeSyncButton } from './home-sync-button'
 import { formatInEasternTime } from '@/lib/utils/dates'
 
+// Add some custom styles for animations
+const fadeInAnimation = `
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-in;
+  }
+`;
+
 interface Transaction {
   _id: string
   date: string
@@ -36,6 +47,23 @@ interface Transaction {
   tip?: number
   discount?: number
   shipping?: number
+  profitCalculation?: {
+    lastCalculatedAt: string
+    totalCost: number
+    totalProfit: number
+    profitMargin: number
+    hasCostData: boolean
+    items: Array<{
+      productId: string
+      quantity: number
+      itemName: string
+      costBasis: number
+      totalCost: number
+      totalPrice: number
+      profit: number
+      profitMargin: number
+    }>
+  }
 }
 
 type TransactionsModalProps = {
@@ -47,12 +75,27 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [calculatingProfitId, setCalculatingProfitId] = useState<string | null>(null);
+  const [successMessageIds, setSuccessMessageIds] = useState<{[key: string]: boolean}>({});
 
   useEffect(() => {
     if (open) {
       fetchTransactions()
     }
   }, [open])
+
+  // Clear success messages after 3 seconds
+  useEffect(() => {
+    const successIds = Object.keys(successMessageIds);
+    if (successIds.length > 0) {
+      const timer = setTimeout(() => {
+        // Create a new object without the current success messages
+        const clearedMessages: {[key: string]: boolean} = {};
+        setSuccessMessageIds(clearedMessages);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessageIds]);
 
   const fetchTransactions = async () => {
     try {
@@ -105,12 +148,19 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
       if (t.source === 'manual' && taxAmount) {
         acc.nonPlatformSalesTax += taxAmount;
       }
+
+      // Add profit calculation if it exists for sale transactions
+      if (t.type === 'sale' && t.profitCalculation && typeof t.profitCalculation.totalProfit === 'number') {
+        acc.totalProfit += t.profitCalculation.totalProfit;
+        acc.hasProfitData = true;
+      }
+
       return acc;
-    }, { revenue: 0, preTaxAmount: 0, salesTax: 0, nonPlatformSalesTax: 0 });
+    }, { revenue: 0, preTaxAmount: 0, salesTax: 0, nonPlatformSalesTax: 0, totalProfit: 0, hasProfitData: false });
     
     totals[date] = dayStats;
     return totals;
-  }, {} as Record<string, { revenue: number, preTaxAmount: number, salesTax: number, nonPlatformSalesTax: number }>);
+  }, {} as Record<string, { revenue: number, preTaxAmount: number, salesTax: number, nonPlatformSalesTax: number, totalProfit: number, hasProfitData: boolean }>);
 
   // Helper function to safely format numbers
   const formatCurrency = (value: number | undefined | null): string => {
@@ -139,20 +189,75 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
         // Remove transaction from local state for immediate UI update
         setTransactions(prev => prev.filter(t => t._id !== transactionId));
 
-        // You might want to use a notification library here (like sonner, react-toastify)
-        alert('Transaction deleted successfully!'); // Placeholder for toast
+        // Show success message on this transaction (it will be removed automatically)
+        const updatedSuccessIds = { ...successMessageIds };
+        updatedSuccessIds[transactionId] = true;
+        setSuccessMessageIds(updatedSuccessIds);
 
       } catch (error) {
         console.error('Error deleting transaction:', error);
-        alert(`Error: ${error instanceof Error ? error.message : 'Could not delete transaction'}`); // Placeholder for toast
+        // Show error inline instead of alert
+        const updatedSuccessIds = { ...successMessageIds };
+        updatedSuccessIds[transactionId] = false; // false means error
+        setSuccessMessageIds(updatedSuccessIds);
       } finally {
         setDeletingId(null);
       }
     }
   };
 
+  // Refresh profit calculation
+  const handleRefreshProfit = async (transactionId: string) => {
+    if (calculatingProfitId) return; // Prevent multiple calculation
+
+    setCalculatingProfitId(transactionId);
+    try {
+      const response = await fetch(`/api/transactions/${transactionId}/profit`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Failed to calculate profit' }));
+        throw new Error(errorData.message || 'Failed to calculate profit');
+      }
+
+      const responseData = await response.json();
+      console.log('[CLIENT] Profit calculation result:', responseData);
+      
+      // Update the transaction in local state if we received valid profit data
+      if (responseData.success && responseData.profitCalculation) {
+        setTransactions(prev => prev.map(t => 
+          t._id === transactionId ? { 
+            ...t, 
+            profitCalculation: responseData.profitCalculation 
+          } : t
+        ));
+
+        // Show success message for this transaction
+        const updatedSuccessIds = { ...successMessageIds };
+        updatedSuccessIds[transactionId] = true;
+        setSuccessMessageIds(updatedSuccessIds);
+      } else {
+        // Handle case where response is ok but data is invalid
+        console.error('[CLIENT] Invalid profit calculation data:', responseData);
+        const updatedSuccessIds = { ...successMessageIds };
+        updatedSuccessIds[transactionId] = false;
+        setSuccessMessageIds(updatedSuccessIds);
+      }
+    } catch (error) {
+      console.error('Error calculating profit:', error);
+      // Show error inline instead of alert
+      const updatedSuccessIds = { ...successMessageIds };
+      updatedSuccessIds[transactionId] = false; // false means error
+      setSuccessMessageIds(updatedSuccessIds);
+    } finally {
+      setCalculatingProfitId(null);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
+      <style dangerouslySetInnerHTML={{ __html: fadeInAnimation }} />
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
         <DialogHeader className="flex flex-row items-center justify-between">
           <DialogTitle>Transactions</DialogTitle>
@@ -192,6 +297,20 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                           )}
                         </div>
                       )}
+                      {dailyTotals[date]?.hasProfitData && (
+                        <div className={
+                          dailyTotals[date]?.totalProfit >= 0 
+                            ? "text-green-600" 
+                            : "text-red-600"
+                        }>
+                          Profit: ${formatCurrency(dailyTotals[date]?.totalProfit)}
+                          {dailyTotals[date]?.preTaxAmount > 0 && (
+                            <span className="text-gray-500">
+                              {' '}({(dailyTotals[date]?.totalProfit / dailyTotals[date]?.preTaxAmount * 100).toFixed(1)}%)
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -214,6 +333,17 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                                   Sale
                                 </span>
                               )}
+                              {/* Add payment source/method badge */}
+                              {transaction.type === 'sale' && (
+                                <span className="ml-1 px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-800 border border-gray-200">
+                                  {transaction.source === 'square' ? 'Square' :
+                                   transaction.source === 'shopify' ? 'Shopify' :
+                                   transaction.paymentMethod === 'Venmo' ? 'Venmo' :
+                                   transaction.paymentMethod === 'Zelle' ? 'Zelle' :
+                                   transaction.paymentMethod === 'Cash App' ? 'Cash App' :
+                                   transaction.paymentMethod === 'Cash' ? 'Cash' : 'Manual'}
+                                </span>
+                              )}
                             </span>
                             <span className="text-sm text-gray-500">
                               {formatInEasternTime(transaction.date, 'h:mm a')}
@@ -231,6 +361,44 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                               ))}
                             </ul>
                           )}
+                          
+                          {/* Display profit calculation for sales */}
+                          {transaction.type === 'sale' && transaction.profitCalculation && (
+                            <div className="mt-2 text-sm">
+                              <div className={
+                                typeof transaction.profitCalculation.totalProfit === 'number' && 
+                                transaction.profitCalculation.totalProfit >= 0 
+                                  ? "text-green-600" 
+                                  : "text-red-600"
+                              }>
+                                Profit: ${formatCurrency(transaction.profitCalculation.totalProfit)} 
+                                ({typeof transaction.profitCalculation.profitMargin === 'number' 
+                                    ? transaction.profitCalculation.profitMargin.toFixed(1) 
+                                    : '0.0'}%)
+                                {typeof transaction.profitCalculation.hasCostData === 'boolean' && 
+                                 !transaction.profitCalculation.hasCostData && (
+                                  <span className="text-amber-500 ml-2">⚠️ Incomplete cost data</span>
+                                )}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Last calculated: {transaction.profitCalculation.lastCalculatedAt 
+                                  ? formatInEasternTime(transaction.profitCalculation.lastCalculatedAt, 'MMM d, yyyy h:mm a')
+                                  : 'N/A'}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Success/error messages for the transaction */}
+                          {successMessageIds[transaction._id] === true && (
+                            <div className="mt-1 text-sm text-green-600 font-medium animate-fade-in">
+                              ✓ Profit calculation updated
+                            </div>
+                          )}
+                          {successMessageIds[transaction._id] === false && (
+                            <div className="mt-1 text-sm text-red-600 font-medium animate-fade-in">
+                              ✗ Failed to update profit calculation
+                            </div>
+                          )}
                         </div>
                         <div className="text-right flex-shrink-0">
                           <div className="font-medium">${formatCurrency(transaction.amount)}</div>
@@ -247,6 +415,29 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                             <div className="text-sm text-gray-500">
                               Tax: ${formatCurrency(transaction.taxAmount)}
                             </div>
+                          )}
+                          
+                          {/* Add refresh button for sales */}
+                          {transaction.type === 'sale' && (
+                            <button
+                              onClick={() => handleRefreshProfit(transaction._id)}
+                              disabled={calculatingProfitId === transaction._id}
+                              className={`mt-2 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100
+                                        ${calculatingProfitId === transaction._id ? 'opacity-70 cursor-wait' : ''}`}
+                              title="Recalculate profit based on current product costs"
+                            >
+                              {calculatingProfitId === transaction._id ? (
+                                <span className="flex items-center">
+                                  <svg className="animate-spin -ml-1 mr-2 h-3 w-3 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                  Calculating...
+                                </span>
+                              ) : (
+                                <>Refresh profit</>
+                              )}
+                            </button>
                           )}
                         </div>
                         <button

@@ -80,6 +80,23 @@ interface ISaleTransaction extends IBaseTransaction {
   shopifySubtotalPrice?: number;
   shopifyTotalPrice?: number;
   shopifyPaymentGateway?: string;
+  profitCalculation?: {
+    lastCalculatedAt: Date;
+    totalCost: number;
+    totalProfit: number;
+    profitMargin: number;
+    hasCostData: boolean;
+    items: Array<{
+      productId: Types.ObjectId;
+      quantity: number;
+      itemName: string;
+      costBasis: number;
+      totalCost: number;
+      totalPrice: number;
+      profit: number;
+      profitMargin: number;
+    }>;
+  };
 }
 
 // Expense-specific interface
@@ -177,7 +194,24 @@ const SaleTransactionSchema = new Schema<ISaleTransaction>({
   shopifyTotalTax: { type: Number },
   shopifySubtotalPrice: { type: Number },
   shopifyTotalPrice: { type: Number },
-  shopifyPaymentGateway: { type: String }
+  shopifyPaymentGateway: { type: String },
+  profitCalculation: {
+    lastCalculatedAt: { type: Date },
+    totalCost: { type: Number },
+    totalProfit: { type: Number },
+    profitMargin: { type: Number },
+    hasCostData: { type: Boolean },
+    items: [{
+      productId: { type: Schema.Types.ObjectId, ref: 'Product' },
+      quantity: { type: Number },
+      itemName: { type: String },
+      costBasis: { type: Number },
+      totalCost: { type: Number },
+      totalPrice: { type: Number },
+      profit: { type: Number },
+      profitMargin: { type: Number }
+    }]
+  }
 });
 
 // Expense transaction schema
