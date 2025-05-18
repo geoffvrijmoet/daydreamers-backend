@@ -11,6 +11,67 @@ interface TransactionQuery {
   type?: string;
 }
 
+// Define base transaction interface to replace 'any'
+interface BaseTransactionDocument {
+  date: Date;
+  amount: number;
+  type: 'sale' | 'expense' | 'training';
+  source: 'manual' | 'shopify' | 'square' | 'amex';
+  notes: string;
+  createdAt: Date;
+  updatedAt: Date;
+  cardLast4?: string;
+  emailId?: string;
+  merchant?: string;
+  description?: string;
+}
+
+// Sale transaction specific fields
+interface SaleTransactionDocument extends BaseTransactionDocument {
+  type: 'sale';
+  customer: string;
+  paymentMethod?: string;
+  isTaxable: boolean;
+  preTaxAmount: number;
+  taxAmount: number;
+  products: Array<{
+    productId: mongoose.Types.ObjectId;
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+    isTaxable: boolean;
+  }>;
+  tip?: number;
+  discount?: number;
+  shipping?: number;
+}
+
+// Expense transaction specific fields
+interface ExpenseTransactionDocument extends BaseTransactionDocument {
+  type: 'expense';
+  merchant: string;
+  purchaseCategory?: string;
+  supplierOrderNumber?: string;
+  products?: Array<{
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+    costDiscount?: number;
+  }>;
+}
+
+// Training transaction specific fields
+interface TrainingTransactionDocument extends BaseTransactionDocument {
+  type: 'training';
+  trainer: string;
+  clientName: string;
+  dogName: string;
+  revenue: number;
+  trainingAgency?: string;
+}
+
 export async function GET(request: Request) {
   try {
     await connectToDatabase()
@@ -110,7 +171,7 @@ export async function POST(request: Request) {
     } = body
     
     // Base transaction object
-    let transactionToSave: any = {
+    let transactionToSave: BaseTransactionDocument = {
       date: new Date(date),
       amount: parseFloat(amount),
       type,
@@ -125,11 +186,12 @@ export async function POST(request: Request) {
 
     // Handle different transaction types
     if (type === 'sale') {
-      transactionToSave = {
+      const saleTransaction: SaleTransactionDocument = {
         ...transactionToSave,
+        type: 'sale',
         customer: customer || clientName || '', // Use customer, fallback to clientName for training sales
         paymentMethod,
-        isTaxable,
+        isTaxable: !!isTaxable,
         preTaxAmount: parseFloat(preTaxAmount) || 0,
         taxAmount: parseFloat(taxAmount) || 0,
         tip: parseFloat(tip) || 0,
@@ -137,26 +199,31 @@ export async function POST(request: Request) {
         shipping: parseFloat(shipping) || 0,
         products: products && Array.isArray(products) ? products.map(p => ({ ...p })) : [], // Ensure products is an array
       };
-      console.log('Server: /api/transactions POST: Sale transaction to save (preTaxAmount):', transactionToSave.preTaxAmount);
-      console.log('Server: /api/transactions POST: Sale transaction to save (taxAmount):', transactionToSave.taxAmount);
+      
+      transactionToSave = saleTransaction;
+      
+      console.log('Server: /api/transactions POST: Sale transaction to save (preTaxAmount):', saleTransaction.preTaxAmount);
+      console.log('Server: /api/transactions POST: Sale transaction to save (taxAmount):', saleTransaction.taxAmount);
     } else if (type === 'expense') {
       transactionToSave = {
         ...transactionToSave,
+        type: 'expense',
         merchant: supplier || '', // Use supplier as merchant for expenses
         purchaseCategory: category || '',
         supplierOrderNumber: supplierOrderNumber || '',
         products: products && Array.isArray(products) ? products.map(p => ({ ...p })) : [],
-      };
+      } as ExpenseTransactionDocument;
     } else if (type === 'training') {
       transactionToSave = {
         ...transactionToSave,
+        type: 'training',
         trainer,
         clientName, // Already captured in customer for sale type if applicable
         dogName,
         // sessionNotes is already in transactionToSave.notes
         revenue: parseFloat(revenue) || parseFloat(amount), // Use revenue or amount
         trainingAgency,
-      };
+      } as TrainingTransactionDocument;
     } else {
       // For generic types or if type is not 'sale', 'expense', or 'training'
       // We might want to add a generic merchant or description if not covered
