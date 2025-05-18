@@ -327,13 +327,21 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
         };
       }
 
+      console.log('Client: handleSubmit: payload before API call:', payload);
+      console.log('Client: handleSubmit: preTaxAmount:', formData.type === 'sale' ? ((formData as SaleFormData).preTaxAmount).toFixed(2) : 'N/A');
+      console.log('Client: handleSubmit: taxAmount:', formData.type === 'sale' ? ((formData as SaleFormData).taxAmount).toFixed(2) : 'N/A');
+
       const response = await fetch('/api/transactions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload), // Send the potentially modified payload
+        body: JSON.stringify(payload),
       })
+
+      console.log('Client: handleSubmit: API Response Status:', response.status);
+      const responseData = await response.json();
+      console.log('Client: handleSubmit: API Response Data:', responseData);
 
       if (!response.ok) {
          const errorText = await response.text();

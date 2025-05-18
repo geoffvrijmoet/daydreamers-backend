@@ -74,64 +74,98 @@ export async function POST(request: Request) {
   try {
     await connectToDatabase()
     const body = await request.json()
+    console.log('Server: /api/transactions POST: Received body:', body); // Log the whole body
+
     const { 
       date, 
       amount, 
-      merchant, 
-      description, 
+      // merchant, // Will get this from body if type is 'expense' or from customer if 'sale'
+      // description, // Notes will be used as description
       type = 'expense', 
       source = 'manual',
       cardLast4, 
       emailId,
-      products // Array of product data with costDiscount
+      products, // Array of product data
+      // Fields specific to SaleFormData
+      customer,
+      paymentMethod,
+      isTaxable,
+      preTaxAmount,
+      taxAmount,
+      tip,
+      discount,
+      shipping,
+      notes, // This will be our description
+      // Fields specific to ExpenseFormData
+      category, // Renamed to purchaseCategory
+      supplier, // Renamed to merchant
+      supplierOrderNumber,
+      // Fields specific to TrainingFormData
+      trainer,
+      clientName,
+      dogName,
+      sessionNotes, // Could also be part of notes
+      revenue,
+      trainingAgency
     } = body
     
-    interface TransactionWithProducts {
-      date: Date;
-      amount: number;
-      description: string;
-      merchant: string;
-      type: string;
-      source: string;
-      cardLast4?: string;
-      emailId?: string;
-      createdAt: Date;
-      updatedAt: Date;
-      products?: Array<{
-        name: string;
-        quantity: number;
-        unitPrice: number;
-        totalPrice: number;
-        costDiscount: number;
-      }>;
-    }
-    
-    const transaction: TransactionWithProducts = {
+    // Base transaction object
+    let transactionToSave: any = {
       date: new Date(date),
       amount: parseFloat(amount),
-      description,
-      merchant,
       type,
       source,
-      cardLast4,
-      emailId,
+      notes: notes || sessionNotes || '', // Use notes as description, fallback to sessionNotes
       createdAt: new Date(),
       updatedAt: new Date()
+    };
+
+    if (cardLast4) transactionToSave.cardLast4 = cardLast4;
+    if (emailId) transactionToSave.emailId = emailId;
+
+    // Handle different transaction types
+    if (type === 'sale') {
+      transactionToSave = {
+        ...transactionToSave,
+        customer: customer || clientName || '', // Use customer, fallback to clientName for training sales
+        paymentMethod,
+        isTaxable,
+        preTaxAmount: parseFloat(preTaxAmount) || 0,
+        taxAmount: parseFloat(taxAmount) || 0,
+        tip: parseFloat(tip) || 0,
+        discount: parseFloat(discount) || 0,
+        shipping: parseFloat(shipping) || 0,
+        products: products && Array.isArray(products) ? products.map(p => ({ ...p })) : [], // Ensure products is an array
+      };
+      console.log('Server: /api/transactions POST: Sale transaction to save (preTaxAmount):', transactionToSave.preTaxAmount);
+      console.log('Server: /api/transactions POST: Sale transaction to save (taxAmount):', transactionToSave.taxAmount);
+    } else if (type === 'expense') {
+      transactionToSave = {
+        ...transactionToSave,
+        merchant: supplier || '', // Use supplier as merchant for expenses
+        purchaseCategory: category || '',
+        supplierOrderNumber: supplierOrderNumber || '',
+        products: products && Array.isArray(products) ? products.map(p => ({ ...p })) : [],
+      };
+    } else if (type === 'training') {
+      transactionToSave = {
+        ...transactionToSave,
+        trainer,
+        clientName, // Already captured in customer for sale type if applicable
+        dogName,
+        // sessionNotes is already in transactionToSave.notes
+        revenue: parseFloat(revenue) || parseFloat(amount), // Use revenue or amount
+        trainingAgency,
+      };
+    } else {
+      // For generic types or if type is not 'sale', 'expense', or 'training'
+      // We might want to add a generic merchant or description if not covered
+      transactionToSave.merchant = body.merchant || '';
+      transactionToSave.description = body.description || transactionToSave.notes || '';
     }
-    
-    // If products are provided, add them to the transaction
-    if (products && Array.isArray(products) && products.length > 0) {
-      transaction.products = products.map(product => ({
-        name: product.name,
-        quantity: product.quantity,
-        unitPrice: product.unitPrice,
-        totalPrice: product.totalPrice,
-        costDiscount: product.costDiscount || 0
-      }))
-    }
-    
-    console.log('Creating transaction:', transaction)
-    const result = await mongoose.connection.db!.collection('transactions').insertOne(transaction)
+        
+    console.log('Server: /api/transactions POST: Transaction object before saving:', transactionToSave);
+    const result = await mongoose.connection.db!.collection('transactions').insertOne(transactionToSave)
     
     // If this is from an email, mark the email as processed
     if (emailId) {
@@ -150,7 +184,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       transaction: {
-        ...transaction,
+        ...transactionToSave,
         id: result.insertedId
       }
     })
