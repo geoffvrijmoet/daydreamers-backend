@@ -21,6 +21,7 @@ interface EmailParsingConfig {
       total: EmailParsingPattern;
     },
     wholesaleDiscount?: number; // Percentage as decimal (0.20 for 20%)
+    quantityMultiple?: number; // Multiplier for quantities (e.g., 2.0 for double)
   };
   items?: {
     section: EmailParsingPattern;  // Pattern to identify the items section
@@ -128,7 +129,8 @@ const SupplierSchema = new Schema<ISupplier>({
           transform: { type: String }
         }
       },
-      wholesaleDiscount: { type: Number }
+      wholesaleDiscount: { type: Number },
+      quantityMultiple: { type: Number }
     },
     items: {
       section: {

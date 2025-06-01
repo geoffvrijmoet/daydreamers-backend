@@ -44,6 +44,7 @@ interface EmailParsingConfig {
       total: EmailParsingPattern;
     },
     wholesaleDiscount?: number;
+    quantityMultiple?: number;
   };
 }
 
@@ -247,13 +248,20 @@ export default function TransactionsPage() {
   });
 
   const [productParsingState, setProductParsingState] = useState<{
-    sectionPattern?: string;
-    namePattern?: string;
-    quantityPattern?: string;
-    totalPattern?: string;
+    nameExamples: string[];
+    quantityExamples: string[];
+    totalExamples: string[];
     wholesaleDiscount?: number;
-    parsingMode?: 'section' | 'name' | 'quantity' | 'total';
-  }>({});
+    quantityMultiple?: number;
+    selectedPatternType?: 'name' | 'quantity' | 'total' | null;
+  }>({
+    nameExamples: [],
+    quantityExamples: [],
+    totalExamples: []
+  });
+
+  // Filter state
+  const [activeFilter, setActiveFilter] = useState<'all' | 'sales' | 'expenses' | 'invoices'>('all');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -358,42 +366,69 @@ export default function TransactionsPage() {
         Object.entries(email.supplier.emailParsing).forEach(([field, config]) => {
           if (config && field in results) {
             const fieldName = field as ParsingField;
-            try {
-              console.log(`Trying to parse field: ${field}`);
-              console.log(`Pattern: ${config.pattern}`);
-              console.log(`Flags: ${config.flags || 'none'}`);
-              
-              const regex = new RegExp(config.pattern, config.flags || '');
-              const match = email.body.match(regex);
-              
-              console.log(`Match result: ${match ? 'Found match' : 'No match'}`);
-              
-              if (match && match[config.groupIndex]) {
-                let value = match[config.groupIndex];
-                console.log(`Raw value: ${value}`);
+            
+            // Special handling for products field
+            if (fieldName === 'products' && email.supplier?.emailParsing?.products) {
+              try {
+                console.log(`Trying to parse products for email ${email._id}`);
+                const productResults = extractProductsFromEmail(email.body, email.supplier.emailParsing.products);
                 
-                // Apply transformation if specified
-                if (config.transform === 'parseFloat') {
-                  value = parseFloat(value).toString();
-                } else if (config.transform === 'parseInt') {
-                  value = parseInt(value).toString();
-                } else if (config.transform === 'trim') {
-                  value = value.trim();
+                if (productResults && productResults.products.length > 0) {
+                  console.log(`Found ${productResults.products.length} products:`, productResults.products);
+                  
+                  results.products = {
+                    value: String(productResults.products.length),
+                    match: 'Products found',
+                    products: productResults.products
+                  };
+                  
+                  emailHasResults = true;
+                  parsedFields++;
+                } else {
+                  console.log('No products found or parsing failed');
                 }
-                
-                console.log(`Transformed value: ${value}`);
-                
-                results[fieldName] = { 
-                  value: value, 
-                  match: match[0],
-                  pattern: config.pattern 
-                };
-                
-                emailHasResults = true;
-                parsedFields++;
+              } catch (e) {
+                console.error(`Error parsing products:`, e);
               }
-            } catch (e) {
-              console.error(`Error parsing ${field}:`, e);
+            } else {
+              // Handle regular fields (non-products)
+              try {
+                console.log(`Trying to parse field: ${field}`);
+                console.log(`Pattern: ${config.pattern}`);
+                console.log(`Flags: ${config.flags || 'none'}`);
+                
+                const regex = new RegExp(config.pattern, config.flags || '');
+                const match = email.body.match(regex);
+                
+                console.log(`Match result: ${match ? 'Found match' : 'No match'}`);
+                
+                if (match && match[config.groupIndex]) {
+                  let value = match[config.groupIndex];
+                  console.log(`Raw value: ${value}`);
+                  
+                  // Apply transformation if specified
+                  if (config.transform === 'parseFloat') {
+                    value = parseFloat(value).toString();
+                  } else if (config.transform === 'parseInt') {
+                    value = parseInt(value).toString();
+                  } else if (config.transform === 'trim') {
+                    value = value.trim();
+                  }
+                  
+                  console.log(`Transformed value: ${value}`);
+                  
+                  results[fieldName] = { 
+                    value: value, 
+                    match: match[0],
+                    pattern: config.pattern 
+                  };
+                  
+                  emailHasResults = true;
+                  parsedFields++;
+                }
+              } catch (e) {
+                console.error(`Error parsing ${field}:`, e);
+              }
             }
           }
         });
@@ -446,7 +481,7 @@ export default function TransactionsPage() {
   };
 
   const handleTextSelection = () => {
-    if (!isParsingMode || !selectedEmail || !selectedField) return;
+    if (!isParsingMode || !selectedEmail) return;
     
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) return;
@@ -454,6 +489,35 @@ export default function TransactionsPage() {
     const text = selection.toString().trim();
     if (text) {
       setSelectedText(text);
+      
+      // If we're in products mode and have a selected pattern type, auto-add the example
+      if (selectedField === 'products' && productParsingState.selectedPatternType) {
+        const action = productParsingState.selectedPatternType;
+        
+        setProductParsingState(prev => {
+          const newState = { ...prev };
+          
+          switch (action) {
+            case 'name':
+              newState.nameExamples = [...newState.nameExamples, text];
+              break;
+            case 'quantity':
+              newState.quantityExamples = [...newState.quantityExamples, text];
+              break;
+            case 'total':
+              newState.totalExamples = [...newState.totalExamples, text];
+              break;
+          }
+          
+          // Clear the selected pattern type after adding
+          newState.selectedPatternType = null;
+          
+          return newState;
+        });
+        
+        // Clear the selected text
+        setSelectedText('');
+      }
     }
   };
 
@@ -604,66 +668,159 @@ export default function TransactionsPage() {
 
   // Handle product pattern action
   const handleProductPatternAction = (action: 'name' | 'quantity' | 'total') => {
-    if (!selectedText || !selectedEmail) return;
-    
-    setProductParsingState(prev => ({
-      ...prev,
-      parsingMode: action
-    }));
-    
-    // Create pattern based on the selected action
-    let pattern = '';
-    
-    // First, escape regex special characters in the selected text
-    const escapedText = selectedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    
-    switch (action) {
-      case 'name':
-        // For product name, just capture the text as is
-        pattern = `(${escapedText})`;
-        break;
-      
-      case 'quantity':
-        // For quantity, look for numbers
-        if (/\d+/.test(selectedText)) {
-          const numberMatch = selectedText.match(/(\d+)/);
-          if (numberMatch) {
-            const numberIndex = selectedText.indexOf(numberMatch[1]);
-            const beforeNumber = selectedText.substring(0, numberIndex);
-            pattern = `${beforeNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)`;
-          } else {
-            pattern = `${escapedText.replace(/(\d+)/, '(\\d+)')}`;
-          }
-        } else {
-          pattern = `${escapedText}\\s*(\\d+)`;
-        }
-        break;
-      
-      case 'total':
-        // For total, look for money amounts
-        if (/\$?\d+(\.\d+)?/.test(selectedText)) {
-          const priceMatch = selectedText.match(/\$?(\d+(\.\d+)?)/);
-          if (priceMatch) {
-            const priceIndex = selectedText.indexOf(priceMatch[0]);
-            const beforePrice = selectedText.substring(0, priceIndex);
-            pattern = `${beforePrice.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\$?(\\d+(\\.\\d+)?)`;
-          } else {
-            pattern = `${escapedText.replace(/\$?(\d+(\.\d+)?)/, '\\$?(\\d+(\\.\\d+)?)')}`;
-          }
-        } else {
-          pattern = `${escapedText}\\s*\\$?(\\d+(\\.\\d+)?)`;
-        }
-        break;
+    if (!selectedText || !selectedEmail) {
+      // If no text selected, just set the pattern type for the next selection
+      setProductParsingState(prev => ({
+        ...prev,
+        selectedPatternType: action
+      }));
+      return;
     }
     
-    // Save the pattern to state
-    setProductParsingState(prev => ({
-      ...prev,
-      [`${action}Pattern`]: pattern
-    }));
+    // Add the selected text to the appropriate examples list (allow duplicates for different contexts)
+    setProductParsingState(prev => {
+      const newState = { ...prev };
+      
+      switch (action) {
+        case 'name':
+          newState.nameExamples = [...newState.nameExamples, selectedText];
+          break;
+        case 'quantity':
+          newState.quantityExamples = [...newState.quantityExamples, selectedText];
+          break;
+        case 'total':
+          newState.totalExamples = [...newState.totalExamples, selectedText];
+          break;
+      }
+      
+      // Clear the selected pattern type
+      newState.selectedPatternType = null;
+      
+      return newState;
+    });
     
     // Clear the selected text
     setSelectedText('');
+  };
+
+  const removeExample = (type: 'name' | 'quantity' | 'total', index: number) => {
+    setProductParsingState(prev => {
+      const newState = { ...prev };
+      
+      switch (type) {
+        case 'name':
+          newState.nameExamples = newState.nameExamples.filter((_, i) => i !== index);
+          break;
+        case 'quantity':
+          newState.quantityExamples = newState.quantityExamples.filter((_, i) => i !== index);
+          break;
+        case 'total':
+          newState.totalExamples = newState.totalExamples.filter((_, i) => i !== index);
+          break;
+      }
+      
+      return newState;
+    });
+  };
+
+  const generatePatternFromExamples = (examples: string[], type: 'name' | 'quantity' | 'total'): string => {
+    if (examples.length === 0) return '';
+    
+    if (examples.length === 1) {
+      // For single example, create a simple pattern
+      const escapedText = examples[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      
+      switch (type) {
+        case 'name':
+          return `(${escapedText})`;
+        case 'quantity':
+          if (/\d+/.test(examples[0])) {
+            const numberMatch = examples[0].match(/(\d+)/);
+            if (numberMatch) {
+              const numberIndex = examples[0].indexOf(numberMatch[1]);
+              const beforeNumber = examples[0].substring(0, numberIndex);
+              return `${beforeNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)`;
+            }
+          }
+          return `${escapedText}\\s*(\\d+)`;
+        case 'total':
+          if (/\$?\d+(\.\d+)?/.test(examples[0])) {
+            const priceMatch = examples[0].match(/\$?(\d+(?:\.\d+)?)/);
+            if (priceMatch) {
+              const priceIndex = examples[0].indexOf(priceMatch[0]);
+              const beforePrice = examples[0].substring(0, priceIndex);
+              const afterPrice = examples[0].substring(priceIndex + priceMatch[0].length);
+              
+              // Escape the before and after parts
+              const escapedBefore = beforePrice.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const escapedAfter = afterPrice.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              
+              // Handle line breaks and whitespace more intelligently
+              const beforeWithWhitespace = escapedBefore.replace(/\s+/g, '\\s*');
+              const afterWithWhitespace = escapedAfter.replace(/\s+/g, '\\s*');
+              
+              return `${beforeWithWhitespace}\\$?(\\d+(?:\\.\\d+)?)${afterWithWhitespace}`;
+            }
+          }
+          return `${escapedText.replace(/\s+/g, '\\s*')}\\s*\\$?(\\d+(?:\\.\\d+)?)`;
+      }
+    }
+    
+    // For multiple examples, find common patterns
+    switch (type) {
+      case 'name':
+        // For names, create an alternation pattern
+        const escapedNames = examples.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        return `(${escapedNames.join('|')})`;
+      
+      case 'quantity':
+        // Find common prefix/suffix patterns for quantities
+        const commonQtyPattern = findCommonPattern(examples, '\\d+');
+        return commonQtyPattern || '(\\d+)';
+      
+      case 'total':
+        // Find common prefix/suffix patterns for totals
+        const commonTotalPattern = findCommonPattern(examples, '\\d+(?:\\.\\d+)?');
+        return commonTotalPattern || '\\$?(\\d+(?:\\.\\d+)?)';
+      
+      default:
+        return '';
+    }
+  };
+
+  const findCommonPattern = (examples: string[], valuePattern: string): string => {
+    if (examples.length < 2) return '';
+    
+    // Find the longest common prefix and suffix
+    let commonPrefix = '';
+    let commonSuffix = '';
+    
+    // Find common prefix
+    const firstExample = examples[0];
+    for (let i = 0; i < firstExample.length; i++) {
+      const char = firstExample[i];
+      if (examples.every(example => example[i] === char)) {
+        commonPrefix += char;
+      } else {
+        break;
+      }
+    }
+    
+    // Find common suffix
+    for (let i = 1; i <= firstExample.length; i++) {
+      const char = firstExample[firstExample.length - i];
+      if (examples.every(example => example[example.length - i] === char)) {
+        commonSuffix = char + commonSuffix;
+      } else {
+        break;
+      }
+    }
+    
+    // Escape special regex characters and handle whitespace intelligently
+    const escapedPrefix = commonPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*');
+    const escapedSuffix = commonSuffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*');
+    
+    return `${escapedPrefix}(${valuePattern})${escapedSuffix}`;
   };
 
   // Save product patterns to supplier
@@ -673,14 +830,20 @@ export default function TransactionsPage() {
     const email = invoiceEmails.find(e => e._id === selectedEmail);
     if (!email || !email.supplier?.id) return;
     
-    const { namePattern, quantityPattern, totalPattern } = productParsingState;
+    const { nameExamples, quantityExamples, totalExamples } = productParsingState;
     const wholesaleDiscount = productParsingState.wholesaleDiscount || 0;
+    const quantityMultiple = productParsingState.quantityMultiple || 1;
     
-    // We need all three patterns
-    if (!namePattern || !quantityPattern || !totalPattern) {
-      alert('Please define patterns for product name, quantity, and total.');
+    // We need at least one example for each pattern type
+    if (nameExamples.length === 0 || quantityExamples.length === 0 || totalExamples.length === 0) {
+      alert('Please provide at least one example for product name, quantity, and total.');
       return;
     }
+    
+    // Generate patterns from examples
+    const namePattern = generatePatternFromExamples(nameExamples, 'name');
+    const quantityPattern = generatePatternFromExamples(quantityExamples, 'quantity');
+    const totalPattern = generatePatternFromExamples(totalExamples, 'total');
     
     // Construct the email parsing configuration for products
     const emailParsing = {
@@ -706,7 +869,14 @@ export default function TransactionsPage() {
             transform: 'parseFloat'
           }
         },
-        wholesaleDiscount
+        wholesaleDiscount,
+        quantityMultiple,
+        // Store the training examples for future reference
+        trainingExamples: {
+          nameExamples,
+          quantityExamples,
+          totalExamples
+        }
       }
     };
     
@@ -757,7 +927,11 @@ export default function TransactionsPage() {
       }
       
       // Reset state
-      setProductParsingState({});
+      setProductParsingState({
+        nameExamples: [],
+        quantityExamples: [],
+        totalExamples: []
+      });
       setSelectedField(null);
       setSelectedText('');
       
@@ -815,14 +989,15 @@ export default function TransactionsPage() {
       // Take the minimum length to ensure we have matching sets
       const minLength = Math.min(nameMatches.length, quantityMatches.length, totalMatches.length);
       
-      // Create product objects with wholesale discount applied if available
+      // Get the multipliers from the patterns
       const wholesaleDiscount = patterns.wholesaleDiscount || 0;
+      const quantityMultiple = patterns.quantityMultiple || 1;
       const products: ParsedProduct[] = [];
       
       for (let i = 0; i < minLength; i++) {
         products.push({
           name: nameMatches[i],
-          quantity: quantityMatches[i],
+          quantity: quantityMatches[i] * quantityMultiple, // Apply quantity multiple
           total: totalMatches[i],
           // Apply wholesale discount to each product
           costDiscount: wholesaleDiscount
@@ -831,7 +1006,8 @@ export default function TransactionsPage() {
       
       return {
         products,
-        wholesaleDiscount
+        wholesaleDiscount,
+        quantityMultiple
       };
     } catch (error) {
       console.error('Error extracting products from email:', error);
@@ -924,8 +1100,24 @@ export default function TransactionsPage() {
     }
   };
 
+  // Add a function to handle the quantity multiple input
+  const handleQuantityMultipleChange = (value: string) => {
+    const multiple = parseFloat(value);
+    if (!isNaN(multiple) && multiple > 0) {
+      setProductParsingState(prev => ({
+        ...prev,
+        quantityMultiple: multiple
+      }));
+    } else {
+      setProductParsingState(prev => ({
+        ...prev,
+        quantityMultiple: 1
+      }));
+    }
+  };
+
   // Combine and sort transactions and invoice emails
-  const combinedItems: ListItem[] = [
+  const allItems: ListItem[] = [
     ...transactions.map(t => ({
       type: 'transaction' as const,
       date: t.date,
@@ -938,6 +1130,19 @@ export default function TransactionsPage() {
     }))
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+  // Filter items based on active filter
+  const filteredItems = allItems.filter(item => {
+    if (activeFilter === 'all') return true;
+    if (activeFilter === 'invoices') return item.type === 'invoice';
+    if (activeFilter === 'sales') {
+      return item.type === 'transaction' && (item.data as Transaction).type === 'sale';
+    }
+    if (activeFilter === 'expenses') {
+      return item.type === 'transaction' && (item.data as Transaction).type === 'expense';
+    }
+    return true;
+  });
+
   if (isLoading) {
     return <div className="p-4">Loading data...</div>;
   }
@@ -949,6 +1154,50 @@ export default function TransactionsPage() {
   return (
     <div className="p-4">
       <h1 className="text-2xl font-bold mb-4">Transactions & Invoices</h1>
+      
+      {/* Filter buttons */}
+      <div className="mb-4 flex flex-wrap gap-2">
+        <button
+          onClick={() => setActiveFilter('all')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            activeFilter === 'all'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          All ({allItems.length})
+        </button>
+        <button
+          onClick={() => setActiveFilter('sales')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            activeFilter === 'sales'
+              ? 'bg-green-600 text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          Sales ({transactions.filter(t => t.type === 'sale').length})
+        </button>
+        <button
+          onClick={() => setActiveFilter('expenses')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            activeFilter === 'expenses'
+              ? 'bg-red-600 text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          Expenses ({transactions.filter(t => t.type === 'expense').length})
+        </button>
+        <button
+          onClick={() => setActiveFilter('invoices')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            activeFilter === 'invoices'
+              ? 'bg-purple-600 text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          Invoice Emails ({invoiceEmails.length})
+        </button>
+      </div>
       
       {/* Add parsing stats information */}
       {parsingStats.totalEmails > 0 && (
@@ -963,7 +1212,7 @@ export default function TransactionsPage() {
       )}
       
       <div className="space-y-4">
-        {combinedItems.map((item) => {
+        {filteredItems.map((item) => {
           if (item.type === 'transaction') {
             const transaction = item.data as Transaction;
             return (
@@ -1029,11 +1278,14 @@ export default function TransactionsPage() {
                               field === 'shipping' || field === 'tax' ? 
                                 parseFloat(result.value) > 0 ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800' :
                               field === 'discount' ? 'bg-green-100 text-green-800' :
+                              field === 'products' ? 'bg-blue-100 text-blue-800' :
                               'bg-gray-100 text-gray-600'
                             }`}
                           >
                             {field === 'orderNumber' ? (
                               <>#${result.value}</>
+                            ) : field === 'products' ? (
+                              <>Products: {result.value} items</>
                             ) : (
                               <>
                                 {field.charAt(0).toUpperCase() + field.slice(1)}: {
@@ -1251,37 +1503,111 @@ export default function TransactionsPage() {
                         <div className="flex flex-wrap gap-2 mb-3">
                           <button 
                             className={`px-3 py-1 text-sm rounded-full ${
-                              productParsingState.namePattern 
-                                ? 'bg-blue-600 text-white' 
-                                : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                              productParsingState.nameExamples.length > 0 ? 'bg-blue-600 text-white' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
                             } transition-colors`}
                             onClick={() => handleProductPatternAction('name')}
                           >
                             Product Name Pattern
-                            {productParsingState.namePattern && ' ✓'}
+                            {productParsingState.nameExamples.length > 0 && ` (${productParsingState.nameExamples.length})`}
                           </button>
                           <button 
                             className={`px-3 py-1 text-sm rounded-full ${
-                              productParsingState.quantityPattern 
-                                ? 'bg-green-600 text-white' 
-                                : 'bg-green-100 text-green-700 hover:bg-green-200'
+                              productParsingState.quantityExamples.length > 0 ? 'bg-green-600 text-white' : 'bg-green-100 text-green-700 hover:bg-green-200'
                             } transition-colors`}
                             onClick={() => handleProductPatternAction('quantity')}
                           >
                             Quantity Pattern
-                            {productParsingState.quantityPattern && ' ✓'}
+                            {productParsingState.quantityExamples.length > 0 && ` (${productParsingState.quantityExamples.length})`}
                           </button>
                           <button 
                             className={`px-3 py-1 text-sm rounded-full ${
-                              productParsingState.totalPattern 
-                                ? 'bg-amber-600 text-white' 
-                                : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                              productParsingState.totalExamples.length > 0 ? 'bg-amber-600 text-white' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
                             } transition-colors`}
                             onClick={() => handleProductPatternAction('total')}
                           >
                             Total Pattern
-                            {productParsingState.totalPattern && ' ✓'}
+                            {productParsingState.totalExamples.length > 0 && ` (${productParsingState.totalExamples.length})`}
                           </button>
+                        </div>
+
+                        {/* Display current examples */}
+                        {(productParsingState.nameExamples.length > 0 || productParsingState.quantityExamples.length > 0 || productParsingState.totalExamples.length > 0) && (
+                          <div className="mb-4 space-y-3">
+                            {/* Name Examples */}
+                            {productParsingState.nameExamples.length > 0 && (
+                              <div>
+                                <p className="text-sm font-medium text-blue-700 mb-2">Product Name Examples:</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {productParsingState.nameExamples.map((example, index) => (
+                                    <div key={index} className="bg-blue-50 border border-blue-200 rounded px-2 py-1 text-sm flex items-center gap-2">
+                                      <span className="font-mono text-blue-800">{example}</span>
+                                      <button
+                                        onClick={() => removeExample('name', index)}
+                                        className="text-blue-500 hover:text-blue-700 text-xs"
+                                        title="Remove example"
+                                      >
+                                        ×
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Quantity Examples */}
+                            {productParsingState.quantityExamples.length > 0 && (
+                              <div>
+                                <p className="text-sm font-medium text-green-700 mb-2">Quantity Examples:</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {productParsingState.quantityExamples.map((example, index) => (
+                                    <div key={index} className="bg-green-50 border border-green-200 rounded px-2 py-1 text-sm flex items-center gap-2">
+                                      <span className="font-mono text-green-800">{example}</span>
+                                      <button
+                                        onClick={() => removeExample('quantity', index)}
+                                        className="text-green-500 hover:text-green-700 text-xs"
+                                        title="Remove example"
+                                      >
+                                        ×
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Total Examples */}
+                            {productParsingState.totalExamples.length > 0 && (
+                              <div>
+                                <p className="text-sm font-medium text-amber-700 mb-2">Total Examples:</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {productParsingState.totalExamples.map((example, index) => (
+                                    <div key={index} className="bg-amber-50 border border-amber-200 rounded px-2 py-1 text-sm flex items-center gap-2">
+                                      <span className="font-mono text-amber-800">{example}</span>
+                                      <button
+                                        onClick={() => removeExample('total', index)}
+                                        className="text-amber-500 hover:text-amber-700 text-xs"
+                                        title="Remove example"
+                                      >
+                                        ×
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Instructions */}
+                        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                          <p className="text-sm text-blue-800">
+                            <strong>Instructions:</strong> 
+                            {productParsingState.selectedPatternType ? (
+                              <>Now highlight text in the email below to add a <strong>{productParsingState.selectedPatternType}</strong> example.</>
+                            ) : (
+                              <>Click a pattern button above, then highlight text in the email below, or highlight text first then click a pattern button.</>
+                            )}
+                          </p>
                         </div>
                         
                         {/* Add wholesale discount input */}
@@ -1307,6 +1633,27 @@ export default function TransactionsPage() {
                           </p>
                         </div>
                         
+                        {/* Add quantity multiple input */}
+                        <div className="mb-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Quantity Multiple
+                          </label>
+                          <div className="flex items-center">
+                            <input
+                              type="number"
+                              min="1"
+                              value={productParsingState.quantityMultiple || ''}
+                              onChange={(e) => handleQuantityMultipleChange(e.target.value)}
+                              placeholder="Enter quantity multiple"
+                              className="w-24 px-3 py-2 border border-gray-300 rounded-md mr-2"
+                            />
+                            <span className="text-gray-600">x</span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Enter the quantity multiple (e.g., 2 for double quantity)
+                          </p>
+                        </div>
+                        
                         <div className="mt-3">
                           {selectedText && (
                             <div className="p-2 bg-gray-50 rounded border text-sm mb-3">
@@ -1315,19 +1662,181 @@ export default function TransactionsPage() {
                             </div>
                           )}
                           
-                          {(productParsingState.namePattern && productParsingState.quantityPattern && productParsingState.totalPattern) && (
+                          {/* Show existing patterns if they exist */}
+                          {email.supplier?.emailParsing?.products && (
+                            <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                              <p className="text-sm font-medium text-yellow-800 mb-2">Current Patterns:</p>
+                              <div className="text-xs space-y-1">
+                                <div><strong>Name:</strong> <code className="bg-yellow-100 px-1 rounded">{email.supplier.emailParsing.products.items.name.pattern}</code></div>
+                                <div><strong>Quantity:</strong> <code className="bg-yellow-100 px-1 rounded">{email.supplier.emailParsing.products.items.quantity.pattern}</code></div>
+                                <div><strong>Total:</strong> <code className="bg-yellow-100 px-1 rounded">{email.supplier.emailParsing.products.items.total.pattern}</code></div>
+                              </div>
+                              <div className="mt-3 pt-3 border-t border-yellow-300">
+                                <p className="text-sm font-medium text-yellow-800 mb-2">Current Settings:</p>
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="block text-xs font-medium text-yellow-700 mb-1">
+                                      Wholesale Discount
+                                    </label>
+                                    <div className="flex items-center">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        step="1"
+                                        value={email.supplier.emailParsing.products.wholesaleDiscount ? (email.supplier.emailParsing.products.wholesaleDiscount * 100) : ''}
+                                        onChange={(e) => {
+                                          const percentage = parseFloat(e.target.value);
+                                          const decimalValue = !isNaN(percentage) ? percentage / 100 : 0;
+                                          
+                                          // Update the email supplier data immediately for UI feedback
+                                          setInvoiceEmails(emails => 
+                                            emails.map(emailItem => 
+                                              emailItem._id === selectedEmail && emailItem.supplier?.emailParsing?.products
+                                                ? { 
+                                                    ...emailItem, 
+                                                    supplier: { 
+                                                      ...emailItem.supplier, 
+                                                      emailParsing: {
+                                                        ...emailItem.supplier.emailParsing,
+                                                        products: {
+                                                          ...emailItem.supplier.emailParsing.products,
+                                                          wholesaleDiscount: decimalValue
+                                                        }
+                                                      }
+                                                    } 
+                                                  } 
+                                                : emailItem
+                                            )
+                                          );
+                                        }}
+                                        placeholder="0"
+                                        className="w-16 px-2 py-1 text-xs border border-yellow-300 rounded mr-1"
+                                      />
+                                      <span className="text-xs text-yellow-700">%</span>
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-yellow-700 mb-1">
+                                      Quantity Multiple
+                                    </label>
+                                    <div className="flex items-center">
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        step="0.1"
+                                        value={email.supplier.emailParsing.products.quantityMultiple || ''}
+                                        onChange={(e) => {
+                                          const multiple = parseFloat(e.target.value);
+                                          const validMultiple = !isNaN(multiple) && multiple > 0 ? multiple : 1;
+                                          
+                                          // Update the email supplier data immediately for UI feedback
+                                          setInvoiceEmails(emails => 
+                                            emails.map(emailItem => 
+                                              emailItem._id === selectedEmail && emailItem.supplier?.emailParsing?.products
+                                                ? { 
+                                                    ...emailItem, 
+                                                    supplier: { 
+                                                      ...emailItem.supplier, 
+                                                      emailParsing: {
+                                                        ...emailItem.supplier.emailParsing,
+                                                        products: {
+                                                          ...emailItem.supplier.emailParsing.products,
+                                                          quantityMultiple: validMultiple
+                                                        }
+                                                      }
+                                                    } 
+                                                  } 
+                                                : emailItem
+                                            )
+                                          );
+                                        }}
+                                        placeholder="1"
+                                        className="w-16 px-2 py-1 text-xs border border-yellow-300 rounded mr-1"
+                                      />
+                                      <span className="text-xs text-yellow-700">x</span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <button 
+                                  onClick={async () => {
+                                    if (!email.supplier?.emailParsing?.products) return;
+                                    
+                                    try {
+                                      const response = await fetch(`/api/suppliers/${email.supplier.id}`, {
+                                        method: 'PATCH',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ 
+                                          emailParsing: email.supplier.emailParsing 
+                                        }),
+                                      });
+                                      
+                                      if (response.ok) {
+                                        alert('Settings updated successfully!');
+                                      } else {
+                                        alert('Failed to update settings. Please try again.');
+                                      }
+                                    } catch (error) {
+                                      console.error('Error updating settings:', error);
+                                      alert('Failed to update settings. Please try again.');
+                                    }
+                                  }}
+                                  className="w-full mt-3 bg-yellow-600 hover:bg-yellow-700 text-white py-1 px-3 rounded text-xs transition-colors"
+                                >
+                                  Update Settings Only
+                                </button>
+                              </div>
+                              <p className="text-xs text-yellow-700 mt-2">Add new examples above to retrain these patterns.</p>
+                            </div>
+                          )}
+                          
+                          {/* Save button for new patterns */}
+                          {(productParsingState.nameExamples.length > 0 && productParsingState.quantityExamples.length > 0 && productParsingState.totalExamples.length > 0) && (
                             <button 
                               onClick={saveProductPatterns}
-                              className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded transition-colors"
+                              className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded transition-colors mb-2"
                             >
-                              Save Product Patterns
+                              {email.supplier?.emailParsing?.products ? 'Update Product Patterns' : 'Save Product Patterns'}
                             </button>
                           )}
+                          
+                          {/* Clear button for existing patterns when no new examples */}
+                          {email.supplier?.emailParsing?.products && 
+                           (productParsingState.nameExamples.length === 0 && productParsingState.quantityExamples.length === 0 && productParsingState.totalExamples.length === 0) && (
+                            <div className="mb-2">
+                              <p className="text-sm text-gray-600 mb-2">To retrain patterns, add new examples using the buttons above, then click &quot;Update Product Patterns&quot;.</p>
+                              <button 
+                                onClick={() => {
+                                  // Clear existing patterns to force retraining
+                                  if (confirm('This will delete the current patterns. You will need to add new examples to create new patterns. Continue?')) {
+                                    const emailParsing = {
+                                      ...email.supplier!.emailParsing,
+                                      products: undefined
+                                    };
+                                    
+                                    fetch(`/api/suppliers/${email.supplier!.id}`, {
+                                      method: 'PATCH',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ emailParsing }),
+                                    }).then(() => {
+                                      // Update UI
+                                      setInvoiceEmails(emails => 
+                                        emails.map(e => 
+                                          e._id === selectedEmail 
+                                            ? { ...e, supplier: { ...e.supplier!, emailParsing } } 
+                                            : e
+                                        )
+                                      );
+                                    });
+                                  }
+                                }}
+                                className="w-full bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded transition-colors"
+                              >
+                                Clear Existing Patterns & Start Over
+                              </button>
+                            </div>
+                          )}
                         </div>
-                        
-                        <p className="text-xs text-gray-600 mt-2">
-                          All products in this email will be parsed with these patterns.
-                        </p>
                       </div>
                     ) : (
                       selectedText && selectedField && (

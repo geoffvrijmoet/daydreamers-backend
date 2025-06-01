@@ -1,12 +1,14 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 import { HomeSyncButton } from './home-sync-button'
 import { formatInEasternTime } from '@/lib/utils/dates'
 
@@ -72,6 +74,7 @@ type TransactionsModalProps = {
 }
 
 export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps) {
+  const router = useRouter()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -260,7 +263,19 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
       <style dangerouslySetInnerHTML={{ __html: fadeInAnimation }} />
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
         <DialogHeader className="flex flex-row items-center justify-between">
-          <DialogTitle>Transactions</DialogTitle>
+          <div className="flex items-center gap-3">
+            <DialogTitle>Transactions</DialogTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                onOpenChange(false)
+                router.push('/transactions')
+              }}
+            >
+              View All
+            </Button>
+          </div>
           <HomeSyncButton />
         </DialogHeader>
 

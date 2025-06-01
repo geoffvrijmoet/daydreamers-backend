@@ -517,10 +517,14 @@ export default function ProductEdit({ params }: { params: { id: string } }) {
                         field="lastPurchasePrice"
                         type="number"
                       />
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Average Cost</label>
-                        <p className="mt-1 text-sm text-gray-900">${variant.averageCost.toFixed(2)}</p>
-                      </div>
+                      <EditableValue
+                        label="Average Cost"
+                        value={variant.averageCost.toFixed(2)}
+                        productId={variant.id}
+                        field="averageCost"
+                        type="number"
+                        format="currency"
+                      />
                       <EditableValue
                         label="Price"
                         value={variant.price}
