@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Product } from '@/types'
 import {
   Dialog,
@@ -89,9 +89,12 @@ type NewSaleModalProps = {
   onSuccess?: () => void
 }
 
-export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProps) {
+function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProps) {
   const [products, setProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
+  const [popularProducts, setPopularProducts] = useState<Product[]>([])
+  const isDesktop = useIsDesktop();
+  const selectedProductsRef = useRef<HTMLDivElement | null>(null);
   const [formData, setFormData] = useState<TransactionFormData>({
     type: 'sale',
     date: new Date().toISOString().split('T')[0],
@@ -163,6 +166,7 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
         const activeProducts = data.products.filter((p: Product) => p.active)
         setProducts(activeProducts)
         setFilteredProducts(activeProducts)
+        setPopularProducts(activeProducts.slice(0, 8))
       } catch (error) {
         console.error('Error fetching products:', error)
       }
@@ -170,6 +174,47 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
     
     fetchProducts()
   }, [])
+
+  // Fetch recent transactions to compute popular products
+  useEffect(() => {
+    if (products.length === 0) return;
+
+    const fetchRecent = async () => {
+      try {
+        const res = await fetch('/api/transactions?limit=100&type=sale');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.transactions) return;
+
+        const counts: Record<string, number> = {};
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        data.transactions.forEach((tx: any) => {
+          if (Array.isArray(tx.products)) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            tx.products.forEach((p: any) => {
+              if (p.productId) {
+                counts[p.productId] = (counts[p.productId] || 0) + p.quantity;
+              }
+            });
+          }
+        });
+
+        const sortedIds = Object.entries(counts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 8)
+          .map(([id]) => id);
+
+        const popular = products.filter(p => p._id && sortedIds.includes(p._id));
+        // if less than 8, fallback fill from products list
+        const filled = popular.concat(products.filter(p => !popular.includes(p)).slice(0, 8 - popular.length));
+        setPopularProducts(filled);
+      } catch (err) {
+        console.error('Failed to fetch recent transactions', err);
+      }
+    };
+
+    fetchRecent();
+  }, [products]);
 
   // Calculate totals whenever products change or amount/shipping is manually updated for sales
   useEffect(() => {
@@ -284,7 +329,7 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
       }
       
       try {
-        const response = await fetch(`/api/customers/search?query=${encodeURIComponent((formData as SaleFormData).customer)}`)
+        const response = await fetch(`/api/customers/search?query=${encodeURIComponent(((formData as SaleFormData).customer) || '')}`)
         if (!response.ok) throw new Error('Failed to fetch customers')
         const data = await response.json()
         setCustomerSuggestions(data.customers.map((c: { name: string }) => c.name));
@@ -462,42 +507,56 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
   }
 
   const handleAddProduct = (product: Product) => {
-    // Allow adding products for both Sale and Expense types
-    if (formData.type !== 'sale' && formData.type !== 'expense') return;
-
-    if (!product._id) {
-      console.error('Product missing _id field:', product);
-      return;
-    }
-
     // Determine unit price based on transaction type
     const unitPrice = formData.type === 'sale'
       ? product.price
       : (product.lastPurchasePrice || 0); // Use lastPurchasePrice for expenses, default 0
 
-    const newProduct: LineItem = {
-      productId: product._id,
-      name: product.name,
-      quantity: 1,
-      unitPrice: unitPrice,
-      totalPrice: unitPrice * 1, // Initial total price
-      isTaxable: formData.type === 'sale' ? (formData as SaleFormData).isTaxable : false // Expenses are not taxable
-    }
-
     setFormData(prev => {
-      // Ensure type is correct before accessing products
-      if (prev.type !== 'sale' && prev.type !== 'expense') return prev; 
-      // Ensure products array exists and add the new item
-      const updatedProducts = [...(prev.products || []), newProduct];
+      if (prev.type !== 'sale' && prev.type !== 'expense') return prev;
+
+      // Check if product already exists
+      const existingIdx = prev.products?.findIndex(item => item.productId === product._id);
+
+      let updatedProducts: LineItem[] = [];
+
+      if (existingIdx !== undefined && existingIdx !== -1 && prev.products) {
+        // Increment quantity
+        updatedProducts = [...prev.products];
+        const existing = updatedProducts[existingIdx];
+        const newQty = existing.quantity + 1;
+        updatedProducts[existingIdx] = {
+          ...existing,
+          quantity: newQty,
+          totalPrice: parseFloat((existing.unitPrice * newQty).toFixed(2))
+        };
+      } else {
+        // Add as new product line
+        const newProduct: LineItem = {
+          productId: product._id,
+          name: product.name,
+          quantity: 1,
+          unitPrice,
+          totalPrice: unitPrice,
+          isTaxable: prev.type === 'sale' ? (prev as SaleFormData).isTaxable : false
+        };
+        updatedProducts = [...(prev.products || []), newProduct];
+      }
+
       return {
         ...prev,
         products: updatedProducts,
-        // Reset amount to trigger recalculation based on products
         amount: 0,
-        // Reset tip/discount only for sales
         ...(prev.type === 'sale' && { tip: 0, discount: 0 }),
-      }
+      };
     });
+
+    // Scroll selected products list to bottom to reveal newest entry
+    setTimeout(() => {
+      if (selectedProductsRef.current) {
+        selectedProductsRef.current.scrollTo({ top: selectedProductsRef.current.scrollHeight, behavior: 'smooth' });
+      }
+    }, 0);
   }
 
   const handleUpdateProductQuantity = (index: number, quantity: number) => {
@@ -559,13 +618,13 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
   }
 
   const handleUpdateProductUnitPrice = (index: number, unitPrice: number) => {
-    // Allow updating unit price only for Expense type
-    if (formData.type !== 'expense') return;
+    // Allow updating for sale or expense
+    if (formData.type !== 'expense' && formData.type !== 'sale') return;
 
     const validUnitPrice = Math.max(0, unitPrice || 0); // Ensure non-negative
 
     setFormData(prev => {
-      if (prev.type !== 'expense') return prev;
+      if (prev.type !== 'expense' && prev.type !== 'sale') return prev;
       if (!prev.products || index < 0 || index >= prev.products.length) return prev;
 
       const products = [...prev.products];
@@ -580,19 +639,19 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
       return {
         ...prev,
         products,
-        amount: 0 // Reset amount to trigger recalculation based on products
+        amount: 0 // Reset amount to trigger recalculation
       };
     });
   };
 
   const handleUpdateProductTotalPrice = (index: number, totalPrice: number) => {
-    // Allow updating total price only for Expense type
-    if (formData.type !== 'expense') return;
+    // Allow updating for sale or expense
+    if (formData.type !== 'expense' && formData.type !== 'sale') return;
 
     const validTotalPrice = Math.max(0, totalPrice || 0); // Ensure non-negative
 
     setFormData(prev => {
-      if (prev.type !== 'expense') return prev;
+      if (prev.type !== 'expense' && prev.type !== 'sale') return prev;
       if (!prev.products || index < 0 || index >= prev.products.length) return prev;
 
       const products = [...prev.products];
@@ -611,7 +670,7 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
       return {
         ...prev,
         products,
-        amount: 0 // Reset amount to trigger recalculation based on products
+        amount: 0 // Reset amount to trigger recalculation
       };
     });
   };
@@ -759,76 +818,100 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
             </button>
           </div>
 
-          {/* Common Fields */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Date</label>
-              <input
-                type="date"
-                value={formData.date}
-                onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Payment Method</label>
-              <select
-                value={formData.paymentMethod}
-                onChange={(e) => setFormData(prev => ({ ...prev, paymentMethod: e.target.value }))}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                required
-              >
-                <option value="Venmo">Venmo</option>
-                <option value="Cash">Cash</option>
-                <option value="Cash App">Cash App</option>
-                <option value="Zelle">Zelle</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-sm mb-1 block">Amount ($)</label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={formData.amount}
-                // ReadOnly ONLY for Expense type when products are added
-                readOnly={formData.type === 'expense' && formData.products && formData.products.length > 0}
-                onChange={(e) => {
-                  const newAmount = parseFloat(e.target.value) || 0;
-                  if (formData.type === 'sale') {
-                    // For sales, changing the total recalculates pre-tax, tax, tip, discount via useEffect
-                     setFormData(prev => ({ ...(prev as SaleFormData), amount: newAmount }));
-                  } else if (formData.type === 'expense' && (!formData.products || formData.products.length === 0)) {
-                    // Allow manual entry for expense ONLY if no products are added
-                    setFormData(prev => ({ ...(prev as ExpenseFormData), amount: newAmount }));
-                  }
-                  // If expense has products, amount is derived, so onChange does nothing here for expenses
-                }}
-                className={`w-full ${ (formData.type === 'expense' && formData.products && formData.products.length > 0) ? 'bg-gray-50' : ''}`}
-                required // Amount is required for all types
-              />
-              {/* Only show pre-tax for Sales */}
+          {/* Common Fields (mobile-first layout) */}
+          <div className="space-y-4">
+            {/* Row: Amount + Sales Tax + Payment Methods */}
+            <div className="flex flex-wrap items-start gap-4">
+              {/* Amount */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Amount</label>
+                <div className="flex items-center mt-1">
+                  <span className="text-gray-500 mr-1">$</span>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData.amount}
+                    readOnly={formData.type === 'expense' && 'products' in formData && (formData as ExpenseFormData).products.length > 0}
+                    onChange={(e) => {
+                      const newAmount = parseFloat(e.target.value) || 0;
+                      if (formData.type === 'sale') {
+                        setFormData(prev => ({ ...(prev as SaleFormData), amount: newAmount }));
+                      } else if (formData.type === 'expense' && !(formData as ExpenseFormData).products.length) {
+                        setFormData(prev => ({ ...(prev as ExpenseFormData), amount: newAmount }));
+                      }
+                    }}
+                    onFocus={(e) => (e.target as HTMLInputElement).select()}
+                    className={`block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 ${(formData.type === 'expense' && 'products' in formData && (formData as ExpenseFormData).products.length > 0) ? 'bg-gray-50' : ''}`}
+                    style={{ width: `${String(formData.amount || 0).length + 3}ch` }}
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Sales Tax (only for sale) */}
               {formData.type === 'sale' && (
-                <div className="text-xs text-gray-500 mt-1">
-                  Pre-tax: ${((formData as SaleFormData).preTaxAmount).toFixed(2)}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Sales&nbsp;Tax</label>
+                  <div className="flex items-center mt-1">
+                    <span className="text-gray-500 mr-1">$</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      readOnly
+                      value={(formData as SaleFormData).taxAmount.toFixed(2)}
+                      className="block rounded-md border-gray-300 bg-gray-50 shadow-sm"
+                      style={{ width: `${String((formData as SaleFormData).taxAmount.toFixed(2)).length + 3}ch` }}
+                    />
+                  </div>
                 </div>
               )}
+
+              {/* Date */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Date</label>
+                <input
+                  type="date"
+                  value={formData.date}
+                  onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
+                  className="mt-1 block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              {/* Payment Methods */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Payment&nbsp;Method</label>
+                <div className="flex flex-wrap gap-2">
+                  {['Venmo', 'Cash', 'Cash App', 'Zelle'].map((method) => (
+                    <button
+                      type="button"
+                      key={method}
+                      onClick={() => setFormData(prev => ({ ...prev, paymentMethod: method }))}
+                      className={`px-3 py-1 rounded-full text-sm border transition-colors ${formData.paymentMethod === method ? 'bg-blue-500 text-white border-blue-500' : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'}`}
+                    >
+                      {method}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-            {/* Conditionally show Tax Amount only for Sales */}
+
+            {/* Apply Tax checkbox row (sale only) */}
             {formData.type === 'sale' && (
-               <div>
-                 <label className="text-sm mb-1 block">Sales Tax (8.875%)</label>
-                 <Input
-                   type="number"
-                   step="0.01"
-                   min="0"
-                   value={(formData as SaleFormData).taxAmount.toFixed(2)}
-                   readOnly
-                   className="w-full bg-gray-50"
-                 />
-               </div>
-             )}
+              <div className="flex items-center">
+                <label className="inline-flex items-center whitespace-nowrap text-sm font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={formData.isTaxable}
+                    onChange={(e) => setFormData(prev => ({ ...prev, isTaxable: e.target.checked, amount: 0 }))}
+                    className="mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                  Apply tax
+                </label>
+              </div>
+            )}
+
           </div>
 
           {/* Type-specific Fields */}
@@ -872,72 +955,6 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
                   </div>
                 )}
               </div>
-              {/* Sale specific additional details like Tip, Discount, Taxable flag */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Shipping, Tip, Discount, Taxable Flag */}
-                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Shipping Amount ($)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.shipping}
-                      onChange={(e) => {
-                        const newShipping = parseFloat(parseFloat(e.target.value || '0').toFixed(2));
-                        setFormData(prev => ({ ...prev, shipping: newShipping, amount: 0 })) // Reset amount to trigger recalc
-                      }}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Tip ($)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.tip} // Display the calculated tip
-                      onChange={(e) => {
-                        const newTip = parseFloat(parseFloat(e.target.value || '0').toFixed(2));
-                        // Recalculate amount based on new tip. useEffect will update the displayed tip.
-                        const currentSubtotalWithTax = formData.preTaxAmount + formData.taxAmount;
-                        const newAmount = parseFloat((currentSubtotalWithTax + newTip - formData.discount).toFixed(2));
-                        setFormData(prev => ({ ...prev, amount: newAmount }))
-                      }}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Discount ($)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.discount} // Display the calculated discount
-                       onChange={(e) => {
-                        const newDiscount = parseFloat(parseFloat(e.target.value || '0').toFixed(2));
-                         // Recalculate amount based on new discount. useEffect will update the displayed discount.
-                        const currentSubtotalWithTax = formData.preTaxAmount + formData.taxAmount;
-                        const newAmount = parseFloat((currentSubtotalWithTax + formData.tip - newDiscount).toFixed(2));
-                         setFormData(prev => ({ ...prev, amount: newAmount }))
-                      }}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Taxable</label>
-                    <div className="mt-1">
-                      <label className="inline-flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={formData.isTaxable}
-                          onChange={(e) => setFormData(prev => ({ ...prev, isTaxable: e.target.checked, amount: 0 }))} // Recalc on taxable change
-                          className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                        />
-                        <span className="ml-2">Apply tax</span>
-                      </label>
-                    </div>
-                  </div>
-                </div>
             </div>
           )}
 
@@ -947,6 +964,22 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
                 <h3 className="text-md font-medium">
                   {formData.type === 'sale' ? 'Add Products to Sale' : 'Add Products Purchased'}
                 </h3>
+               {/* Quick-add popular products (mobile only) */}
+               {!isDesktop && popularProducts.length > 0 && (
+                 <div className="flex flex-wrap gap-2 mb-2">
+                   {popularProducts.map((product) => (
+                     <button
+                       key={product._id}
+                       type="button"
+                       onClick={() => handleAddProduct(product)}
+                       className="px-3 py-1 rounded-full bg-gray-100 text-sm hover:bg-blue-100 border border-gray-300"
+                     >
+                       {product.name}
+                     </button>
+                   ))}
+                 </div>
+               )}
+
                <div>
                  <input
                    type="text"
@@ -966,28 +999,20 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
                  />
                </div>
 
-               {/* Product List */}
-               <div className="max-h-[200px] overflow-y-auto space-y-1 border rounded p-2"> {/* Reduced max height */}
+               {/* Product Suggestions List */}
+               <div className="max-h-[200px] overflow-y-auto space-y-1 border rounded p-2">
                  {filteredProducts.map((product) => (
-                   <div
-                     key={product._id}
-                     className="flex items-center justify-between p-2 border-b last:border-b-0 hover:bg-gray-50 cursor-pointer"
+                   <button
+                     key={product._id ?? product.sku ?? product.name}
+                     type="button"
                      onClick={() => handleAddProduct(product)}
+                     className="w-full flex items-center justify-between p-2 rounded hover:bg-blue-50 focus:outline-none"
                    >
-                     <div>
-                       <div className="font-medium">{product.name}</div>
-                       <div className="text-sm text-gray-500">SKU: {product.sku || 'N/A'}</div>
-                     </div>
-                     <div className="text-right">
-                       <div className="font-medium">
-                         {formData.type === 'sale'
-                           ? `$${(product.price || 0).toFixed(2)}`
-                           : `Last Cost: $${(product.lastPurchasePrice || 0).toFixed(2)}`
-                         }
-                       </div>
-                       <div className="text-sm text-gray-500">Stock: {product.stock}</div>
-                     </div>
-                   </div>
+                     <span className="text-sm text-left">{product.name}</span>
+                     {typeof product.price === 'number' && !isNaN(product.price) && (
+                       <span className="text-xs text-gray-500 ml-2">${product.price.toFixed(2)}</span>
+                     )}
+                   </button>
                  ))}
                </div>
 
@@ -1134,50 +1159,58 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
 
                {/* Selected Products List (Hide when creating new product) */}
                {!isCreatingProduct && (formData.type === 'sale' || formData.type === 'expense') && formData.products && formData.products.length > 0 && (
-                 <div className="space-y-2">
+                 <div ref={selectedProductsRef} className="space-y-2 sticky bottom-0 left-0 right-0 bg-white border-t pt-2 max-h-[40vh] overflow-y-auto">
                    <h4 className="text-sm font-medium">Selected Products</h4>
                    {formData.products.map((product, index) => (
-                     <div key={index} className="flex items-center gap-2 p-1 border rounded">
-                       <input
-                         type="number"
-                         step="0.01" // Allow decimal steps
-                         min="0.01"  // Set minimum value (adjust if needed)
-                         value={product.quantity}
-                         onChange={(e) => handleUpdateProductQuantity(index, parseFloat(e.target.value) || 0)} // Use parseFloat
-                         className="w-20 px-2 py-1 border rounded"
-                       />
-                       <span className="flex-grow text-sm">{product.name}</span>
-                       {/* Unit Price Input (Expense Only) */}
-                       <span className="text-sm">@</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={product.unitPrice}
-                          onChange={(e) => handleUpdateProductUnitPrice(index, parseFloat(e.target.value) || 0)}
-                          className="w-20 px-2 py-1 border rounded text-sm text-right"
-                          aria-label={`Unit price for ${product.name}`}
-                          disabled={formData.type !== 'expense'} // Disable if not expense
-                        />
-                       {/* Total Price Input (Expense Only) */}
-                       <span className="text-sm">= $</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={product.totalPrice.toFixed(2)}
-                          onChange={(e) => handleUpdateProductTotalPrice(index, parseFloat(e.target.value) || 0)}
-                          className="w-24 px-2 py-1 border rounded text-sm font-medium text-right"
+                     <div key={index} className="flex flex-col gap-1 p-1 border rounded">
+                       <div className="flex items-center justify-between">
+                         <span className="text-sm font-medium">{product.name}</span>
+                         <button
+                           type="button"
+                           onClick={() => handleRemoveProduct(index)}
+                           className="text-red-500 hover:text-red-700 px-2"
+                         >
+                           ×
+                         </button>
+                       </div>
+
+                       {/* Controls row */}
+                       <div className="flex items-center gap-2 flex-wrap">
+                         <input
+                           type="number"
+                           step="0.01"
+                           min="0.01"
+                           value={product.quantity}
+                           onChange={(e) => handleUpdateProductQuantity(index, parseFloat(e.target.value) || 0)}
+                           onFocus={(e) => (e.target as HTMLInputElement).select()}
+                           className="w-20 px-2 py-1 border rounded"
+                         />
+                         {/* Unit Price (expense only) */}
+                         <span className="text-sm">@</span>
+                         <input
+                           type="number"
+                           step="0.01"
+                           min="0"
+                           value={product.unitPrice}
+                           onChange={(e) => handleUpdateProductUnitPrice(index, parseFloat(e.target.value) || 0)}
+                           onFocus={(e) => (e.target as HTMLInputElement).select()}
+                           className="w-20 px-2 py-1 border rounded text-sm text-right"
+                           aria-label={`Unit price for ${product.name}`}
+                           disabled={false}
+                         />
+                         <span className="text-sm">= $</span>
+                         <input
+                           type="number"
+                           step="0.01"
+                           min="0"
+                           value={(product.totalPrice ?? (product.unitPrice * product.quantity)).toFixed(2)}
+                           onChange={(e) => handleUpdateProductTotalPrice(index, parseFloat(e.target.value) || 0)}
+                           onFocus={(e) => (e.target as HTMLInputElement).select()}
+                           className="w-24 px-2 py-1 border rounded text-sm font-medium text-right"
                            aria-label={`Total price for ${product.name}`}
-                           disabled={formData.type !== 'expense'} // Disable if not expense
-                        />
-                       <button
-                         type="button"
-                         onClick={() => handleRemoveProduct(index)}
-                         className="text-red-500 hover:text-red-700 px-2"
-                       >
-                         ×
-                       </button>
+                           disabled={false}
+                         />
+                       </div>
                      </div>
                    ))}
                  </div>
@@ -1340,4 +1373,37 @@ export function NewSaleModal({ open, onOpenChange, onSuccess }: NewSaleModalProp
       </DialogContent>
     </Dialog>
   )
+}
+
+// ---------- Responsive wrapper & mobile variant ----------
+
+// Simple hook to detect if the viewport is desktop-sized. Defaults to `true` during SSR.
+function useIsDesktop(breakpoint: number = 768) {
+  const [isDesktop, setIsDesktop] = useState(
+    typeof window === "undefined" ? true : window.innerWidth >= breakpoint
+  );
+
+  useEffect(() => {
+    const handleResize = () => setIsDesktop(window.innerWidth >= breakpoint);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [breakpoint]);
+
+  return isDesktop;
+}
+
+// Mobile implementation. Currently re-uses the desktop modal so behaviour stays unchanged.
+// Modify this component to tailor the mobile experience separately from the desktop one.
+function NewSaleModalMobile(props: NewSaleModalProps) {
+  return <NewSaleModalDesktop {...props} />;
+}
+
+// Public component: automatically switches between desktop & mobile variants.
+export function NewSaleModal(props: NewSaleModalProps) {
+  const isDesktop = useIsDesktop();
+  return isDesktop ? (
+    <NewSaleModalDesktop {...props} />
+  ) : (
+    <NewSaleModalMobile {...props} />
+  );
 } 
