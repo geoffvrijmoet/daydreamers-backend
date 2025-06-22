@@ -877,6 +877,17 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                   className="mt-1 block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   required
                 />
+                {formData.type === 'sale' && (
+                  <label className="inline-flex items-center mt-2 whitespace-nowrap text-sm font-medium text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={formData.isTaxable}
+                      onChange={(e) => setFormData(prev => ({ ...prev, isTaxable: e.target.checked, amount: 0 }))}
+                      className="mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    />
+                    Apply&nbsp;tax
+                  </label>
+                )}
               </div>
 
               {/* Payment Methods */}
@@ -897,20 +908,9 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
               </div>
             </div>
 
-            {/* Apply Tax + Shipping/Tip/Discount (sale only) */}
+            {/* Shipping/Tip/Discount row (sale only) */}
             {formData.type === 'sale' && (
-              <div className="flex flex-wrap items-end gap-4">
-                {/* Apply-tax checkbox */}
-                <label className="inline-flex items-center whitespace-nowrap text-sm font-medium text-gray-700 mr-2">
-                  <input
-                    type="checkbox"
-                    checked={formData.isTaxable}
-                    onChange={(e) => setFormData(prev => ({ ...prev, isTaxable: e.target.checked, amount: 0 }))}
-                    className="mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
-                  Apply&nbsp;tax
-                </label>
-
+              <div className="flex flex-wrap items-end gap-4 mt-2">
                 {/* Shipping input */}
                 <div>
                   <label className="block text-xs text-gray-500">Shipping</label>
@@ -932,7 +932,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                   </div>
                 </div>
 
-                {/* Tip (read-only) */}
+                {/* Tip */}
                 <div>
                   <label className="block text-xs text-gray-500">Tip</label>
                   <div className="flex items-center">
@@ -947,7 +947,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                   </div>
                 </div>
 
-                {/* Discount (read-only) */}
+                {/* Discount */}
                 <div>
                   <label className="block text-xs text-gray-500">Discount</label>
                   <div className="flex items-center">
