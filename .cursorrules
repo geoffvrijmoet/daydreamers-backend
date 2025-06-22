@@ -17,3 +17,114 @@ You carefully provide accurate, factual, thoughtful answers, and are a genius at
 - Be concise. Minimize any other prose.
 - If you think there might not be a correct answer, you say so. If you do not know the answer, say so instead of guessing.
 - When writing scripts, use the guidelines in `guidelines/script-development.md`.
+
+
+
+
+
+## Development Log Integration
+
+CRITICAL: You must interact with the development log located at `guidelines/development-log.md`:
+
+1. **BEFORE starting any work**: Read `guidelines/development-log.md` to understand the current architecture and check for existing to-do items.
+
+2. **Treat as To-Do List**: Any questions or tasks written in the "🎯 Current To-Do Items / Questions for AI" section are actionable items you should complete.
+
+3. **AFTER completing any work**: Update the development log by:
+   - Moving completed items from "To-Do Items" to "Recently Completed Tasks" 
+   - Adding new architecture details for any systems you modify
+   - Recording the date and files changed
+   - Adding new to-do items if the user requests additional features
+
+4. **Architecture Documentation**: The development log serves as the single source of truth for understanding how this web app works. Keep it current and detailed so future AI agents can quickly understand the codebase.
+
+5. **Search Patterns**: Use the grep/find commands documented in the log to locate relevant code quickly.
+
+6. **Follow Established Patterns**: The log documents naming conventions, file organization, and architectural decisions - follow these patterns when adding new features.
+
+7. **NEVER Add Dates**: Do NOT add specific dates to the development log. AI assistants are unreliable with current dates. Use relative terms like "Latest", "Recent", or let the user add dates manually.
+
+After the assistant finishes a to-do item, it must immediately move that bullet to ‘✅ Recently Completed’ in guidelines/development-log.md, documenting files changed, changes, and architectural notes
+
+
+
+
+
+
+
+
+# Cursor Rule: Enforce Mobile/Desktop Isolation via Responsive Techniques
+
+## Purpose:
+Ensure that changes intended specifically for mobile screen sizes minimize impact on the desktop layout and experience. The development workflow is desktop-first, followed by layering mobile adjustments.
+
+## Constraint:
+When generating or modifying code (JSX, CSS, Styled Components, etc.) that is intended to apply *only* or *differently* to mobile screen sizes (typically below a certain breakpoint, e.g., <768px), you **must** use standard responsive techniques to isolate these changes.
+
+## Specific Instructions:
+1.  **Default (Desktop) Styles:** Assume base styles and layout defined without responsive wrappers (like media queries or responsive classes) represent the desktop view.
+2.  **Styling for Mobile:**
+    *   For CSS/Styled Components, **always** wrap mobile-specific style overrides or additions within a media query targeting the appropriate mobile breakpoint (e.g., `@media (max-width: 767px) { ... }`). Do *not* apply mobile-only styles directly to the base style definition.
+    *   If using a utility-first CSS framework (like Tailwind CSS), **always** prefix mobile-specific classes with the corresponding breakpoint utility (e.g., `sm:flex-col`, `md:hidden`). Do *not* rely solely on default, unprefixed classes for mobile-specific styling if it conflicts with the desktop view.
+3.  **Layout/Structure for Mobile:**
+    *   If the mobile layout requires significantly different components or structure, use **conditional rendering** in React/JSX based on the current screen size. This typically involves a hook or context to determine the screen width. Render different components (e.g., `<DesktopNav />` vs `<MobileNav />`) or different element structures based on this condition.
+4.  **Behavior/Logic for Mobile:**
+    *   If specific JavaScript logic or component behavior should only apply on mobile, implement it **conditionally** based on screen size within the component's logic (e.g., using `useEffect` with a screen size check or a responsive hook).
+5.  **Avoid:** Do not mix mobile-specific style declarations or structural assumptions directly into the default component render or base CSS rules if they would break or alter the intended desktop presentation.
+
+## Example (Illustrative - AI should apply this principle everywhere):
+
+**Bad (Mobile style mixed into base):**
+```css
+.container {
+  display: flex; /* Good for desktop */
+  flex-direction: column; /* BAD - forces column layout on desktop too */
+}```
+
+**Good (Mobile style isolated):**
+```css
+.container {
+  display: flex; /* Desktop default */
+}
+
+@media (max-width: 767px) {
+  .container {
+    flex-direction: column; /* Mobile override */
+  }
+}
+```
+
+**Bad (Conditional render without check):**
+```
+// Assuming this component only makes sense on mobile
+function MobileOnlyButton() { /* ... */ }
+
+function MyComponent() {
+  return <MobileOnlyButton />; // BAD - Renders on desktop too
+}
+
+```
+
+**Good (Conditional render with check):**
+```
+import useScreenSize from '../hooks/useScreenSize'; // Assuming a hook exists
+
+function MobileOnlyButton() { /* ... */ }
+
+function MyComponent() {
+  const { isMobile } = useScreenSize(); // Assuming hook provides this
+
+  return (
+    <div>
+      {/* Desktop content */}
+      {!isMobile && <DesktopFeature />}
+
+      {/* Mobile-only content */}
+      {isMobile && <MobileOnlyButton />}
+
+      {/* Content that works on both */}
+      <SharedContent />
+    </div>
+  );
+}
+```

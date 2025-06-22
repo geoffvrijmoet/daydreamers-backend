@@ -845,6 +845,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                     className={`block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 ${(formData.type === 'expense' && 'products' in formData && (formData as ExpenseFormData).products.length > 0) ? 'bg-gray-50' : ''}`}
                     style={{ width: `${String(formData.amount || 0).length + 3}ch` }}
                     required
+                    inputMode="decimal"
                   />
                 </div>
               </div>
@@ -862,6 +863,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                       value={(formData as SaleFormData).taxAmount.toFixed(2)}
                       className="rounded-md border-gray-300 bg-gray-50 shadow-sm"
                       style={{ width: `${String((formData as SaleFormData).taxAmount.toFixed(2)).length + 3}ch` }}
+                      inputMode="decimal"
                     />
                   </div>
                 </div>
@@ -928,6 +930,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                       onFocus={(e) => (e.target as HTMLInputElement).select()}
                       className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                       style={{ width: `${String((formData as SaleFormData).shipping || 0).length + 3}ch` }}
+                      inputMode="decimal"
                     />
                   </div>
                 </div>
@@ -943,6 +946,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                       value={(formData as SaleFormData).tip.toFixed(2)}
                       className="rounded-md border-gray-300 bg-gray-50 shadow-sm"
                       style={{ width: `${((formData as SaleFormData).tip.toFixed(2)).length + 3}ch` }}
+                      inputMode="decimal"
                     />
                   </div>
                 </div>
@@ -958,6 +962,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                       value={(formData as SaleFormData).discount.toFixed(2)}
                       className="rounded-md border-gray-300 bg-gray-50 shadow-sm"
                       style={{ width: `${((formData as SaleFormData).discount.toFixed(2)).length + 3}ch` }}
+                      inputMode="decimal"
                     />
                   </div>
                 </div>
@@ -1185,6 +1190,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                           value={newProductFormData.price || 0}
                           onChange={(e) => setNewProductFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
                           className="mt-1 block w-full"
+                          inputMode="decimal"
                         />
                       </div>
                     )}
@@ -1239,6 +1245,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                            onChange={(e) => handleUpdateProductQuantity(index, parseFloat(e.target.value) || 0)}
                            onFocus={(e) => (e.target as HTMLInputElement).select()}
                            className="w-20 px-2 py-1 border rounded"
+                           inputMode="decimal"
                          />
                          {/* Unit Price (expense only) */}
                          <span className="text-sm">@</span>
@@ -1252,6 +1259,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                            className="w-20 px-2 py-1 border rounded text-sm text-right"
                            aria-label={`Unit price for ${product.name}`}
                            disabled={false}
+                           inputMode="decimal"
                          />
                          <span className="text-sm">= $</span>
                          <input
@@ -1264,6 +1272,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                            className="w-24 px-2 py-1 border rounded text-sm font-medium text-right"
                            aria-label={`Total price for ${product.name}`}
                            disabled={false}
+                           inputMode="decimal"
                          />
                        </div>
                      </div>
