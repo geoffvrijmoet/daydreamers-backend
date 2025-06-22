@@ -860,7 +860,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                       step="0.01"
                       readOnly
                       value={(formData as SaleFormData).taxAmount.toFixed(2)}
-                      className="block rounded-md border-gray-300 bg-gray-50 shadow-sm"
+                      className="rounded-md border-gray-300 bg-gray-50 shadow-sm"
                       style={{ width: `${String((formData as SaleFormData).taxAmount.toFixed(2)).length + 3}ch` }}
                     />
                   </div>
@@ -897,18 +897,70 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
               </div>
             </div>
 
-            {/* Apply Tax checkbox row (sale only) */}
+            {/* Apply Tax + Shipping/Tip/Discount (sale only) */}
             {formData.type === 'sale' && (
-              <div className="flex items-center">
-                <label className="inline-flex items-center whitespace-nowrap text-sm font-medium text-gray-700">
+              <div className="flex flex-wrap items-end gap-4">
+                {/* Apply-tax checkbox */}
+                <label className="inline-flex items-center whitespace-nowrap text-sm font-medium text-gray-700 mr-2">
                   <input
                     type="checkbox"
                     checked={formData.isTaxable}
                     onChange={(e) => setFormData(prev => ({ ...prev, isTaxable: e.target.checked, amount: 0 }))}
                     className="mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   />
-                  Apply tax
+                  Apply&nbsp;tax
                 </label>
+
+                {/* Shipping input */}
+                <div>
+                  <label className="block text-xs text-gray-500">Shipping</label>
+                  <div className="flex items-center">
+                    <span className="text-gray-500 mr-1">$</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={(formData as SaleFormData).shipping}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setFormData(prev => ({ ...(prev as SaleFormData), shipping: val, amount: 0 }));
+                      }}
+                      onFocus={(e) => (e.target as HTMLInputElement).select()}
+                      className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      style={{ width: `${String((formData as SaleFormData).shipping || 0).length + 3}ch` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Tip (read-only) */}
+                <div>
+                  <label className="block text-xs text-gray-500">Tip</label>
+                  <div className="flex items-center">
+                    <span className="text-gray-500 mr-1">$</span>
+                    <Input
+                      type="number"
+                      readOnly
+                      value={(formData as SaleFormData).tip.toFixed(2)}
+                      className="rounded-md border-gray-300 bg-gray-50 shadow-sm"
+                      style={{ width: `${((formData as SaleFormData).tip.toFixed(2)).length + 3}ch` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Discount (read-only) */}
+                <div>
+                  <label className="block text-xs text-gray-500">Discount</label>
+                  <div className="flex items-center">
+                    <span className="text-gray-500 mr-1">$</span>
+                    <Input
+                      type="number"
+                      readOnly
+                      value={(formData as SaleFormData).discount.toFixed(2)}
+                      className="rounded-md border-gray-300 bg-gray-50 shadow-sm"
+                      style={{ width: `${((formData as SaleFormData).discount.toFixed(2)).length + 3}ch` }}
+                    />
+                  </div>
+                </div>
               </div>
             )}
 
@@ -955,6 +1007,9 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                   </div>
                 )}
               </div>
+
+              {/* Shipping, Tip, Discount */}
+              {/* Shipping/Tip/Discount block removed (now displayed next to Apply Tax) */}
             </div>
           )}
 
@@ -1159,7 +1214,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
 
                {/* Selected Products List (Hide when creating new product) */}
                {!isCreatingProduct && (formData.type === 'sale' || formData.type === 'expense') && formData.products && formData.products.length > 0 && (
-                 <div ref={selectedProductsRef} className="space-y-2 sticky bottom-0 left-0 right-0 bg-white border-t pt-2 max-h-[40vh] overflow-y-auto">
+                 <div ref={selectedProductsRef} className="space-y-2 sticky bottom-14 left-0 right-0 bg-white border-t pt-2 max-h-[40vh] overflow-y-auto">
                    <h4 className="text-sm font-medium">Selected Products</h4>
                    {formData.products.map((product, index) => (
                      <div key={index} className="flex flex-col gap-1 p-1 border rounded">
@@ -1361,7 +1416,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
           </div>
 
           {/* Submit Button */}
-          <div className="flex justify-end">
+          <div className="flex justify-end sticky bottom-0 left-0 right-0 bg-white py-2 border-t z-20">
             <button
               type="submit"
               className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
