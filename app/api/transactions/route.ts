@@ -50,10 +50,11 @@ interface SaleTransactionDocument extends BaseTransactionDocument {
 // Expense transaction specific fields
 interface ExpenseTransactionDocument extends BaseTransactionDocument {
   type: 'expense';
-  merchant: string;
+  supplier: string;
   purchaseCategory?: string;
   supplierOrderNumber?: string;
   products?: Array<{
+    productId?: mongoose.Types.ObjectId;
     name: string;
     quantity: number;
     unitPrice: number;
@@ -158,7 +159,7 @@ export async function POST(request: Request) {
       shipping,
       notes, // This will be our description
       // Fields specific to ExpenseFormData
-      category, // Renamed to purchaseCategory
+      purchaseCategory,
       supplier, // Renamed to merchant
       supplierOrderNumber,
       // Fields specific to TrainingFormData
@@ -208,10 +209,15 @@ export async function POST(request: Request) {
       transactionToSave = {
         ...transactionToSave,
         type: 'expense',
-        merchant: supplier || '', // Use supplier as merchant for expenses
-        purchaseCategory: category || '',
+        supplier: supplier || '',
+        purchaseCategory: purchaseCategory || '',
         supplierOrderNumber: supplierOrderNumber || '',
-        products: products && Array.isArray(products) ? products.map(p => ({ ...p })) : [],
+        products: products && Array.isArray(products)
+          ? products.map(p => ({
+              ...p,
+              productId: p.productId ? new mongoose.Types.ObjectId(p.productId) : undefined
+            }))
+          : [],
       } as ExpenseTransactionDocument;
     } else if (type === 'training') {
       transactionToSave = {

@@ -46,6 +46,10 @@ interface EmailParsingConfig {
     wholesaleDiscount?: number;
     quantityMultiple?: number;
   };
+  contentBounds?: {
+    startPattern?: EmailParsingPattern;
+    endPattern?: EmailParsingPattern;
+  };
 }
 
 interface InvoiceEmail {
@@ -83,6 +87,8 @@ interface ParsedProduct {
   quantity: number;
   total: number;
   costDiscount?: number; // User input for cost discount (e.g., 0.20 for 20% off)
+  productId?: string;
+  dbName?: string;
 }
 
 // Define the parsing result structure
@@ -94,11 +100,14 @@ interface ParsingResult {
 }
 
 // Helper to format currency values
-const formatCurrency = (value: string | null): string => {
-  if (!value) return '$0.00';
+const formatCurrency = (value: string | number | null): string => {
+  if (value === null || value === undefined) return '$0.00';
   
-  // Remove any existing $ signs
-  const numericValue = value.replace(/[$,]/g, '');
+  // Ensure we operate on a string
+  const strVal = typeof value === 'number' ? value.toString() : value;
+  
+  // Remove any existing $ or comma signs
+  const numericValue = strVal.replace(/[$,]/g, '');
   
   try {
     return new Intl.NumberFormat('en-US', { 
@@ -237,6 +246,8 @@ export default function TransactionsPage() {
   const [selectedText, setSelectedText] = useState<string>('');
   const [selectedField, setSelectedField] = useState<ParsingField | null>(null);
   const [isParsingMode, setIsParsingMode] = useState(false);
+  /* AI parsing */
+  const [aiLoadingEmail, setAiLoadingEmail] = useState<string | null>(null);
   
   // Keep track of parsed field results
   const [parsingResults, setParsingResults] = useState<Record<string, Record<ParsingField, ParsingResult>>>({});
@@ -260,8 +271,34 @@ export default function TransactionsPage() {
     totalExamples: []
   });
 
+  // NEW: Content bounds inputs state
+  const [contentBoundsInputs, setContentBoundsInputs] = useState<{ startPattern: string; endPattern: string }>({
+    startPattern: '',
+    endPattern: ''
+  });
+
   // Filter state
   const [activeFilter, setActiveFilter] = useState<'all' | 'sales' | 'expenses' | 'invoices'>('all');
+
+  // product suggestions (keyed by `${emailId}-${rowIndex}`)
+  type Suggestion = { _id: string; name: string };
+  const [productSuggestions, setProductSuggestions] = useState<Record<string, Suggestion[]>>({});
+
+  const fetchProductSuggestions = async (term: string, emailId: string, index: number) => {
+    if (!term) return;
+    try {
+      const res = await fetch(`/api/products/search?term=${encodeURIComponent(term)}`);
+      if (res.ok) {
+        const json = await res.json();
+        setProductSuggestions(prev => ({
+          ...prev,
+          [`${emailId}-${index}`]: json.products || []
+        }));
+      }
+    } catch (err) {
+      console.error('product search error', err);
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -470,6 +507,9 @@ export default function TransactionsPage() {
         ...prev,
         [emailId]: !prev[emailId]
       }));
+      if (!expandedEmails[emailId]) {
+        setSelectedEmail(emailId)
+      }
     }
   };
 
@@ -478,6 +518,16 @@ export default function TransactionsPage() {
     setSelectedEmail(emailId);
     setSelectedField(null);
     setSelectedText('');
+    // Initialise content bounds inputs for this email (if available)
+    const email = invoiceEmails.find(e => e._id === emailId);
+    if (email?.supplier?.emailParsing?.contentBounds) {
+      setContentBoundsInputs({
+        startPattern: email.supplier.emailParsing.contentBounds.startPattern?.pattern || '',
+        endPattern: email.supplier.emailParsing.contentBounds.endPattern?.pattern || ''
+      });
+    } else {
+      setContentBoundsInputs({ startPattern: '', endPattern: '' });
+    }
   };
 
   const handleTextSelection = () => {
@@ -1034,15 +1084,16 @@ export default function TransactionsPage() {
       // The discount has already been applied from the wholesaleDiscount during product parsing
       // These products will be saved to MongoDB in the transaction document
       const products = parsingResults[emailId].products.products.map(product => ({
-        name: product.name,
+        productId: product.productId, // may be undefined
+        name: product.dbName || product.name,
         quantity: product.quantity,
-        unitPrice: (product.total / product.quantity).toString(), // Convert to string
-        totalPrice: (product.total * (1 - (product.costDiscount || 0))).toString(), // Convert to string
+        unitPrice: Number((product.total / product.quantity).toFixed(2)),
+        totalPrice: Number((product.total * (1 - (product.costDiscount || 0))).toFixed(2)),
         costDiscount: product.costDiscount || 0
       }));
       
       // Calculate the total after discounts
-      const totalAfterDiscounts = products.reduce((sum, p) => sum + parseFloat(p.totalPrice), 0);
+      const totalAfterDiscounts = products.reduce((sum, p) => sum + p.totalPrice, 0);
       
       // Call API to create a transaction
       // This transaction will be saved to MongoDB with the specified data
@@ -1054,12 +1105,14 @@ export default function TransactionsPage() {
         body: JSON.stringify({
           date: new Date(email.date).toISOString(),
           amount: totalAfterDiscounts,
-          merchant: email.supplier?.name || email.from.split('<')[0].trim(),
-          description: `Invoice from ${email.supplier?.name || 'unknown supplier'}`,
-          type: 'purchase',
+          supplier: email.supplier?.name || email.from.split('<')[0].trim(),
+          notes: `Invoice from ${email.supplier?.name || 'unknown supplier'}`,
+          type: 'expense',
           source: 'email',
           emailId: email.emailId,
-          products: products // These products will be saved to the transaction document in MongoDB
+          purchaseCategory: 'inventory',
+          supplierOrderNumber: parsingResults[email._id]?.orderNumber?.value || '',
+          products: products // saved
         }),
       });
       
@@ -1116,6 +1169,209 @@ export default function TransactionsPage() {
     }
   };
 
+  // NEW: save content bounds to supplier parsing config
+  const saveContentBounds = async () => {
+    if (!selectedEmail) return;
+    const email = invoiceEmails.find(e => e._id === selectedEmail);
+    if (!email || !email.supplier?.id) return;
+
+    const emailParsing = {
+      ...email.supplier.emailParsing,
+      contentBounds: {
+        ...(contentBoundsInputs.startPattern
+          ? { startPattern: { pattern: contentBoundsInputs.startPattern, flags: 'm', groupIndex: 0 } }
+          : {}),
+        ...(contentBoundsInputs.endPattern
+          ? { endPattern: { pattern: contentBoundsInputs.endPattern, flags: 'm', groupIndex: 0 } }
+          : {})
+      }
+    };
+
+    try {
+      const response = await fetch(`/api/suppliers/${email.supplier.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailParsing })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update supplier');
+      }
+
+      // Update local state so UI reflects change
+      setInvoiceEmails(prev =>
+        prev.map(e =>
+          e._id === selectedEmail
+            ? { ...e, supplier: { ...e.supplier!, emailParsing } }
+            : e
+        )
+      );
+
+      alert('Content bounds saved!');
+    } catch (err) {
+      console.error('Error saving content bounds', err);
+      alert('Failed to save content bounds. Please try again.');
+    }
+  };
+
+  // ────────────────────────────────────────────────
+  // AI Parsing
+  // ────────────────────────────────────────────────
+  interface AIParseResultFrontend {
+    orderNumber: string | null;
+    subtotal: string | null;
+    shipping: string | null;
+    tax: string | null;
+    discount: string | null;
+    orderTotal: string | null;
+    products: { name: string; quantity: number; lineTotal: string }[];
+  }
+
+  const parseWithAI = async (email: InvoiceEmail) => {
+    setAiLoadingEmail(email._id);
+
+    try {
+      const response = await fetch('/api/ai/parse-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailBody: email.body, supplierId: email.supplier?.id || email.supplierId })
+      });
+
+      const json = await response.json();
+
+      if (!response.ok) {
+        alert(json?.error || 'AI parsing failed');
+        return;
+      }
+
+      const data = json.data as AIParseResultFrontend;
+
+      if (!data) {
+        alert('No data returned from AI');
+        return;
+      }
+
+      const results: Record<ParsingField, ParsingResult> = {
+        orderNumber: { value: data.orderNumber ?? null, match: null },
+        total: { value: data.orderTotal ?? null, match: null },
+        subtotal: { value: data.subtotal ?? null, match: null },
+        shipping: { value: data.shipping ?? null, match: null },
+        tax: { value: data.tax ?? null, match: null },
+        discount: { value: data.discount ?? null, match: null },
+        products: {
+          value: data.products && data.products.length ? String(data.products.length) : null,
+          match: null,
+          products: (data.products || []).map((p) => ({
+            name: p.name,
+            quantity: Number(p.quantity) || 0,
+            total: parseFloat(p.lineTotal) || 0
+          }))
+        }
+      };
+
+      setParsingResults(prev => ({
+        ...prev,
+        [email._id]: results
+      }));
+    } catch (err) {
+      console.error('AI parse error:', err);
+      alert('Failed to parse with AI');
+    } finally {
+      setAiLoadingEmail(null);
+    }
+  };
+
+  const saveAITraining = async (email: InvoiceEmail) => {
+    const parsed = parsingResults[email._id]
+    if (!parsed) {
+      alert('No parsed data to save');
+      return;
+    }
+ 
+    try {
+      // 1. Create / update product aliases based on current mappings
+      const productsArray = parsed.products?.products || []
+      for (const prod of productsArray) {
+        if (prod.productId) {
+          await fetch(`/api/products/${prod.productId}/alias`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              supplierId: email.supplier?.id || email.supplierId,
+              nameInInvoice: prod.name
+            })
+          })
+        }
+      }
+ 
+      // 2. Save corrected products as a purchase transaction
+      await saveProductsToTransaction(email._id)
+ 
+      // 3. Save training sample for the supplier
+      // Build training prompt respecting content bounds if defined
+      const buildPrompt = () => {
+        const bounds = email.supplier?.emailParsing?.contentBounds
+        if (bounds?.startPattern?.pattern && bounds?.endPattern?.pattern) {
+          try {
+            // Ensure case-insensitive search by adding 'i' if missing
+            const normalizeFlags = (orig = '') => orig.includes('i') ? orig : orig + 'i'
+
+            const startRegex = new RegExp(bounds.startPattern.pattern, normalizeFlags(bounds.startPattern.flags))
+            const endRegex = new RegExp(bounds.endPattern.pattern, normalizeFlags(bounds.endPattern.flags))
+
+            const startMatch = startRegex.exec(email.body)
+            const endMatch = endRegex.exec(email.body)
+
+            if (startMatch && endMatch) {
+              const startIdx = startMatch.index
+              const endIdx = endMatch.index
+              if (endIdx > startIdx) {
+                return email.body.slice(startIdx, endIdx).slice(0, 6000)
+              }
+            }
+          } catch {
+            console.warn('contentBounds regex error, falling back to full body')
+          }
+        }
+        return email.body.slice(0, 6000)
+      }
+
+      await fetch(`/api/suppliers/${email.supplier?.id || email.supplierId}/ai-training`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: buildPrompt(),
+          result: parsed
+        })
+      })
+      alert('Training sample saved!');
+    } catch (err) {
+      console.error('save training error', err)
+      alert('Failed to save training data');
+    }
+  };
+
+  // Helper to update a single parsed product row
+  const updateProduct = (
+    emailId: string,
+    index: number,
+    partial: Partial<ParsedProduct>
+  ) => {
+    setParsingResults(prev => {
+      const emailData = prev[emailId]
+      if (!emailData || !emailData.products?.products) return prev
+      const updated = [...emailData.products.products]
+      updated[index] = { ...updated[index], ...partial }
+      return {
+        ...prev,
+        [emailId]: {
+          ...emailData,
+          products: { ...emailData.products, products: updated }
+        }
+      }
+    })
+  }
+
   // Combine and sort transactions and invoice emails
   const allItems: ListItem[] = [
     ...transactions.map(t => ({
@@ -1150,6 +1406,44 @@ export default function TransactionsPage() {
   if (error) {
     return <div className="p-4 text-red-500">Error: {error}</div>;
   }
+
+  // Helper to escape user text for safe regex and collapse whitespace
+  const escapeForRegex = (text: string) =>
+    text.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*');
+
+  // Derive start & end patterns from the currently-highlighted selection
+  const setBoundsFromSelection = () => {
+    if (!selectedText) return;
+
+    const lines = selectedText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return;
+
+    const startSnippet = lines[0].slice(0, 120); // safety limit
+    const endSnippet = lines[lines.length - 1].slice(0, 120);
+
+    setContentBoundsInputs({
+      startPattern: escapeForRegex(startSnippet),
+      endPattern: escapeForRegex(endSnippet)
+    });
+  };
+
+  // NEW: compute trimmed preview for content bounds
+  const getBoundsPreview = (email: InvoiceEmail | undefined) => {
+    if (!email) return '';
+    const { startPattern, endPattern } = contentBoundsInputs;
+    if (!startPattern || !endPattern) return '';
+    try {
+      const normalizeFlags = (orig = '') => orig.includes('i') ? orig : orig + 'i';
+      const startRegex = new RegExp(startPattern, normalizeFlags());
+      const endRegex = new RegExp(endPattern, normalizeFlags());
+      const startMatch = startRegex.exec(email.body);
+      const endMatch = endRegex.exec(email.body);
+      if (startMatch && endMatch && endMatch.index > startMatch.index) {
+        return email.body.slice(startMatch.index, endMatch.index);
+      }
+    } catch {}
+    return '';
+  };
 
   return (
     <div className="p-4">
@@ -1304,15 +1598,39 @@ export default function TransactionsPage() {
                   </div>
                   <div className="flex items-center">
                     {email.supplier && (
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleParsingMode(email._id);
-                        }} 
-                        className={`mr-3 px-2 py-1 text-xs rounded ${isParsingMode && selectedEmail === email._id ? 'bg-purple-500 text-white' : 'bg-purple-200 text-purple-700'}`}
-                      >
-                        {isParsingMode && selectedEmail === email._id ? 'Exit Parsing Mode' : 'Parse Email'}
-                      </button>
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            parseWithAI(email);
+                          }}
+                          disabled={aiLoadingEmail === email._id}
+                          className={`mr-3 px-2 py-1 text-xs rounded ${aiLoadingEmail === email._id ? 'bg-teal-100 text-teal-400 cursor-not-allowed' : 'bg-teal-200 text-teal-700 hover:bg-teal-300'}`}
+                        >
+                          {aiLoadingEmail === email._id ? 'Parsing…' : 'Parse with AI'}
+                        </button>
+
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleParsingMode(email._id);
+                          }} 
+                          className={`mr-3 px-2 py-1 text-xs rounded ${isParsingMode && selectedEmail === email._id ? 'bg-purple-500 text-white' : 'bg-purple-200 text-purple-700'}`}
+                        >
+                          {isParsingMode && selectedEmail === email._id ? 'Exit Parsing Mode' : 'Parse Email'}
+                        </button>
+                        {parsingResults[email._id] && Object.values(parsingResults[email._id]).some(r => r.value) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              saveAITraining(email);
+                            }}
+                            className="px-2 py-1 text-xs rounded bg-green-200 text-green-700 hover:bg-green-300"
+                          >
+                            Save as Correct
+                          </button>
+                        )}
+                      </>
                     )}
                     <div className="text-purple-600">
                       {expandedEmails[email._id] ? (
@@ -1394,15 +1712,60 @@ export default function TransactionsPage() {
                           </thead>
                           <tbody>
                             {parsingResults[email._id].products?.products?.map((product, index) => {
-                              // Calculate adjusted total based on discount
-                              const discount = product.costDiscount || 0;
-                              const adjustedTotal = product.total * (1 - discount);
+                              // adjusted total computed inline
+                              const adjustedTotal = product.total * (1 - (product.costDiscount || 0));
                               
                               return (
                                 <tr key={index} className="border-b">
-                                  <td className="px-3 py-2">{product.name}</td>
-                                  <td className="px-3 py-2 text-right">{product.quantity}</td>
-                                  <td className="px-3 py-2 text-right">{formatCurrency(product.total.toString())}</td>
+                                  {/* Name + mapping */}
+                                  <td className="px-3 py-2">
+                                    <div className="flex items-center gap-1">
+                                      <span>{product.name}</span>
+                                      <span className="text-xs text-gray-400">→</span>
+                                      <select
+                                        value={product.productId || ''}
+                                        onClick={() => {
+                                          if (!productSuggestions[`${email._id}-${index}`]) {
+                                            fetchProductSuggestions(product.name, email._id, index)
+                                          }
+                                        }}
+                                        onChange={(e) => {
+                                          const selId = e.target.value
+                                          const selName = (productSuggestions[`${email._id}-${index}`] || []).find(p => p._id === selId)?.name || ''
+                                          updateProduct(email._id, index, { productId: selId || undefined, dbName: selName })
+                                        }}
+                                        className="border rounded px-1 text-xs"
+                                      >
+                                        <option value="">Select...</option>
+                                        {(productSuggestions[`${email._id}-${index}`] || []).map(p => (
+                                          <option key={p._id} value={p._id}>{p.name}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  </td>
+                                  {/* Quantity editable */}
+                                  <td className="px-3 py-2 text-right">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={product.quantity}
+                                      onChange={e => updateProduct(email._id, index, { quantity: parseFloat(e.target.value) || 0 })}
+                                      className="w-20 border px-1 rounded text-right"
+                                    />
+                                  </td>
+                                  {/* Total editable */}
+                                  <td className="px-3 py-2 text-right">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={product.total}
+                                      onChange={e => updateProduct(email._id, index, { total: parseFloat(e.target.value) || 0 })}
+                                      className="w-24 border px-1 rounded text-right"
+                                    />
+                                  </td>
+                                  {/* Discount */}
                                   <td className="px-3 py-2 text-right">
                                     <input
                                       type="number"
@@ -1410,36 +1773,11 @@ export default function TransactionsPage() {
                                       max="1"
                                       step="0.01"
                                       value={product.costDiscount || 0}
-                                      onChange={(e) => {
-                                        // Update the cost discount for this product
-                                        const newDiscount = Math.min(1, Math.max(0, parseFloat(e.target.value) || 0));
-                                        
-                                        const currentEmailProducts = parsingResults[email._id]?.products?.products;
-                                        if (currentEmailProducts) {
-                                          const updatedProducts = [...currentEmailProducts]; // Now safe due to the check
-                                          updatedProducts[index] = {
-                                            ...updatedProducts[index],
-                                            costDiscount: newDiscount
-                                          };
-                                          
-                                          // Update the parsing results
-                                          const newParsingResultsForEmail = {
-                                            ...parsingResults[email._id],
-                                            products: {
-                                              ...(parsingResults[email._id]?.products),
-                                              products: updatedProducts
-                                            }
-                                          };
-                                          
-                                          setParsingResults(prevResults => ({
-                                            ...prevResults,
-                                            [email._id]: newParsingResultsForEmail as Record<ParsingField, ParsingResult> // Added type assertion
-                                          }));
-                                        }
-                                      }}
-                                      className="w-20 px-2 py-1 border rounded text-right"
+                                      onChange={e => updateProduct(email._id, index, { costDiscount: Math.min(1, Math.max(0, parseFloat(e.target.value) || 0)) })}
+                                      className="w-20 border px-1 rounded text-right"
                                     />
                                   </td>
+                                  {/* Adjusted total */}
                                   <td className="px-3 py-2 text-right">
                                     {formatCurrency(adjustedTotal.toString())}
                                   </td>
@@ -1799,41 +2137,58 @@ export default function TransactionsPage() {
                               {email.supplier?.emailParsing?.products ? 'Update Product Patterns' : 'Save Product Patterns'}
                             </button>
                           )}
-                          
-                          {/* Clear button for existing patterns when no new examples */}
-                          {email.supplier?.emailParsing?.products && 
-                           (productParsingState.nameExamples.length === 0 && productParsingState.quantityExamples.length === 0 && productParsingState.totalExamples.length === 0) && (
-                            <div className="mb-2">
-                              <p className="text-sm text-gray-600 mb-2">To retrain patterns, add new examples using the buttons above, then click &quot;Update Product Patterns&quot;.</p>
-                              <button 
-                                onClick={() => {
-                                  // Clear existing patterns to force retraining
-                                  if (confirm('This will delete the current patterns. You will need to add new examples to create new patterns. Continue?')) {
-                                    const emailParsing = {
-                                      ...email.supplier!.emailParsing,
-                                      products: undefined
-                                    };
-                                    
-                                    fetch(`/api/suppliers/${email.supplier!.id}`, {
-                                      method: 'PATCH',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ emailParsing }),
-                                    }).then(() => {
-                                      // Update UI
-                                      setInvoiceEmails(emails => 
-                                        emails.map(e => 
-                                          e._id === selectedEmail 
-                                            ? { ...e, supplier: { ...e.supplier!, emailParsing } } 
-                                            : e
-                                        )
-                                      );
-                                    });
-                                  }
-                                }}
-                                className="w-full bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded transition-colors"
-                              >
-                                Clear Existing Patterns & Start Over
-                              </button>
+                          {/* -------------------------------------------------- */}
+                          {/* Content Bounds Editor (now shown under header) */}
+                          {/* -------------------------------------------------- */}
+
+                          {expandedEmails[email._id] && (
+                            <div className="mt-4 flex flex-col md:flex-row gap-4">
+                              {/* Editor */}
+                              <div className="p-3 bg-indigo-50/60 rounded-lg border border-indigo-200 max-w-xl flex-shrink-0">
+                               <h4 className="text-sm font-medium mb-2 text-indigo-800">Content Bounds</h4>
+                               <div className="mb-2 flex flex-col gap-2">
+                                 <input
+                                   type="text"
+                                   value={contentBoundsInputs.startPattern}
+                                   onChange={e => setContentBoundsInputs({ ...contentBoundsInputs, startPattern: e.target.value })}
+                                   placeholder="Start regex (optional)"
+                                   className="w-full border px-2 py-1 text-xs rounded"
+                                 />
+                                 <input
+                                   type="text"
+                                   value={contentBoundsInputs.endPattern}
+                                   onChange={e => setContentBoundsInputs({ ...contentBoundsInputs, endPattern: e.target.value })}
+                                   placeholder="End regex (optional)"
+                                   className="w-full border px-2 py-1 text-xs rounded"
+                                 />
+                               </div>
+                               {/* actions */}
+                               <div className="flex flex-wrap gap-2 mb-2">
+                                 <button
+                                   onClick={setBoundsFromSelection}
+                                   disabled={!selectedText}
+                                   className={`text-xs px-3 py-1 rounded ${selectedText ? 'bg-indigo-200 text-indigo-700 hover:bg-indigo-300' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                                 >
+                                   Use Highlight as Bounds
+                                 </button>
+                                 <button
+                                   onClick={saveContentBounds}
+                                   className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1 rounded"
+                                 >
+                                   Save Content Bounds
+                                 </button>
+                               </div>
+                               {selectedText && (
+                                 <p className="text-[10px] text-gray-500 italic">Using first & last line of highlighted text to build start/end regex.</p>
+                               )}
+                             </div>
+                              {/* Preview */}
+                              <div className="flex-1 border rounded bg-gray-50 p-2 overflow-y-auto text-xs whitespace-pre-wrap">
+                                {(() => {
+                                  const preview = getBoundsPreview(email);
+                                  return preview ? preview : <em className="text-gray-400">No match with current patterns</em>;
+                                })()}
+                              </div>
                             </div>
                           )}
                         </div>

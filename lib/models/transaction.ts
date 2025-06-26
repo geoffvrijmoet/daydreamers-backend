@@ -102,11 +102,13 @@ interface ISaleTransaction extends IBaseTransaction {
 // Expense-specific interface
 interface IExpenseTransaction extends IBaseTransaction {
   type: 'expense';
-  merchant: string;
-  category?: string;
+  supplier: string;
+  purchaseCategory?: string;
   isRecurring?: boolean;
+  supplierOrderNumber?: string;
   // Optional products from parsed invoice emails
   products?: Array<{
+    productId?: Types.ObjectId;
     name: string;
     quantity: number;
     unitPrice: number;
@@ -163,6 +165,7 @@ const LineItemSchema = new Schema<ILineItem>({
 
 // Schema for products from emails
 const EmailProductSchema = new Schema({
+  productId: { type: Schema.Types.ObjectId, ref: 'Product' },
   name: { type: String, required: true },
   quantity: { type: Number, required: true },
   unitPrice: { type: Number, required: true },
@@ -216,8 +219,9 @@ const SaleTransactionSchema = new Schema<ISaleTransaction>({
 
 // Expense transaction schema
 const ExpenseTransactionSchema = new Schema<IExpenseTransaction>({
-  merchant: { type: String, required: true },
-  category: { type: String },
+  supplier: { type: String, required: true },
+  purchaseCategory: { type: String },
+  supplierOrderNumber: { type: String },
   isRecurring: { type: Boolean },
   // Add products field for invoice email products
   products: [EmailProductSchema]

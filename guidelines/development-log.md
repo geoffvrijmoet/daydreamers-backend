@@ -225,3 +225,55 @@
     -   "Update Settings Only" button allows saving these values independently of regex patterns.
     -   Provides granular control for quick adjustments without full retraining.
     -   Files changed: `app/transactions/page.tsx`.
+
+-   **Added AI Parsing Integration with OpenAI (Iter 2 – training memory)**
+    -   Added supplier-level `aiTraining.samples` array in the `Supplier` schema for few-shot examples.
+    -   New API route `app/api/suppliers/[id]/ai-training/route.ts` saves a `{prompt,result}` pair, trimming to `maxSamples` (default 10).
+    -   `lib/services/ai-email-parser.ts` now accepts examples and prepends them to the prompt.
+    -   `/api/ai/parse-invoice` pulls samples for the supplier and feeds them to the parser.
+    -   Front-end: `Parse with AI` now sends `supplierId`; "Save as Correct" button saves a confirmed parse as a training sample.
+    -   Updated deps back to `openai`.
+    -   Files changed: `lib/models/Supplier.ts`, `app/api/suppliers/[id]/ai-training/route.ts`, `lib/services/ai-email-parser.ts`, `app/api/ai/parse-invoice/route.ts`, `app/transactions/page.tsx`, `package.json`.
+
+### AI Email Parser Prompt Refactor (Recent)
+
+-   **Converted few-shot examples to proper chat format**
+    -   Each saved sample is now a `(user=email, assistant=JSON)` pair instead of inline text.
+    -   Moved JSON schema into the `system` prompt; removed boiler-plate from the user message.
+    -   Cuts token usage and lets the model actually learn from previous answers.
+    -   No change to `max_tokens` (still 512).
+    -   File changed: `lib/services/ai-email-parser.ts`
+
+### Invoice Email AI Parsing Improvements (Recent)
+
+-   **Switched `productId` to Native ObjectId in Expense Products**
+    -   Added `productId` (ObjectId) to `EmailProductSchema` in `lib/models/transaction.ts`.
+    -   Cast incoming `productId` strings to `mongoose.Types.ObjectId` in `/api/transactions` POST handler.
+    -   Updated TypeScript interfaces accordingly.
+    -   Ensures proper relations for downstream aggregations.
+
+-   **Replaced `merchant` with `supplier` on Expense Transactions**
+    -   Added `supplier` field to `IExpenseTransaction` & schema; removed hard-coded `merchant` usage.
+    -   API now persists `supplier` from front-end payload.
+    -   Aligns DB schema with invoice-driven terminology.
+
+-   **Increased Supplier AI-Training Prompt Size**
+    -   Front-end now sends up to 6 KB of the invoice body (`email.body.slice(0, 6000)`), doubling previous context window.
+
+-   **Alias & Training Reliability Fixes**
+    -   `productId` is now saved as ObjectId, allowing `/api/products/[id]/alias` to work correctly.
+    -   Fixed destructuring bug in `/api/transactions` that ignored `purchaseCategory`.
+
+    Files changed:
+    - `lib/models/transaction.ts`
+    - `app/api/transactions/route.ts`
+    - `app/transactions/page.tsx`
+
+### OpenAI → Gemini Fallback (Recent)
+
+-   When OpenAI replies with an *insufficient credit* style error the service now retries with Gemini-Pro.
+    -   Implemented `parseWithGemini` using `@google/generative-ai`.
+    -   Added helper `isQuotaError` to detect quota/billing messages.
+    -   Lazy-initialises Gemini client with `process.env.GEMINI_API_KEY`.
+    -   No change to OpenAI token budget.
+    -   File changed: `lib/services/ai-email-parser.ts`

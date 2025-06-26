@@ -52,6 +52,10 @@ export interface IProduct extends Document {
       error: string;
     }>;
   };
+  supplierAliases?: {
+    supplierId: mongoose.Types.ObjectId | string;
+    nameInInvoice: string;
+  }[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -107,7 +111,11 @@ const ProductSchema = new Schema<IProduct>({
       platform: { type: String, required: true, enum: ['shopify', 'square'] },
       error: { type: String, required: true }
     }]
-  }
+  },
+  supplierAliases: [{
+    supplierId: { type: Schema.Types.ObjectId, ref: 'Supplier', required: true },
+    nameInInvoice: { type: String, required: true }
+  }]
 }, {
   timestamps: true
 });
@@ -119,6 +127,7 @@ ProductSchema.index({ stock: 1 });
 ProductSchema.index({ active: 1 });
 ProductSchema.index({ 'platformMetadata.productId': 1 });
 ProductSchema.index({ 'platformMetadata.sku': 1 });
+ProductSchema.index({ 'supplierAliases.nameInInvoice': 1 });
 
 // Pre-save hook to ensure name is always baseProductName + variantName
 ProductSchema.pre('save', function(next) {

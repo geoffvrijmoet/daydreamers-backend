@@ -36,6 +36,10 @@ interface EmailParsingConfig {
     billing: EmailParsingPattern;
     shipping: EmailParsingPattern;
   };
+  contentBounds?: {
+    startPattern?: EmailParsingPattern;
+    endPattern?: EmailParsingPattern;
+  };
 }
 
 export interface ISupplier extends Document {
@@ -44,6 +48,13 @@ export interface ISupplier extends Document {
   invoiceEmail: string;
   invoiceSubjectPattern: string;
   skuPrefix: string;
+  aiTraining?: {
+    samples: {
+      prompt: string;
+      result: Record<string, unknown>;
+    }[];
+    maxSamples?: number;
+  };
   emailParsing?: EmailParsingConfig;
   createdAt: Date;
   updatedAt: Date;
@@ -70,6 +81,15 @@ const SupplierSchema = new Schema<ISupplier>({
   skuPrefix: {
     type: String,
     required: true
+  },
+  aiTraining: {
+    samples: [
+      {
+        prompt: { type: String },
+        result: { type: Schema.Types.Mixed }
+      }
+    ],
+    maxSamples: { type: Number, default: 10 }
   },
   emailParsing: {
     orderNumber: {
@@ -172,6 +192,18 @@ const SupplierSchema = new Schema<ISupplier>({
         groupIndex: { type: Number }
       },
       shipping: {
+        pattern: { type: String },
+        flags: { type: String },
+        groupIndex: { type: Number }
+      }
+    },
+    contentBounds: {
+      startPattern: {
+        pattern: { type: String },
+        flags: { type: String },
+        groupIndex: { type: Number }
+      },
+      endPattern: {
         pattern: { type: String },
         flags: { type: String },
         groupIndex: { type: Number }
