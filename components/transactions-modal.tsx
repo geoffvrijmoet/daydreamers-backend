@@ -30,6 +30,8 @@ interface Transaction {
   amount: number
   customer?: string
   description?: string
+  supplier?: string
+  purchaseCategory?: string
   products?: Array<{
     name: string
     quantity: number
@@ -338,9 +340,7 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                         <div className="space-y-1 flex-grow pr-4">
                           <div className="flex items-center gap-2">
                             <span className="font-medium">
-                              {transaction.customer || 
-                               (transaction.type === 'expense' ? 'Expense' : 
-                                transaction.type === 'training' ? 'Training Session' : null)
+                              {transaction.type === 'expense' ? (transaction.supplier || 'Expense') : (transaction.customer || (transaction.type === 'training' ? 'Training Session' : null))
                               }
                               {/* Add a badge for Sale type */}
                               {transaction.type === 'sale' && (
@@ -366,6 +366,9 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                           </div>
                           {transaction.description && (
                             <p className="text-sm text-gray-600">{transaction.description}</p>
+                          )}
+                          {transaction.type === 'expense' && transaction.purchaseCategory && (
+                            <p className="text-xs text-gray-500">Category: {transaction.purchaseCategory}</p>
                           )}
                           {transaction.products && (
                             <ul className="text-sm text-gray-600">
