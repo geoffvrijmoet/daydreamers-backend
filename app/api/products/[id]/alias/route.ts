@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import ProductModel from '@/lib/models/Product'
+import mongoose from 'mongoose'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -16,26 +17,34 @@ export async function POST (request: Request, { params }: { params: { id: string
     const { id } = params
     const { supplierId, nameInInvoice } = await request.json() as Body
 
+    console.log('[AliasRoute] Incoming alias request', { productId: id, supplierId, nameInInvoice })
+
     if (!supplierId || !nameInInvoice) {
       return NextResponse.json({ error: 'supplierId and nameInInvoice required' }, { status: 400 })
     }
 
-    const product = await ProductModel.findById(id)
-    if (!product) {
-      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    // Use atomic update to avoid validating entire document (which may fail).
+    const objSupplierId = new mongoose.Types.ObjectId(supplierId)
+
+    // Check & add only if not present
+    const res = await ProductModel.updateOne(
+      {
+        _id: id,
+        supplierAliases: { $not: { $elemMatch: { supplierId: objSupplierId, nameInInvoice } } }
+      },
+      {
+        $addToSet: { supplierAliases: { supplierId: objSupplierId, nameInInvoice } }
+      },
+      { runValidators: false }
+    )
+
+    if (res.modifiedCount > 0) {
+      console.log('[AliasRoute] Alias added via $addToSet', { productId: id })
+    } else {
+      console.log('[AliasRoute] Alias already existed or product missing')
     }
 
-    const aliases = product.supplierAliases || []
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const exists = aliases.find((a: any) => a.supplierId.toString() === supplierId && a.nameInInvoice === nameInInvoice)
-
-    if (!exists) {
-      aliases.push({ supplierId, nameInInvoice })
-      product.supplierAliases = aliases
-      await product.save()
-    }
-
-    return NextResponse.json({ success: true, aliasCount: product.supplierAliases?.length || 0 })
+    return NextResponse.json({ success: true })
   } catch (err) {
     console.error('add-alias error', err)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })

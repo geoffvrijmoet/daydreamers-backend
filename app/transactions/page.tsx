@@ -43,6 +43,14 @@ interface EmailParsingConfig {
       quantity: EmailParsingPattern;
       total: EmailParsingPattern;
     },
+    /**
+     * Percentage discount that should be applied to the cost of every product 
+     * line on an invoice (e.g. 0.2 for a 20 % discount). This replaces the
+     * older `wholesaleDiscount` field but the latter is still respected for
+     * backwards-compatibility.
+     */
+    costDiscount?: number;
+    /** @deprecated – use costDiscount */
     wholesaleDiscount?: number;
     quantityMultiple?: number;
   };
@@ -1039,8 +1047,8 @@ export default function TransactionsPage() {
       // Take the minimum length to ensure we have matching sets
       const minLength = Math.min(nameMatches.length, quantityMatches.length, totalMatches.length);
       
-      // Get the multipliers from the patterns
-      const wholesaleDiscount = patterns.wholesaleDiscount || 0;
+      // Get the multipliers / discounts from the patterns
+      const costDiscount = patterns.costDiscount ?? patterns.wholesaleDiscount ?? 0;
       const quantityMultiple = patterns.quantityMultiple || 1;
       const products: ParsedProduct[] = [];
       
@@ -1049,14 +1057,14 @@ export default function TransactionsPage() {
           name: nameMatches[i],
           quantity: quantityMatches[i] * quantityMultiple, // Apply quantity multiple
           total: totalMatches[i],
-          // Apply wholesale discount to each product
-          costDiscount: wholesaleDiscount
+          // Apply cost discount to each product
+          costDiscount: costDiscount
         });
       }
       
       return {
         products,
-        wholesaleDiscount,
+        costDiscount,
         quantityMultiple
       };
     } catch (error) {
@@ -1081,7 +1089,7 @@ export default function TransactionsPage() {
     
     try {
       // Prepare the products data with discounts applied
-      // The discount has already been applied from the wholesaleDiscount during product parsing
+      // The discount has already been applied from the costDiscount during product parsing
       // These products will be saved to MongoDB in the transaction document
       const products = parsingResults[emailId].products.products.map(product => ({
         productId: product.productId, // may be undefined
@@ -1140,8 +1148,8 @@ export default function TransactionsPage() {
     }
   };
 
-  // Add a function to handle the wholesale discount input
-  const handleWholesaleDiscountChange = (value: string) => {
+  // Add a function to handle the cost discount input
+  const handleCostDiscountChange = (value: string) => {
     // Convert percentage input to decimal (e.g., 20 -> 0.20)
     const percentage = parseFloat(value);
     if (!isNaN(percentage)) {
@@ -1264,10 +1272,49 @@ export default function TransactionsPage() {
           products: (data.products || []).map((p) => ({
             name: p.name,
             quantity: Number(p.quantity) || 0,
-            total: parseFloat(p.lineTotal) || 0
+            total: parseFloat(p.lineTotal) || 0,
+            costDiscount:
+              email.supplier?.emailParsing?.products?.costDiscount ??
+              email.supplier?.emailParsing?.products?.wholesaleDiscount ??
+              0
           }))
         }
       };
+
+      // ───────────────────────────────────────────────
+      // Auto-match products to MongoDB products via supplierAliases
+      // ───────────────────────────────────────────────
+      const supplierIdForMatch = email.supplier?.id || email.supplierId;
+      if (supplierIdForMatch && results.products.products && results.products.products.length) {
+        await Promise.all(
+          results.products.products.map(async (prod, idx) => {
+            try {
+              const resp = await fetch(
+                `/api/products/find-by-alias?supplierId=${supplierIdForMatch}&name=${encodeURIComponent(prod.name)}`
+              );
+              if (resp.ok) {
+                const { product } = await resp.json();
+                if (product?._id) {
+                  prod.productId = product._id as string;
+                  prod.dbName = product.name as string;
+
+                  // preload suggestions so dropdown shows immediately
+                  const key = `${email._id}-${idx}`;
+                  setProductSuggestions(prev => {
+                    const existing = prev[key] || [];
+                    if (!existing.find(p => p._id === product._id)) {
+                      return { ...prev, [key]: [ { _id: product._id, name: product.name }, ...existing ] };
+                    }
+                    return prev;
+                  });
+                }
+              }
+            } catch (err) {
+              console.warn('alias lookup failed', err);
+            }
+          })
+        );
+      }
 
       setParsingResults(prev => ({
         ...prev,
@@ -1371,6 +1418,25 @@ export default function TransactionsPage() {
       }
     })
   }
+
+  // Update the same cost discount on every parsed product for an email
+  const updateCostDiscount = (emailId: string, discount: number) => {
+    setParsingResults(prev => {
+      const emailData = prev[emailId];
+      if (!emailData || !emailData.products?.products) return prev;
+      const updatedProducts = emailData.products.products.map(p => ({
+        ...p,
+        costDiscount: discount
+      }));
+      return {
+        ...prev,
+        [emailId]: {
+          ...emailData,
+          products: { ...emailData.products, products: updatedProducts }
+        }
+      };
+    });
+  };
 
   // Combine and sort transactions and invoice emails
   const allItems: ListItem[] = [
@@ -1586,7 +1652,7 @@ export default function TransactionsPage() {
                                   ['total', 'subtotal', 'shipping', 'tax'].includes(field) ?
                                     formatCurrency(result.value) :
                                     field === 'discount' ?
-                                      `-${formatCurrency(result.value.replace('-', ''))}` :
+                                      `-${formatCurrency((typeof result.value === 'number' ? String(result.value) : (result.value || '')).replace('-', ''))}` :
                                       result.value
                                 }
                               </>
@@ -1662,7 +1728,7 @@ export default function TransactionsPage() {
                               ['total', 'subtotal', 'shipping', 'tax'].includes(field) ? 
                                 formatCurrency(result.value) : 
                                 field === 'discount' ? 
-                                  `-${formatCurrency(result.value.replace('-', ''))}` : 
+                                  `-${formatCurrency((typeof result.value === 'number' ? String(result.value) : (result.value || '')).replace('-', ''))}` : 
                                   result.value
                             }
                           </span>
@@ -1688,8 +1754,28 @@ export default function TransactionsPage() {
                   hasParsingResults && 
                   (parsingResults[email._id]?.products?.products || []).length > 0 && (
                     <div className="mt-3 p-3 bg-white rounded-lg border border-purple-100">
-                      <div className="flex justify-between items-center mb-3">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-3 gap-3">
                         <h3 className="font-medium">Parsed Products</h3>
+
+                        <div className="flex items-center gap-2">
+                          <label className="text-sm">Cost Discount&nbsp;(%)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value={((parsingResults[email._id]?.products?.products?.[0]?.costDiscount || 0) * 100).toString()}
+                            onChange={(e) => {
+                              const perc = parseFloat(e.target.value);
+                              const dec = !isNaN(perc) ? perc / 100 : 0;
+
+                              // Update all parsed products locally
+                              updateCostDiscount(email._id, dec);
+                            }}
+                            className="w-20 border px-2 py-1 rounded text-right text-sm"
+                          />
+                        </div>
+
                         <Button
                           onClick={() => saveProductsToTransaction(email._id)}
                           disabled={!email || !(parsingResults[email._id]?.products?.products || []).length}
@@ -1706,7 +1792,6 @@ export default function TransactionsPage() {
                               <th className="px-3 py-2 text-left">Product</th>
                               <th className="px-3 py-2 text-right">Quantity</th>
                               <th className="px-3 py-2 text-right">Total</th>
-                              <th className="px-3 py-2 text-right">Cost Discount</th>
                               <th className="px-3 py-2 text-right">Adjusted Total</th>
                             </tr>
                           </thead>
@@ -1722,25 +1807,34 @@ export default function TransactionsPage() {
                                     <div className="flex items-center gap-1">
                                       <span>{product.name}</span>
                                       <span className="text-xs text-gray-400">→</span>
-                                      <select
-                                        value={product.productId || ''}
-                                        onClick={() => {
-                                          if (!productSuggestions[`${email._id}-${index}`]) {
-                                            fetchProductSuggestions(product.name, email._id, index)
-                                          }
-                                        }}
-                                        onChange={(e) => {
-                                          const selId = e.target.value
-                                          const selName = (productSuggestions[`${email._id}-${index}`] || []).find(p => p._id === selId)?.name || ''
-                                          updateProduct(email._id, index, { productId: selId || undefined, dbName: selName })
-                                        }}
-                                        className="border rounded px-1 text-xs"
-                                      >
-                                        <option value="">Select...</option>
-                                        {(productSuggestions[`${email._id}-${index}`] || []).map(p => (
-                                          <option key={p._id} value={p._id}>{p.name}</option>
-                                        ))}
-                                      </select>
+                                      {(() => {
+                                        const key = `${email._id}-${index}`;
+                                        const suggestions = productSuggestions[key] || [];
+                                        const merged = product.productId && product.dbName && !suggestions.find(p => p._id === product.productId)
+                                          ? [{ _id: product.productId, name: product.dbName }, ...suggestions]
+                                          : suggestions;
+                                        return (
+                                          <select
+                                            value={product.productId || ''}
+                                            onClick={() => {
+                                              if (!productSuggestions[key]) {
+                                                fetchProductSuggestions(product.name, email._id, index);
+                                              }
+                                            }}
+                                            onChange={e => {
+                                              const selId = e.target.value;
+                                              const selName = merged.find(p => p._id === selId)?.name || '';
+                                              updateProduct(email._id, index, { productId: selId || undefined, dbName: selName });
+                                            }}
+                                            className="border rounded px-1 text-xs"
+                                          >
+                                            <option value="">Select...</option>
+                                            {merged.map(p => (
+                                              <option key={p._id} value={p._id}>{p.name}</option>
+                                            ))}
+                                          </select>
+                                        );
+                                      })()}
                                     </div>
                                   </td>
                                   {/* Quantity editable */}
@@ -1765,18 +1859,6 @@ export default function TransactionsPage() {
                                       className="w-24 border px-1 rounded text-right"
                                     />
                                   </td>
-                                  {/* Discount */}
-                                  <td className="px-3 py-2 text-right">
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      max="1"
-                                      step="0.01"
-                                      value={product.costDiscount || 0}
-                                      onChange={e => updateProduct(email._id, index, { costDiscount: Math.min(1, Math.max(0, parseFloat(e.target.value) || 0)) })}
-                                      className="w-20 border px-1 rounded text-right"
-                                    />
-                                  </td>
                                   {/* Adjusted total */}
                                   <td className="px-3 py-2 text-right">
                                     {formatCurrency(adjustedTotal.toString())}
@@ -1795,7 +1877,6 @@ export default function TransactionsPage() {
                                     .toString()
                                 )}
                               </td>
-                              <td className="px-3 py-2"></td>
                               <td className="px-3 py-2 text-right">
                                 {formatCurrency(
                                   (parsingResults[email._id].products?.products || [])
@@ -1948,10 +2029,10 @@ export default function TransactionsPage() {
                           </p>
                         </div>
                         
-                        {/* Add wholesale discount input */}
+                        {/* Add cost discount input */}
                         <div className="mb-4">
                           <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Wholesale Discount Percentage
+                            Cost Discount Percentage
                           </label>
                           <div className="flex items-center">
                             <input
@@ -1960,14 +2041,14 @@ export default function TransactionsPage() {
                               max="100"
                               step="1"
                               value={productParsingState.wholesaleDiscount ? (productParsingState.wholesaleDiscount * 100) : ''}
-                              onChange={(e) => handleWholesaleDiscountChange(e.target.value)}
+                              onChange={(e) => handleCostDiscountChange(e.target.value)}
                               placeholder="Enter %"
                               className="w-24 px-3 py-2 border border-gray-300 rounded-md mr-2"
                             />
                             <span className="text-gray-600">%</span>
                           </div>
                           <p className="text-xs text-gray-500 mt-1">
-                            Enter the wholesale discount percentage (e.g., 20 for 20%)
+                            Enter the cost discount percentage (e.g., 20 for 20%)
                           </p>
                         </div>
                         
@@ -2014,7 +2095,7 @@ export default function TransactionsPage() {
                                 <div className="grid grid-cols-2 gap-4">
                                   <div>
                                     <label className="block text-xs font-medium text-yellow-700 mb-1">
-                                      Wholesale Discount
+                                      Cost Discount
                                     </label>
                                     <div className="flex items-center">
                                       <input
@@ -2022,30 +2103,32 @@ export default function TransactionsPage() {
                                         min="0"
                                         max="100"
                                         step="1"
-                                        value={email.supplier.emailParsing.products.wholesaleDiscount ? (email.supplier.emailParsing.products.wholesaleDiscount * 100) : ''}
+                                        value={email.supplier.emailParsing.products.costDiscount ? (email.supplier.emailParsing.products.costDiscount * 100) : ''}
                                         onChange={(e) => {
                                           const percentage = parseFloat(e.target.value);
                                           const decimalValue = !isNaN(percentage) ? percentage / 100 : 0;
                                           
                                           // Update the email supplier data immediately for UI feedback
                                           setInvoiceEmails(emails => 
-                                            emails.map(emailItem => 
-                                              emailItem._id === selectedEmail && emailItem.supplier?.emailParsing?.products
-                                                ? { 
-                                                    ...emailItem, 
-                                                    supplier: { 
-                                                      ...emailItem.supplier, 
-                                                      emailParsing: {
-                                                        ...emailItem.supplier.emailParsing,
-                                                        products: {
-                                                          ...emailItem.supplier.emailParsing.products,
-                                                          wholesaleDiscount: decimalValue
-                                                        }
+                                            emails.map(emailItem => {
+                                              if (emailItem._id === selectedEmail && emailItem.supplier?.emailParsing?.products) {
+                                                const updated: InvoiceEmail = {
+                                                  ...emailItem,
+                                                  supplier: {
+                                                    ...emailItem.supplier,
+                                                    emailParsing: {
+                                                      ...emailItem.supplier.emailParsing,
+                                                      products: {
+                                                        ...emailItem.supplier.emailParsing.products,
+                                                        costDiscount: decimalValue
                                                       }
-                                                    } 
-                                                  } 
-                                                : emailItem
-                                            )
+                                                    }
+                                                  }
+                                                };
+                                                return updated;
+                                              }
+                                              return emailItem;
+                                            })
                                           );
                                         }}
                                         placeholder="0"
@@ -2070,23 +2153,25 @@ export default function TransactionsPage() {
                                           
                                           // Update the email supplier data immediately for UI feedback
                                           setInvoiceEmails(emails => 
-                                            emails.map(emailItem => 
-                                              emailItem._id === selectedEmail && emailItem.supplier?.emailParsing?.products
-                                                ? { 
-                                                    ...emailItem, 
-                                                    supplier: { 
-                                                      ...emailItem.supplier, 
-                                                      emailParsing: {
-                                                        ...emailItem.supplier.emailParsing,
-                                                        products: {
-                                                          ...emailItem.supplier.emailParsing.products,
-                                                          quantityMultiple: validMultiple
-                                                        }
+                                            emails.map(emailItem => {
+                                              if (emailItem._id === selectedEmail && emailItem.supplier?.emailParsing?.products) {
+                                                const updated: InvoiceEmail = {
+                                                  ...emailItem,
+                                                  supplier: {
+                                                    ...emailItem.supplier,
+                                                    emailParsing: {
+                                                      ...emailItem.supplier.emailParsing,
+                                                      products: {
+                                                        ...emailItem.supplier.emailParsing.products,
+                                                        quantityMultiple: validMultiple
                                                       }
-                                                    } 
-                                                  } 
-                                                : emailItem
-                                            )
+                                                    }
+                                                  }
+                                                };
+                                                return updated;
+                                              }
+                                              return emailItem;
+                                            })
                                           );
                                         }}
                                         placeholder="1"
@@ -2244,7 +2329,7 @@ export default function TransactionsPage() {
                                         ['total', 'subtotal', 'shipping', 'tax'].includes(field) ? 
                                           formatCurrency(result.value) : 
                                           field === 'discount' ? 
-                                            `-${formatCurrency(result.value.replace('-', ''))}` : 
+                                            `-${formatCurrency((typeof result.value === 'number' ? String(result.value) : (result.value || '')).replace('-', ''))}` : 
                                             result.value
                                       }
                                     </span>

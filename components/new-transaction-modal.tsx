@@ -72,10 +72,9 @@ type BasePayload = Omit<BaseTransactionFormData, 'notes'> & { date: string; note
 
 type SalePayload = Omit<SaleFormData, 'date'> & BasePayload & { type: 'sale' };
 
-type ExpensePayload = Omit<ExpenseFormData, 'date' | 'category' | 'supplier'> & BasePayload & {
+type ExpensePayload = Omit<ExpenseFormData, 'date' | 'category'> & BasePayload & {
   type: 'expense';
   purchaseCategory: string; // Renamed from category
-  merchant: string;         // Renamed from supplier
   products: LineItem[];     // Add products field
 };
 
@@ -118,6 +117,8 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const [newProductFormData, setNewProductFormData] = useState<Partial<Product>>({});
   const [isIngredientChecked, setIsIngredientChecked] = useState(false);
+  const [showAllCategories, setShowAllCategories] = useState(false);
+  const [showProducts, setShowProducts] = useState(false);
 
   // Reset form when modal opens
   useEffect(() => {
@@ -357,13 +358,13 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
       let payload: TransactionPayload;
 
       if (formData.type === 'expense') {
-        const { category, supplier, ...restExpenseData } = formData;
+        const { category, ...restExpenseData } = formData as ExpenseFormData;
         payload = {
           ...restExpenseData,
           date: date.toISOString(),
           purchaseCategory: category,
-          merchant: supplier,
-        };
+          products: (formData as ExpenseFormData).products
+        } as ExpensePayload;
       } else {
         // For sale or training, the structure matches TransactionPayload directly
         payload = {
@@ -818,11 +819,146 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
             </button>
           </div>
 
+          {/* Expense-specific: Date & Payment Method row (above Amount) */}
+          {formData.type === 'expense' && (
+            <div className="flex flex-wrap items-start justify-center gap-6 mb-4">
+              {/* Date */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Date</label>
+                <input
+                  type="date"
+                  value={formData.date}
+                  onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
+                  className="mt-1 block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              {/* Payment Methods */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Payment&nbsp;Method</label>
+                <div className="flex flex-wrap gap-2">
+                  {['Venmo', 'Cash', 'Cash App', 'Zelle'].map((method) => (
+                    <button
+                      type="button"
+                      key={method}
+                      onClick={() => setFormData(prev => ({ ...prev, paymentMethod: method }))}
+                      className={`px-3 py-1 rounded-full text-sm border transition-colors ${formData.paymentMethod === method ? 'bg-blue-500 text-white border-blue-500' : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'}`}
+                    >
+                      {method}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Centered Amount input for Expense mode */}
+          {formData.type === 'expense' && (
+            <div className="w-full flex justify-center mt-4">
+              <div className="flex flex-col items-center">
+                <label className="text-lg font-semibold text-gray-700 mb-2">Amount</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.amount}
+                  readOnly={false}
+                  onChange={(e) => {
+                    const newAmount = parseFloat(e.target.value) || 0;
+                    setFormData(prev => ({ ...prev, amount: newAmount }));
+                  }}
+                  onFocus={(e) => (e.target as HTMLInputElement).select()}
+                  className="text-center text-4xl md:text-5xl font-semibold border-none bg-transparent focus:ring-0 focus:border-none shadow-none w-40 appearance-none"
+                  required
+                  inputMode="decimal"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Expense-specific: Supplier & Category row (below Amount) */}
+          {formData.type === 'expense' && (
+            <div className="flex flex-col gap-4 mt-4 items-center md:flex-row md:flex-wrap md:items-center">
+              {/* Supplier */}
+              <div className="flex-1 min-w-[45%] flex flex-col items-center md:items-start">
+                <label className="block text-sm font-medium text-gray-700">Supplier</label>
+                <Input
+                  type="text"
+                  value={formData.supplier || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, supplier: e.target.value }))}
+                  onFocus={(e) => (e.target as HTMLInputElement).select()}
+                  className="mt-1 block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  style={{ width: `${Math.max(10, (formData.supplier?.length || 0) + 2)}ch` }}
+                />
+              </div>
+
+              {/* Category */}
+              <div className="flex-1 flex flex-col items-center md:items-start">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    "Rent", "Equipment", "Inventory", "Advertising", "Software", "Insurance", "Shipping", "Transit", "Bank fees", "Interest", "Other"
+                  ]
+                    .filter((cat, idx) => showAllCategories || idx < 2) // show only first 2 when collapsed
+                    .map(cat => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => {
+                          setFormData(prev => ({ ...prev, category: cat }));
+                          setShowOtherCategoryInput(cat === 'Other');
+                        }}
+                        className={`px-3 py-1 rounded-full text-sm border ${
+                          formData.category === cat
+                            ? 'bg-blue-500 text-white border-blue-500'
+                            : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  {!showAllCategories && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllCategories(true)}
+                      className="px-2 py-1 text-sm text-gray-600 hover:text-gray-800"
+                      aria-label="Show more categories"
+                    >
+                      ▼
+                    </button>
+                  )}
+                  {showAllCategories && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllCategories(false)}
+                      className="px-2 py-1 text-sm text-gray-600 hover:text-gray-800"
+                      aria-label="Show fewer categories"
+                    >
+                      ▲
+                    </button>
+                  )}
+                </div>
+                {showOtherCategoryInput && (
+                  <input
+                    type="text"
+                    placeholder="Specify other category"
+                    value={formData.category === 'Other' ? '' : formData.category}
+                    onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
+                    className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    required
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Common Fields (mobile-first layout) */}
           <div className="space-y-4">
             {/* Row: Amount + Sales Tax + Payment Methods */}
             <div className="flex flex-wrap items-start gap-4">
               {/* Amount */}
+              {formData.type !== 'expense' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700">Amount</label>
                 <div className="flex items-center mt-1">
@@ -832,23 +968,19 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                     step="0.01"
                     min="0"
                     value={formData.amount}
-                    readOnly={formData.type === 'expense' && 'products' in formData && (formData as ExpenseFormData).products.length > 0}
+                    readOnly={false}
                     onChange={(e) => {
                       const newAmount = parseFloat(e.target.value) || 0;
-                      if (formData.type === 'sale') {
-                        setFormData(prev => ({ ...(prev as SaleFormData), amount: newAmount }));
-                      } else if (formData.type === 'expense' && !(formData as ExpenseFormData).products.length) {
-                        setFormData(prev => ({ ...(prev as ExpenseFormData), amount: newAmount }));
-                      }
+                      setFormData(prev => ({ ...prev, amount: newAmount }));
                     }}
                     onFocus={(e) => (e.target as HTMLInputElement).select()}
-                    className={`block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 ${(formData.type === 'expense' && 'products' in formData && (formData as ExpenseFormData).products.length > 0) ? 'bg-gray-50' : ''}`}
-                    style={{ width: `${String(formData.amount || 0).length + 3}ch` }}
+                    className="block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                     required
                     inputMode="decimal"
                   />
                 </div>
               </div>
+              )}
 
               {/* Sales Tax (only for sale) */}
               {formData.type === 'sale' && (
@@ -869,7 +1001,8 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                 </div>
               )}
 
-              {/* Date */}
+              {/* Date (hidden in expense mode – rendered above) */}
+              {formData.type !== 'expense' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700">Date</label>
                 <input
@@ -891,8 +1024,10 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                   </label>
                 )}
               </div>
+              )}
 
-              {/* Payment Methods */}
+              {/* Payment Methods (hidden in expense mode – rendered above) */}
+              {formData.type !== 'expense' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Payment&nbsp;Method</label>
                 <div className="flex flex-wrap gap-2">
@@ -908,6 +1043,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                   ))}
                 </div>
               </div>
+              )}
             </div>
 
             {/* Shipping/Tip/Discount row (sale only) */}
@@ -1021,333 +1157,275 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
           {/* Product Section (Visible for Sale and Expense) */}
           {(formData.type === 'sale' || formData.type === 'expense') && (
              <div className="space-y-4">
-                <h3 className="text-md font-medium">
-                  {formData.type === 'sale' ? 'Add Products to Sale' : 'Add Products Purchased'}
-                </h3>
-               {/* Quick-add popular products (mobile only) */}
-               {!isDesktop && popularProducts.length > 0 && (
-                 <div className="flex flex-wrap gap-2 mb-2">
-                   {popularProducts.map((product) => (
-                     <button
-                       key={product._id}
-                       type="button"
-                       onClick={() => handleAddProduct(product)}
-                       className="px-3 py-1 rounded-full bg-gray-100 text-sm hover:bg-blue-100 border border-gray-300"
-                     >
-                       {product.name}
-                     </button>
-                   ))}
-                 </div>
-               )}
+                <button
+                  type="button"
+                  onClick={() => setShowProducts(prev => !prev)}
+                  className="flex items-center gap-1 text-md font-medium text-blue-600 hover:underline"
+                >
+                  {showProducts ? 'Hide Products ▲' : (formData.type === 'sale' ? 'Add Products to Sale ▼' : 'Add Products Purchased ▼')}
+                </button>
 
-               <div>
-                 <input
-                   type="text"
-                   placeholder="Search products by name or SKU..."
-                   value={productSearchTerm}
-                   onChange={(e) => {
-                     const searchTerm = e.target.value;
-                     setProductSearchTerm(searchTerm);
-                     const lowerSearchTerm = searchTerm.toLowerCase();
-                     const filtered = products.filter(p =>
-                       p.name.toLowerCase().includes(lowerSearchTerm) ||
-                       (p.sku?.toLowerCase() || '').includes(lowerSearchTerm)
-                     );
-                     setFilteredProducts(filtered);
-                   }}
-                   className="w-full px-4 py-2 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                 />
-               </div>
-
-               {/* Product Suggestions List */}
-               <div className="max-h-[200px] overflow-y-auto space-y-1 border rounded p-2">
-                 {filteredProducts.map((product) => (
-                   <button
-                     key={product._id ?? product.sku ?? product.name}
-                     type="button"
-                     onClick={() => handleAddProduct(product)}
-                     className="w-full flex items-center justify-between p-2 rounded hover:bg-blue-50 focus:outline-none"
-                   >
-                     <span className="text-sm text-left">{product.name}</span>
-                     {typeof product.price === 'number' && !isNaN(product.price) && (
-                       <span className="text-xs text-gray-500 ml-2">${product.price.toFixed(2)}</span>
-                     )}
-                   </button>
-                 ))}
-               </div>
-
-               {/* Show 'Create Product' button for Expenses if term entered and no exact match */}
-               {formData.type === 'expense' && 
-                productSearchTerm.trim() && 
-                !isCreatingProduct && // Don't show if already creating
-                !filteredProducts.some(p => p.name.toLowerCase() === productSearchTerm.trim().toLowerCase()) && (
-                  <div className="mt-2 text-center">
-                    <Button 
-                      type="button" 
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setIsCreatingProduct(true); // Show the new product form
-                        // Reset checkbox state when starting a new creation
-                        setIsIngredientChecked(false); 
-                        setNewProductFormData({ 
-                          // Initialize without isIngredient field
-                          name: productSearchTerm.trim(),
-                          sku: productSearchTerm.trim().toLowerCase().replace(/\s+/g, '-').substring(0, 30),
-                          category: 'Uncategorized', 
-                          price: 0, 
-                          lastPurchasePrice: 0, 
-                          stock: 0,
-                          active: true,
-                          baseProductName: productSearchTerm.trim(),
-                          variantName: 'Default',
-                          minimumStock: 0,
-                          averageCost: 0,
-                          costHistory: [],
-                          totalSpent: 0,
-                          totalPurchased: 0,
-                          platformMetadata: [],
-                          syncStatus: { lastSyncAttempt: '', lastSuccessfulSync: '', errors: [] },
-                          // Ensure other potentially required Partial<Product> fields have defaults
-                          description: '',
-                          barcode: '',
-                          supplier: '',
-                          isProxied: false,
-                        }); 
-                      }}
-                      className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                    >
-                      Create &quot;{productSearchTerm.trim()}&quot; as new product
-                    </Button>
+                {showProducts && (
+                <>
+                
+                {/* Quick-add popular products (mobile only) */}
+                {!isDesktop && popularProducts.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {popularProducts.map((product) => (
+                      <button
+                        key={product._id}
+                        type="button"
+                        onClick={() => handleAddProduct(product)}
+                        className="px-3 py-1 rounded-full bg-gray-100 text-sm hover:bg-blue-100 border border-gray-300"
+                      >
+                        {product.name}
+                      </button>
+                    ))}
                   </div>
                 )}
 
-                {/* --- New Product Form --- */}
-                {isCreatingProduct && (
-                  <div className="mt-4 p-4 border rounded bg-gray-50 space-y-3">
-                    <h4 className="text-md font-medium mb-2">Create New Product</h4>
-                    {/* Add Name Input */}
-                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Product Name</label>
-                      <Input 
-                        type="text" 
-                        value={newProductFormData.name || ''}
-                        onChange={(e) => setNewProductFormData(prev => ({ ...prev, name: e.target.value }))}
-                        className="mt-1 block w-full"
-                        required // Make Name required
-                      />
-                    </div>
-                    {/* Existing fields: SKU, Cost, Ingredient Checkbox, Retail Price */}
-                     <div>
-                      <label className="block text-sm font-medium text-gray-700">SKU</label>
-                      <Input 
-                        type="text" 
-                        value={newProductFormData.sku || ''}
-                        onChange={(e) => setNewProductFormData(prev => ({ ...prev, sku: e.target.value }))}
-                        className="mt-1 block w-full"
-                        required // Make SKU required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Cost ($)</label>
-                      <Input 
-                        type="number" 
-                        step="0.01"
-                        min="0"
-                        value={newProductFormData.lastPurchasePrice || 0} // Map to lastPurchasePrice
-                        onChange={(e) => setNewProductFormData(prev => ({ ...prev, lastPurchasePrice: parseFloat(e.target.value) || 0 }))}
-                        className="mt-1 block w-full"
-                        required // Make Cost required
-                      />
-                    </div>
-                    <div className="flex items-center mt-2">
-                       <input
-                         id="is-ingredient-checkbox"
-                         type="checkbox"
-                         checked={isIngredientChecked} // Use separate state
-                         onChange={(e) => {
-                           setIsIngredientChecked(e.target.checked); // Update separate state
-                           // Optionally clear/set price in main form data if needed when box changes
-                           if (e.target.checked) {
-                              setNewProductFormData(prev => ({ ...prev, price: 0 }));
-                           }
-                         }}
-                         className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                       />
-                       <label htmlFor="is-ingredient-checkbox" className="ml-2 block text-sm text-gray-900">
-                         Is Ingredient? (No Retail Price)
-                       </label>
-                     </div>
+                <div>
+                  <input
+                    type="text"
+                    placeholder="Search products by name or SKU..."
+                    value={productSearchTerm}
+                    onChange={(e) => {
+                      const searchTerm = e.target.value;
+                      setProductSearchTerm(searchTerm);
+                      const lowerSearchTerm = searchTerm.toLowerCase();
+                      const filtered = products.filter(p =>
+                        p.name.toLowerCase().includes(lowerSearchTerm) ||
+                        (p.sku?.toLowerCase() || '').includes(lowerSearchTerm)
+                      );
+                      setFilteredProducts(filtered);
+                    }}
+                    className="w-full px-4 py-2 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                </div>
 
-                    {/* Conditionally Render Retail Price Input based on separate state */}
-                    {!isIngredientChecked && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">Retail Price ($)</label>
-                        <Input 
-                          type="number" 
-                          step="0.01"
-                          min="0"
-                          value={newProductFormData.price || 0}
-                          onChange={(e) => setNewProductFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
-                          className="mt-1 block w-full"
-                          inputMode="decimal"
-                        />
-                      </div>
-                    )}
-                    
-                    <div className="flex justify-end gap-2 pt-2">
-                      <Button 
-                        type="button" 
-                        variant="ghost" 
-                        onClick={() => {
-                           setIsCreatingProduct(false);
-                           setIsIngredientChecked(false); // Reset checkbox state on cancel
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                      <Button 
-                        type="button" 
-                        onClick={handleSaveNewProduct}
-                        className="bg-blue-500 hover:bg-blue-600 text-white"
-                      >
-                        Save Product
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                {/* --- End New Product Form --- */}
-
-               {/* Selected Products List (Hide when creating new product) */}
-               {!isCreatingProduct && (formData.type === 'sale' || formData.type === 'expense') && formData.products && formData.products.length > 0 && (
-                 <div ref={selectedProductsRef} className="space-y-2 sticky bottom-14 left-0 right-0 bg-white border-t pt-2 max-h-[40vh] overflow-y-auto">
-                   <h4 className="text-sm font-medium">Selected Products</h4>
-                   {formData.products.map((product, index) => (
-                     <div key={index} className="flex flex-col gap-1 p-1 border rounded">
-                       <div className="flex items-center justify-between">
-                         <span className="text-sm font-medium">{product.name}</span>
-                         <button
-                           type="button"
-                           onClick={() => handleRemoveProduct(index)}
-                           className="text-red-500 hover:text-red-700 px-2"
-                         >
-                           ×
-                         </button>
-                       </div>
-
-                       {/* Controls row */}
-                       <div className="flex items-center gap-2 flex-wrap">
-                         <input
-                           type="number"
-                           step="0.01"
-                           min="0.01"
-                           value={product.quantity}
-                           onChange={(e) => handleUpdateProductQuantity(index, parseFloat(e.target.value) || 0)}
-                           onFocus={(e) => (e.target as HTMLInputElement).select()}
-                           className="w-20 px-2 py-1 border rounded"
-                           inputMode="decimal"
-                         />
-                         {/* Unit Price (expense only) */}
-                         <span className="text-sm">@</span>
-                         <input
-                           type="number"
-                           step="0.01"
-                           min="0"
-                           value={product.unitPrice}
-                           onChange={(e) => handleUpdateProductUnitPrice(index, parseFloat(e.target.value) || 0)}
-                           onFocus={(e) => (e.target as HTMLInputElement).select()}
-                           className="w-20 px-2 py-1 border rounded text-sm text-right"
-                           aria-label={`Unit price for ${product.name}`}
-                           disabled={false}
-                           inputMode="decimal"
-                         />
-                         <span className="text-sm">= $</span>
-                         <input
-                           type="number"
-                           step="0.01"
-                           min="0"
-                           value={(product.totalPrice ?? (product.unitPrice * product.quantity)).toFixed(2)}
-                           onChange={(e) => handleUpdateProductTotalPrice(index, parseFloat(e.target.value) || 0)}
-                           onFocus={(e) => (e.target as HTMLInputElement).select()}
-                           className="w-24 px-2 py-1 border rounded text-sm font-medium text-right"
-                           aria-label={`Total price for ${product.name}`}
-                           disabled={false}
-                           inputMode="decimal"
-                         />
-                       </div>
-                     </div>
-                   ))}
-                 </div>
-               )}
-             </div>
-          )}
-
-          {/* Expense Specific Section (Category, Supplier, etc.) */}
-          {formData.type === 'expense' && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold">Expense Details</h2>
-              {/* Category Selection */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    "Inventory", "Equipment", "Advertising", "Rent", "Software", 
-                    "Insurance", "Shipping", "Transit", "Bank fees", "Interest", "Other"
-                  ].map(cat => (
+                {/* Product Suggestions List */}
+                <div className="max-h-[200px] overflow-y-auto space-y-1 border rounded p-2">
+                  {filteredProducts.map((product) => (
                     <button
-                      key={cat}
+                      key={product._id ?? product.sku ?? product.name}
                       type="button"
-                      onClick={() => {
-                        setFormData(prev => ({ ...prev, category: cat }));
-                        setShowOtherCategoryInput(cat === 'Other');
-                      }}
-                      className={`px-3 py-1 rounded-full text-sm border ${ 
-                        formData.category === cat
-                          ? 'bg-blue-500 text-white border-blue-500'
-                          : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'
-                      }`}
+                      onClick={() => handleAddProduct(product)}
+                      className="w-full flex items-center justify-between p-2 rounded hover:bg-blue-50 focus:outline-none"
                     >
-                      {cat}
+                      <span className="text-sm text-left">{product.name}</span>
+                      {typeof product.price === 'number' && !isNaN(product.price) && (
+                        <span className="text-xs text-gray-500 ml-2">${product.price.toFixed(2)}</span>
+                      )}
                     </button>
                   ))}
                 </div>
-                {showOtherCategoryInput && (
-                  <input
-                    type="text"
-                    placeholder="Specify other category"
-                    value={formData.category === 'Other' ? '' : formData.category} // Show entered text if not 'Other' itself
-                    onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-                    className="mt-2 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    required
-                  />
+
+                {/* Show 'Create Product' button for Expenses if term entered and no exact match */}
+                {formData.type === 'expense' && 
+                 productSearchTerm.trim() && 
+                 !isCreatingProduct && // Don't show if already creating
+                 !filteredProducts.some(p => p.name.toLowerCase() === productSearchTerm.trim().toLowerCase()) && (
+                   <div className="mt-2 text-center">
+                     <Button 
+                       type="button" 
+                       variant="outline"
+                       size="sm"
+                       onClick={() => {
+                         setIsCreatingProduct(true); // Show the new product form
+                         // Reset checkbox state when starting a new creation
+                         setIsIngredientChecked(false); 
+                         setNewProductFormData({ 
+                           // Initialize without isIngredient field
+                           name: productSearchTerm.trim(),
+                           sku: productSearchTerm.trim().toLowerCase().replace(/\s+/g, '-').substring(0, 30),
+                           category: 'Uncategorized', 
+                           price: 0, 
+                           lastPurchasePrice: 0, 
+                           stock: 0,
+                           active: true,
+                           baseProductName: productSearchTerm.trim(),
+                           variantName: 'Default',
+                           minimumStock: 0,
+                           averageCost: 0,
+                           costHistory: [],
+                           totalSpent: 0,
+                           totalPurchased: 0,
+                           platformMetadata: [],
+                           syncStatus: { lastSyncAttempt: '', lastSuccessfulSync: '', errors: [] },
+                           // Ensure other potentially required Partial<Product> fields have defaults
+                           description: '',
+                           barcode: '',
+                           supplier: '',
+                           isProxied: false,
+                         }); 
+                       }}
+                       className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                     >
+                       Create &quot;{productSearchTerm.trim()}&quot; as new product
+                     </Button>
+                   </div>
+                 )}
+
+                 {/* --- New Product Form --- */}
+                 {isCreatingProduct && (
+                   <div className="mt-4 p-4 border rounded bg-gray-50 space-y-3">
+                     <h4 className="text-md font-medium mb-2">Create New Product</h4>
+                     {/* Add Name Input */}
+                      <div>
+                       <label className="block text-sm font-medium text-gray-700">Product Name</label>
+                       <Input 
+                         type="text" 
+                         value={newProductFormData.name || ''}
+                         onChange={(e) => setNewProductFormData(prev => ({ ...prev, name: e.target.value }))}
+                         className="mt-1 block w-full"
+                         required // Make Name required
+                       />
+                     </div>
+                     {/* Existing fields: SKU, Cost, Ingredient Checkbox, Retail Price */}
+                      <div>
+                       <label className="block text-sm font-medium text-gray-700">SKU</label>
+                       <Input 
+                         type="text" 
+                         value={newProductFormData.sku || ''}
+                         onChange={(e) => setNewProductFormData(prev => ({ ...prev, sku: e.target.value }))}
+                         className="mt-1 block w-full"
+                         required // Make SKU required
+                       />
+                     </div>
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700">Cost ($)</label>
+                       <Input 
+                         type="number" 
+                         step="0.01"
+                         min="0"
+                         value={newProductFormData.lastPurchasePrice || 0} // Map to lastPurchasePrice
+                         onChange={(e) => setNewProductFormData(prev => ({ ...prev, lastPurchasePrice: parseFloat(e.target.value) || 0 }))}
+                         className="mt-1 block w-full"
+                         required // Make Cost required
+                       />
+                     </div>
+                     <div className="flex items-center mt-2">
+                        <input
+                          id="is-ingredient-checkbox"
+                          type="checkbox"
+                          checked={isIngredientChecked} // Use separate state
+                          onChange={(e) => {
+                            setIsIngredientChecked(e.target.checked); // Update separate state
+                            // Optionally clear/set price in main form data if needed when box changes
+                            if (e.target.checked) {
+                               setNewProductFormData(prev => ({ ...prev, price: 0 }));
+                            }
+                          }}
+                          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <label htmlFor="is-ingredient-checkbox" className="ml-2 block text-sm text-gray-900">
+                          Is Ingredient? (No Retail Price)
+                        </label>
+                      </div>
+
+                     {/* Conditionally Render Retail Price Input based on separate state */}
+                     {!isIngredientChecked && (
+                       <div>
+                         <label className="block text-sm font-medium text-gray-700">Retail Price ($)</label>
+                         <Input 
+                           type="number" 
+                           step="0.01"
+                           min="0"
+                           value={newProductFormData.price || 0}
+                           onChange={(e) => setNewProductFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                           className="mt-1 block w-full"
+                           inputMode="decimal"
+                         />
+                       </div>
+                     )}
+                     
+                     <div className="flex justify-end gap-2 pt-2">
+                       <Button 
+                         type="button" 
+                         variant="ghost" 
+                         onClick={() => {
+                            setIsCreatingProduct(false);
+                            setIsIngredientChecked(false); // Reset checkbox state on cancel
+                         }}
+                       >
+                         Cancel
+                       </Button>
+                       <Button 
+                         type="button" 
+                         onClick={handleSaveNewProduct}
+                         className="bg-blue-500 hover:bg-blue-600 text-white"
+                       >
+                         Save Product
+                       </Button>
+                     </div>
+                   </div>
+                 )}
+                 {/* --- End New Product Form --- */}
+
+                {/* Selected Products List (Hide when creating new product) */}
+                {!isCreatingProduct && (formData.type === 'sale' || formData.type === 'expense') && formData.products && formData.products.length > 0 && (
+                  <div ref={selectedProductsRef} className="space-y-2 sticky bottom-14 left-0 right-0 bg-white border-t pt-2 max-h-[40vh] overflow-y-auto">
+                    <h4 className="text-sm font-medium">Selected Products</h4>
+                    {formData.products.map((product, index) => (
+                      <div key={index} className="flex flex-col gap-1 p-1 border rounded">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium">{product.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveProduct(index)}
+                            className="text-red-500 hover:text-red-700 px-2"
+                          >
+                            ×
+                          </button>
+                        </div>
+
+                        {/* Controls row */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            value={product.quantity}
+                            onChange={(e) => handleUpdateProductQuantity(index, parseFloat(e.target.value) || 0)}
+                            onFocus={(e) => (e.target as HTMLInputElement).select()}
+                            className="w-20 px-2 py-1 border rounded"
+                            inputMode="decimal"
+                          />
+                          {/* Unit Price (expense only) */}
+                          <span className="text-sm">@</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={product.unitPrice}
+                            onChange={(e) => handleUpdateProductUnitPrice(index, parseFloat(e.target.value) || 0)}
+                            onFocus={(e) => (e.target as HTMLInputElement).select()}
+                            className="w-20 px-2 py-1 border rounded text-sm text-right"
+                            aria-label={`Unit price for ${product.name}`}
+                            disabled={false}
+                            inputMode="decimal"
+                          />
+                          <span className="text-sm">= $</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={(product.totalPrice ?? (product.unitPrice * product.quantity)).toFixed(2)}
+                            onChange={(e) => handleUpdateProductTotalPrice(index, parseFloat(e.target.value) || 0)}
+                            onFocus={(e) => (e.target as HTMLInputElement).select()}
+                            className="w-24 px-2 py-1 border rounded text-sm font-medium text-right"
+                            aria-label={`Total price for ${product.name}`}
+                            disabled={false}
+                            inputMode="decimal"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </div>
-
-              {/* Supplier and Order Number */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Supplier Input (value mapped to merchant on submit) */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Supplier</label>
-                  <input
-                    type="text"
-                    value={formData.supplier || ''}
-                    onChange={(e) => setFormData(prev => ({ ...prev, supplier: e.target.value }))}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
-
-                {/* Supplier Order Number Input */}
-                 <div>
-                   <label className="block text-sm font-medium text-gray-700">Supplier Order Number</label>
-                   <input
-                     type="text"
-                     value={formData.supplierOrderNumber || ''}
-                     onChange={(e) => setFormData(prev => ({ ...prev, supplierOrderNumber: e.target.value }))}
-                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                   />
-                 </div>
-              </div>
-            </div>
+                </>
+                )}
+             </div>
           )}
 
           {formData.type === 'training' && (

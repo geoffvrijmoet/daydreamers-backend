@@ -20,6 +20,7 @@ interface BaseTransactionDocument {
   notes: string;
   createdAt: Date;
   updatedAt: Date;
+  paymentMethod?: string;
   cardLast4?: string;
   emailId?: string;
   merchant?: string;
@@ -184,6 +185,7 @@ export async function POST(request: Request) {
 
     if (cardLast4) transactionToSave.cardLast4 = cardLast4;
     if (emailId) transactionToSave.emailId = emailId;
+    if (paymentMethod) transactionToSave.paymentMethod = paymentMethod;
 
     // Handle different transaction types
     if (type === 'sale') {

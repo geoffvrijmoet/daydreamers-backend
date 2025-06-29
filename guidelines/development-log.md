@@ -137,6 +137,13 @@
     -   Provides enhanced at-a-glance financial info and payment context.
     -   Files changed: `components/transactions-modal.tsx`.
 
+-   **Expense Modal UI: Centered Prominent Amount Input**
+    -   When creating an *Expense* transaction, the `Amount` field now renders as a large, border-less input centred horizontally in its own row.
+    -   The original amount input inside the common fields row is hidden in expense view to prevent duplication.
+    -   Styling: `text-4xl md:text-5xl`, `border-none`, `bg-transparent`, `text-center`.
+    -   Reads/writes the same `formData.amount` state and keeps existing read-only behaviour when products are populated.
+    -   Files changed: `components/new-transaction-modal.tsx`.
+
 ### Email Parsing System
 
 -   **Implemented Email Parsing Feature**
