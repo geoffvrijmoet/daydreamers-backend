@@ -12,12 +12,12 @@ export async function PUT(
     const updateData = await request.json()
     delete updateData._id
 
-    const result = await mongoose.model('Transaction').updateOne(
-      { id: params.id },
+    const result = await mongoose.connection.db!.collection('transactions').updateOne(
+      { _id: new mongoose.Types.ObjectId(params.id) },
       { 
         $set: {
           ...updateData,
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date()
         } 
       }
     )
@@ -46,7 +46,7 @@ export async function GET(
   try {
     await connectToDatabase()
     
-    const transaction = await mongoose.model('Transaction').findOne({
+    const transaction = await mongoose.connection.db!.collection('transactions').findOne({
       _id: new mongoose.Types.ObjectId(params.id)
     })
 
@@ -95,7 +95,7 @@ export async function PATCH(
       // If we're updating the amount, we might need to update related fields
       // Calculate pre-tax amount if not explicitly provided
       if (updates.preTaxAmount === undefined) {
-        const transaction = await mongoose.model('Transaction').findOne({ _id: new mongoose.Types.ObjectId(params.id) });
+        const transaction = await mongoose.connection.db!.collection('transactions').findOne({ _id: new mongoose.Types.ObjectId(params.id) });
         if (transaction) {
           // If transaction has a tax amount, update the pre-tax amount calculation
           if (transaction.taxAmount) {
@@ -108,18 +108,23 @@ export async function PATCH(
       }
     }
 
-    const result = await mongoose.model('Transaction').findOneAndUpdate(
+    const result = await mongoose.connection.db!.collection('transactions').updateOne(
       { _id: new mongoose.Types.ObjectId(params.id) },
       { 
         $set: {
           ...updates,
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date()
         }
-      },
-      { new: true }
+      }
     );
 
-    if (!result) {
+    console.log('[API] Update result:', {
+      matched: result.matchedCount,
+      modified: result.modifiedCount,
+      acknowledged: result.acknowledged
+    });
+
+    if (result.matchedCount === 0) {
       console.error('[API] Transaction not found:', params.id);
       return NextResponse.json(
         { error: 'Transaction not found' },
@@ -128,13 +133,14 @@ export async function PATCH(
     }
 
     console.log('[API] Successfully updated transaction:', {
-      id: result._id,
-      updatedFields: Object.keys(updates)
+      id: params.id,
+      updatedFields: Object.keys(updates),
+      modified: result.modifiedCount > 0
     });
 
     return NextResponse.json({ 
       success: true,
-      transaction: result 
+      modified: result.modifiedCount > 0
     });
   } catch (error) {
     console.error('Error updating transaction:', error);
@@ -160,7 +166,7 @@ export async function DELETE(
       );
     }
 
-    const result = await mongoose.model('Transaction').deleteOne({ 
+    const result = await mongoose.connection.db!.collection('transactions').deleteOne({ 
       _id: new ObjectId(id)
     });
 
