@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Product } from '@/types'
 import {
   Dialog,
@@ -61,6 +61,9 @@ interface TrainingFormData extends BaseTransactionFormData {
   dogName: string
   sessionNotes: string
   revenue: number
+  sale: number
+  taxAmount: number
+  taxIncluded: boolean
   trainingAgency: string
 }
 
@@ -78,9 +81,9 @@ type ExpensePayload = Omit<ExpenseFormData, 'date' | 'category'> & BasePayload &
   products: LineItem[];     // Add products field
 };
 
-type TrainingPayload = Omit<TrainingFormData, 'date'> & BasePayload & { type: 'training' };
+type TrainingPayloadExtended = Omit<TrainingFormData, 'date'> & BasePayload & { type: 'training' };
 
-type TransactionPayload = SalePayload | ExpensePayload | TrainingPayload;
+type TransactionPayload = SalePayload | ExpensePayload | TrainingPayloadExtended;
 
 type NewSaleModalProps = {
   open: boolean
@@ -109,7 +112,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
     tip: 0,
     discount: 0,
     shipping: 0,
-  })
+  } as SaleFormData)
   const [customerSuggestions, setCustomerSuggestions] = useState<string[]>([])
   const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false)
   const [showOtherCategoryInput, setShowOtherCategoryInput] = useState(false);
@@ -347,6 +350,108 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
     return () => clearTimeout(delayDebounceFn);
   }, [formData.type === 'sale' ? (formData as SaleFormData).customer : null]);
 
+  // ─────────────────────────────────────────────
+  // Training helpers
+  // ─────────────────────────────────────────────
+  const TAX_RATE = 0.08875;
+
+  const computeFromRevenue = useCallback((revenue: number, taxInc: boolean, hasAgency: boolean) => {
+    if (hasAgency) {
+      return { sale: revenue, tax: 0 };
+    }
+    if (!taxInc) {
+      const tax = revenue * TAX_RATE;
+      return { sale: revenue, tax };
+    }
+    const tax = (revenue * TAX_RATE) / (1 + TAX_RATE);
+    return { sale: revenue - tax, tax };
+  }, []);
+
+  const computeFromSale = useCallback((saleVal: number, taxInc: boolean, hasAgency: boolean) => {
+    if (hasAgency) {
+      return { revenue: saleVal, tax: 0 };
+    }
+    if (!taxInc) {
+      const tax = saleVal * TAX_RATE;
+      return { revenue: saleVal + tax, tax };
+    }
+    // taxInc true: saleVal is pre-tax even though revenue should include tax
+    const tax = saleVal * TAX_RATE;
+    return { revenue: saleVal + tax, tax };
+  }, []);
+
+  const computeFromTax = useCallback((taxVal: number, taxInc: boolean, hasAgency: boolean) => {
+    if (hasAgency) {
+      return null; // ignore when agency present
+    }
+    if (!taxInc) {
+      const sale = taxVal / TAX_RATE;
+      return { sale, revenue: sale + taxVal };
+    }
+    const revenue = taxVal / TAX_RATE;
+    return { revenue, sale: revenue - taxVal };
+  }, []);
+
+  // Handlers for training inputs
+  const handleTrainingRevenueChange = (val: number) => {
+    setFormData(prev => {
+      if (prev.type !== 'training') return prev;
+      const hasAgency = !!prev.trainingAgency.trim();
+      const { sale, tax } = computeFromRevenue(val, prev.taxIncluded, hasAgency);
+      return { ...prev, revenue: parseFloat(val.toFixed(2)) , sale: parseFloat(sale.toFixed(2)) , taxAmount: parseFloat(tax.toFixed(2)) };
+    });
+  };
+
+  const handleTrainingSaleChange = (val: number) => {
+    setFormData(prev => {
+      if (prev.type !== 'training') return prev;
+      const hasAgency = !!prev.trainingAgency.trim();
+      const { revenue, tax } = computeFromSale(val, prev.taxIncluded, hasAgency);
+      return { ...prev, sale: parseFloat(val.toFixed(2)), revenue: parseFloat(revenue.toFixed(2)), taxAmount: parseFloat(tax.toFixed(2)), amount: revenue };
+    });
+  };
+
+  const handleTrainingTaxChange = (val: number) => {
+    setFormData(prev => {
+      if (prev.type !== 'training') return prev;
+      const hasAgency = !!prev.trainingAgency.trim();
+      const computed = computeFromTax(val, prev.taxIncluded, hasAgency);
+      if (!computed) {
+        // agency present, force tax 0
+        return { ...prev, taxAmount: 0 };
+      }
+      return { ...prev, taxAmount: parseFloat(val.toFixed(2)) , revenue: parseFloat(computed.revenue.toFixed(2)), sale: parseFloat(computed.sale.toFixed(2)), amount: parseFloat(computed.revenue.toFixed(2)) };
+    });
+  };
+
+  const recomputeTrainingFromCurrent = useCallback((data: TrainingFormData): TrainingFormData => {
+    const hasAgency = !!data.trainingAgency.trim();
+    if (data.revenue) {
+      const { sale, tax } = computeFromRevenue(data.revenue, data.taxIncluded, hasAgency);
+      return { ...data, sale, taxAmount: parseFloat(tax.toFixed(2)) };
+    }
+    if (data.sale) {
+      const { revenue, tax } = computeFromSale(data.sale, data.taxIncluded, hasAgency);
+      return { ...data, revenue, taxAmount: parseFloat(tax.toFixed(2)) };
+    }
+    if (data.taxAmount) {
+      const comp = computeFromTax(data.taxAmount, data.taxIncluded, hasAgency);
+      if (comp) {
+        return { ...data, revenue: parseFloat(comp.revenue.toFixed(2)), sale: parseFloat(comp.sale.toFixed(2)) };
+      }
+      return { ...data, taxAmount: 0 };
+    }
+    return data;
+  }, [computeFromRevenue, computeFromSale, computeFromTax]);
+
+  useEffect(() => {
+    if (formData.type !== 'training') return;
+    setFormData(prev => {
+      if (prev.type !== 'training') return prev;
+      return recomputeTrainingFromCurrent(prev);
+    });
+  }, [formData.type === 'training' ? (formData as TrainingFormData).trainingAgency : null, formData.type === 'training' ? (formData as TrainingFormData).taxIncluded : null]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
@@ -501,6 +606,9 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
           dogName: '',
           sessionNotes: '',
           revenue: 0,
+          sale: 0,
+          taxAmount: 0,
+          taxIncluded: true,
           trainingAgency: '',
         } as TrainingFormData)
         break
@@ -959,27 +1067,87 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
             <div className="flex flex-wrap items-start gap-4">
               {/* Amount */}
               {formData.type !== 'expense' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Amount</label>
-                <div className="flex items-center mt-1">
-                  <span className="text-gray-500 mr-1">$</span>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={formData.amount}
-                    readOnly={false}
-                    onChange={(e) => {
-                      const newAmount = parseFloat(e.target.value) || 0;
-                      setFormData(prev => ({ ...prev, amount: newAmount }));
-                    }}
-                    onFocus={(e) => (e.target as HTMLInputElement).select()}
-                    className="block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    required
-                    inputMode="decimal"
-                  />
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Amount</label>
+                  <div className="flex items-center mt-1">
+                    <span className="text-gray-500 mr-1">$</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.amount}
+                      readOnly={false}
+                      onChange={(e) => {
+                        const newAmount = parseFloat(e.target.value) || 0;
+                        if (formData.type === 'training') {
+                          handleTrainingRevenueChange(parseFloat(newAmount.toFixed(2)));
+                          setFormData(prev => ({ ...(prev as TrainingFormData), amount: newAmount }));
+                        } else {
+                          setFormData(prev => ({ ...prev, amount: newAmount }));
+                        }
+                      }}
+                      onFocus={(e) => (e.target as HTMLInputElement).select()}
+                      className="block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-right"
+                      required
+                      inputMode="decimal"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* Training-specific Sale & Tax inputs */}
+              {formData.type === 'training' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Sale&nbsp;(Pre-tax)</label>
+                    <div className="flex items-center mt-1">
+                      <span className="text-gray-500 mr-1">$</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={(formData as TrainingFormData).sale ?? ''}
+                        onChange={e => handleTrainingSaleChange(parseFloat(e.target.value) || 0)}
+                        onFocus={e => (e.target as HTMLInputElement).select()}
+                        className="block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-right"
+                        inputMode="decimal"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Sales&nbsp;Tax</label>
+                    <div className="flex items-center mt-1">
+                      <span className="text-gray-500 mr-1">$</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={(formData as TrainingFormData).taxAmount ?? ''}
+                        onChange={e => handleTrainingTaxChange(parseFloat(e.target.value) || 0)}
+                        onFocus={e => (e.target as HTMLInputElement).select()}
+                        className="block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-right"
+                        inputMode="decimal"
+                      />
+                    </div>
+                    <label className="inline-flex items-center text-xs mt-1 select-none">
+                      <input
+                        type="checkbox"
+                        checked={(formData as TrainingFormData).taxIncluded}
+                        onChange={e => {
+                          const val = e.target.checked;
+                          setFormData(prev => {
+                            if (prev.type !== 'training') return prev;
+                            const updated: TrainingFormData = { ...(prev as TrainingFormData), taxIncluded: val };
+                            return recomputeTrainingFromCurrent(updated);
+                          });
+                        }}
+                        className="mr-1 rounded border-gray-300 text-blue-600 shadow-sm focus:ring-blue-500"
+                      />
+                      Tax&nbsp;Included
+                    </label>
+                  </div>
+                </>
               )}
 
               {/* Sales Tax (only for sale) */}
@@ -1436,7 +1604,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                   <label className="block text-sm font-medium text-gray-700">Trainer</label>
                   <input
                     type="text"
-                    value={formData.type === 'training' ? formData.trainer : ''}
+                    value={formData.type === 'training' ? 'Madeline Pape' : ''}
                     onChange={(e) => {
                       if (formData.type === 'training') {
                         setFormData(prev => ({ ...(prev as TrainingFormData), trainer: e.target.value }));
@@ -1457,7 +1625,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                       }
                     }}
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    required
+                    required={!(formData.type === 'training' && ((formData as TrainingFormData).trainingAgency || '').trim().length > 0)}
                   />
                 </div>
                 <div>
@@ -1471,7 +1639,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                       }
                     }}
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    required
+                    required={!(formData.type === 'training' && ((formData as TrainingFormData).trainingAgency || '').trim().length > 0)}
                   />
                 </div>
                 <div>
@@ -1487,6 +1655,8 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   />
                 </div>
+
+                {/* (removed: revenue/sale/tax inputs - now placed near Amount) */}
               </div>
             </div>
           )}

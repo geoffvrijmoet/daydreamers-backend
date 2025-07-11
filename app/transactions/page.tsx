@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface Transaction {
   _id: string;
@@ -13,6 +14,15 @@ interface Transaction {
   supplier?: string;
   customer?: string;
   emailId?: string;
+  purchaseCategory?: string;
+
+  // Training-specific
+  clientName?: string;
+  dogName?: string;
+  trainer?: string;
+  revenue?: number;
+  taxAmount?: number;
+  trainingAgency?: string;
 }
 
 interface Supplier {
@@ -74,11 +84,20 @@ interface InvoiceEmail {
   updatedAt: Date;
 }
 
+// Amex alert email parsed txn
+interface AmexTransaction {
+  emailId: string;
+  date: string;
+  amount: number;
+  merchant: string;
+  cardLast4: string;
+}
+
 // Combined type for list items
 type ListItem = {
-  type: 'transaction' | 'invoice';
+  type: 'transaction' | 'invoice' | 'amex';
   date: string;
-  data: Transaction | InvoiceEmail;
+  data: Transaction | InvoiceEmail | AmexTransaction;
 };
 
 // Add this interface to track expanded state for each email
@@ -247,6 +266,7 @@ const renderEmailBodyWithHighlights = (
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [invoiceEmails, setInvoiceEmails] = useState<InvoiceEmail[]>([]);
+  const [amexTxns, setAmexTxns] = useState<AmexTransaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedEmails, setExpandedEmails] = useState<ExpandedState>({});
@@ -285,14 +305,23 @@ export default function TransactionsPage() {
     endPattern: ''
   });
 
-  // Filter state
-  const [activeFilter, setActiveFilter] = useState<'all' | 'sales' | 'expenses' | 'invoices'>('all');
+  // Filter states
+  const [activeFilter, setActiveFilter] = useState<'all' | 'sales' | 'expenses' | 'training' | 'invoices'>('all');
+
+  // Date filter: all | thisMonth | thisYear | lastYear
+  const [dateFilter, setDateFilter] = useState<'all' | 'thisMonth' | 'thisYear' | 'lastYear'>('thisYear');
 
   // product suggestions (keyed by `${emailId}-${rowIndex}`)
   type Suggestion = { _id: string; name: string };
   const [productSuggestions, setProductSuggestions] = useState<Record<string, Suggestion[]>>({});
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const [showAmexMenu, setShowAmexMenu] = useState(false);
+
+  const [previewAmex, setPreviewAmex] = useState<AmexTransaction | null>(null);
+  const [savingAmex, setSavingAmex] = useState(false);
+  const [draftPayload, setDraftPayload] = useState<string>('');
 
   const fetchProductSuggestions = async (term: string, emailId: string, index: number) => {
     if (!term) return;
@@ -315,8 +344,35 @@ export default function TransactionsPage() {
       try {
         setIsLoading(true);
         
+        // Build transactions query based on dateFilter
+        const buildTxnUrl = () => {
+          let url = '/api/transactions?limit=1000'
+          const today = new Date()
+          const yr = today.getUTCFullYear()
+          const month = today.getUTCMonth()
+
+          let start: Date | undefined
+          let end: Date | undefined
+
+          if (dateFilter === 'thisYear') {
+            start = new Date(Date.UTC(yr, 0, 1))
+            end = new Date(Date.UTC(yr, 11, 31, 23, 59, 59, 999))
+          } else if (dateFilter === 'lastYear') {
+            start = new Date(Date.UTC(yr - 1, 0, 1))
+            end = new Date(Date.UTC(yr - 1, 11, 31, 23, 59, 59, 999))
+          } else if (dateFilter === 'thisMonth') {
+            start = new Date(Date.UTC(yr, month, 1))
+            end = new Date(Date.UTC(yr, month + 1, 0, 23, 59, 59, 999))
+          }
+
+          if (start) url += `&startDate=${start.toISOString()}`
+          if (end) url += `&endDate=${end.toISOString()}`
+
+          return url
+        }
+
         const [transactionsRes, invoiceEmailsRes] = await Promise.all([
-          fetch('/api/transactions'),
+          fetch(buildTxnUrl()),
           fetch('/api/invoiceemails')
         ]);
 
@@ -371,7 +427,7 @@ export default function TransactionsPage() {
     };
 
     fetchData();
-  }, []);
+  }, [dateFilter]);
 
   // Process emails to extract values based on supplier's parsing config
   useEffect(() => {
@@ -1447,6 +1503,11 @@ export default function TransactionsPage() {
       date: t.date,
       data: t
     })),
+    ...amexTxns.map(a => ({
+      type: 'amex' as const,
+      date: a.date,
+      data: a
+    })),
     ...invoiceEmails.map(e => ({
       type: 'invoice' as const,
       date: e.date,
@@ -1457,12 +1518,19 @@ export default function TransactionsPage() {
   // Filter items based on active filter
   const filteredItems = allItems.filter(item => {
     if (activeFilter === 'all') return true;
-    if (activeFilter === 'invoices') return item.type === 'invoice';
+    if (activeFilter === 'invoices') {
+      if (item.type === 'invoice' || item.type === 'amex') return true;
+      if (item.type === 'transaction' && (item.data as Transaction).source === 'amex') return true;
+      return false;
+    }
     if (activeFilter === 'sales') {
       return item.type === 'transaction' && (item.data as Transaction).type === 'sale';
     }
     if (activeFilter === 'expenses') {
       return item.type === 'transaction' && (item.data as Transaction).type === 'expense';
+    }
+    if (activeFilter === 'training') {
+      return item.type === 'transaction' && (item.data as Transaction).type === 'training';
     }
     return true;
   });
@@ -1534,7 +1602,81 @@ export default function TransactionsPage() {
     <div className="p-4">
       <h1 className="text-2xl font-bold mb-4">Transactions & Invoices</h1>
       
-      {/* Filter buttons */}
+      {/* Amex fetch button + menu */}
+      <div className="mb-6 relative inline-block">
+        <button
+          onClick={() => setShowAmexMenu(prev=>!prev)}
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-100 text-blue-700 hover:bg-blue-200"
+        >
+          Find Amex Transactions
+        </button>
+        {showAmexMenu && (
+          <div className="absolute z-10 mt-2 w-40 bg-white border border-gray-200 rounded shadow-lg">
+            <button
+              onClick={async () => {
+                setShowAmexMenu(false);
+                const currentYear = new Date().getUTCFullYear();
+                const yearStart = new Date(Date.UTC(currentYear, 0, 1));
+                const daysSinceYearStart = Math.floor((Date.now() - yearStart.getTime()) / (1000 * 60 * 60 * 24));
+                try {
+                  const res = await fetch(`/api/amex?sinceDays=${daysSinceYearStart}`);
+                  const json = await res.json();
+                  if(!res.ok || json.error){alert(json.error || 'Fetch failed');return;}
+                  const fetched: AmexTransaction[] = json.transactions || [];
+                  const existingIds = new Set<string>(transactions.map(t=>t.emailId).filter(Boolean) as string[]);
+                  const unique = fetched.filter(f=>!existingIds.has(f.emailId));
+                  setAmexTxns(unique);
+                  setActiveFilter('invoices');
+                }catch{
+                  alert('Fetch error');
+                }
+              }}
+              className="block w-full text-left px-4 py-2 text-sm hover:bg-blue-50 border-b border-gray-100"
+            >This Year</button>
+            {[7,30,60,90].map(days=> (
+              <button
+                key={days}
+                onClick={async () => {
+                  setShowAmexMenu(false);
+                  try {
+                    const res = await fetch(`/api/amex?sinceDays=${days}`);
+                    const json = await res.json();
+                    if(!res.ok || json.error){alert(json.error || 'Fetch failed');return;}
+                    const fetched: AmexTransaction[] = json.transactions || [];
+                    const existingIds = new Set<string>(transactions.map(t=>t.emailId).filter(Boolean) as string[]);
+                    const unique = fetched.filter(f=>!existingIds.has(f.emailId));
+                    setAmexTxns(unique);
+                    setActiveFilter('invoices');
+                  }catch{
+                    alert('Fetch error');
+                  }
+                }}
+                className="block w-full text-left px-4 py-2 text-sm hover:bg-blue-50"
+              >Last {days} days</button>
+            ))}
+          </div>
+        )}
+      </div>
+      
+      {/* Date range filter */}
+      <div className="mb-4 flex flex-wrap gap-2">
+        {(['thisYear', 'lastYear', 'thisMonth', 'all'] as const).map(df => (
+          <button
+            key={df}
+            onClick={() => setDateFilter(df)}
+            className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+              dateFilter === df ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            {df === 'thisYear' && 'This Year'}
+            {df === 'lastYear' && 'Last Year'}
+            {df === 'thisMonth' && 'This Month'}
+            {df === 'all' && 'All Time'}
+          </button>
+        ))}
+      </div>
+      
+      {/* Type filter buttons */}
       <div className="mb-4 flex flex-wrap gap-2">
         <button
           onClick={() => setActiveFilter('all')}
@@ -1567,6 +1709,16 @@ export default function TransactionsPage() {
           Expenses ({transactions.filter(t => t.type === 'expense').length})
         </button>
         <button
+          onClick={() => setActiveFilter('training')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            activeFilter === 'training'
+              ? 'bg-yellow-600 text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          Training ({transactions.filter(t => t.type === 'training').length})
+        </button>
+        <button
           onClick={() => setActiveFilter('invoices')}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             activeFilter === 'invoices'
@@ -1574,7 +1726,7 @@ export default function TransactionsPage() {
               : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
           }`}
         >
-          Invoice Emails ({invoiceEmails.length})
+          Amex / Invoice Emails ({invoiceEmails.length + amexTxns.length})
         </button>
       </div>
       
@@ -1602,11 +1754,45 @@ export default function TransactionsPage() {
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="text-lg font-semibold">
-                      {transaction.merchant || transaction.supplier || transaction.customer || 'Unknown'}
+                      {(() => {
+                        if (transaction.type === 'training') {
+                          return transaction.clientName || transaction.trainingAgency || 'Unknown';
+                        }
+                        return transaction.merchant || transaction.supplier || transaction.customer || transaction.clientName || transaction.trainingAgency || 'Unknown';
+                      })()}
                     </p>
                     <p className="text-sm text-gray-600">
                       {new Date(transaction.date).toLocaleDateString()} • {transaction.type} • {transaction.source}
                     </p>
+                    {/* Training specific details */}
+                    {transaction.type === 'training' && (
+                      <div className="mt-1 space-y-0.5 text-xs text-gray-700">
+                        {transaction.dogName && (
+                          <div>Dog: <span className="font-medium">{transaction.dogName}</span></div>
+                        )}
+                        {transaction.trainer && (
+                          <div>Trainer: <span className="font-medium">{transaction.trainer}</span></div>
+                        )}
+                        {/* Compute amounts */}
+                        {(() => {
+                          const revenue = typeof transaction.revenue === 'number' ? transaction.revenue : transaction.amount;
+                          const taxable = !transaction.trainingAgency;
+                          const salesTax = typeof transaction.taxAmount === 'number' ? transaction.taxAmount : (taxable ? parseFloat(((revenue * 0.08875) / 1.08875).toFixed(2)) : 0);
+                          const sale = revenue - salesTax;
+                          return (
+                            <div className="flex flex-wrap gap-2 mt-1">
+                              <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700">Revenue: {formatCurrency(revenue)}</span>
+                              {taxable && (
+                                <>
+                                  <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700">Sale: {formatCurrency(sale)}</span>
+                                  <span className="px-2 py-0.5 rounded bg-pink-50 text-pink-700">Sales&nbsp;Tax: {formatCurrency(salesTax)}</span>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
                     {transaction.emailId && (
                       <p className="text-xs text-gray-400 mt-1">Email ID: {transaction.emailId}</p>
                     )}
@@ -1637,6 +1823,38 @@ export default function TransactionsPage() {
                 </button>
               </div>
             );
+          } else if (item.type === 'amex') {
+            const a = item.data as AmexTransaction;
+            return (
+              <div key={a.emailId} className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="font-semibold">{a.merchant}</p>
+                    <p className="text-sm text-gray-600">{new Date(a.date).toLocaleDateString()} • card • ****{a.cardLast4}</p>
+                  </div>
+                  <p className="text-lg font-bold">${a.amount.toFixed(2)}</p>
+                </div>
+                <div className="flex justify-end mt-2">
+                  <button
+                    className="text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+                    onClick={() => {
+                      const defaultPayload = {
+                        date: new Date(a.date).toISOString(),
+                        amount: a.amount,
+                        type: 'expense',
+                        source: 'amex',
+                        supplier: a.merchant,
+                        emailId: a.emailId,
+                        purchaseCategory: 'inventory',
+                        notes: `Amex card ****${a.cardLast4}`
+                      };
+                      setDraftPayload(JSON.stringify(defaultPayload, null, 2));
+                      setPreviewAmex(a);
+                    }}
+                  >Preview&nbsp;&amp;&nbsp;Save</button>
+                </div>
+              </div>
+            )
           } else {
             const email = item.data as InvoiceEmail;
             const isHtml = email.body.trim().toLowerCase().startsWith('<html');
@@ -2397,6 +2615,61 @@ export default function TransactionsPage() {
           }
         })}
       </div>
+      {previewAmex && (
+        <Dialog open={!!previewAmex} onOpenChange={(o)=>{ if(!o) setPreviewAmex(null); }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Save Amex Transaction</DialogTitle>
+            </DialogHeader>
+            <textarea
+              className="w-full h-48 font-mono text-xs border rounded bg-gray-50 p-2"
+              value={draftPayload}
+              onChange={e=>setDraftPayload(e.target.value)}
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                className="px-3 py-1 text-sm rounded bg-gray-200 hover:bg-gray-300"
+                onClick={() => setPreviewAmex(null)}
+              >Cancel</button>
+              <button
+                className="px-3 py-1 text-sm rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                disabled={savingAmex}
+                onClick={async () => {
+                  if(!previewAmex) return;
+                  setSavingAmex(true);
+                  let payload;
+                  try {
+                    payload = JSON.parse(draftPayload);
+                  } catch {
+                    alert('Invalid JSON');
+                    setSavingAmex(false);
+                    return;
+                  }
+                  try{
+                    const res = await fetch('/api/transactions',{
+                      method:'POST',
+                      headers:{'Content-Type':'application/json'},
+                      body:JSON.stringify(payload)
+                    });
+                    const json = await res.json();
+                    if(!res.ok){ alert(json?.error || 'Save failed'); setSavingAmex(false); return; }
+                    // add to transactions list
+                    if(json.transaction){
+                      setTransactions(prev=>[json.transaction, ...prev]);
+                    }
+                    setAmexTxns(prev=>prev.filter(x=>x.emailId!==previewAmex.emailId));
+                    setPreviewAmex(null);
+                  }catch{
+                    alert('Save error');
+                  }finally{
+                    setSavingAmex(false);
+                  }
+                }}
+              >{savingAmex? 'Saving…':'Commit'}</button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 } 
