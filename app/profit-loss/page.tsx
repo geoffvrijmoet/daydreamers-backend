@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatNumberWithCommas } from "@/lib/utils"
-import { Loader2, ChevronDown, ChevronRight } from "lucide-react"
+import { Loader2, ChevronDown, ChevronRight, Check } from "lucide-react"
 import { toEasternTime, formatInEasternTime } from '@/lib/utils/dates'
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
@@ -21,6 +21,7 @@ interface Transaction {
   description?: string
   paymentMethod?: string
   purchaseCategory?: string
+  expenseType?: string
   supplierOrderNumber?: string
   preTaxAmount?: number
   taxAmount?: number
@@ -60,6 +61,9 @@ export default function ProfitLossPage() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['all']))
   const [loadingProgress, setLoadingProgress] = useState<string>('')
   const [isClient, setIsClient] = useState(false)
+  const [editingExpenseTypes, setEditingExpenseTypes] = useState<Record<string, string>>({})
+  const [updatingTransactions, setUpdatingTransactions] = useState<Set<string>>(new Set())
+  const [successTransactions, setSuccessTransactions] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     setIsClient(true)
@@ -321,6 +325,144 @@ export default function ProfitLossPage() {
     }
   }
 
+  // Update transaction's purchaseCategory with the expenseType value
+  const updateTransactionCategory = async (transactionId: string, expenseType: string) => {
+    setUpdatingTransactions(prev => new Set(prev).add(transactionId))
+    
+    try {
+      const response = await fetch(`/api/transactions/${transactionId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          purchaseCategory: expenseType
+        }),
+      })
+      
+      if (!response.ok) {
+        throw new Error('Failed to update transaction')
+      }
+      
+      // Update local state
+      setTransactions(prev => 
+        prev.map(t => 
+          t._id === transactionId 
+            ? { ...t, purchaseCategory: expenseType }
+            : t
+        )
+      )
+      
+      // Show success feedback
+      setSuccessTransactions(prev => new Set(prev).add(transactionId))
+      setTimeout(() => {
+        setSuccessTransactions(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(transactionId)
+          return newSet
+        })
+      }, 2000)
+      
+    } catch (error) {
+      console.error('Error updating transaction:', error)
+      alert('Failed to update transaction category')
+    } finally {
+      setUpdatingTransactions(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(transactionId)
+        return newSet
+      })
+    }
+  }
+
+  // EditableExpenseType component
+  const EditableExpenseType = ({ transaction }: { transaction: Transaction }) => {
+    const [isEditing, setIsEditing] = useState(false)
+    const [tempValue, setTempValue] = useState('')
+    const currentExpenseType = editingExpenseTypes[transaction._id] ?? transaction.expenseType ?? ''
+    const isUpdating = updatingTransactions.has(transaction._id)
+    const isSuccess = successTransactions.has(transaction._id)
+    
+    const handleEdit = () => {
+      setTempValue(currentExpenseType)
+      setIsEditing(true)
+    }
+    
+    const handleSave = () => {
+      setEditingExpenseTypes(prev => ({
+        ...prev,
+        [transaction._id]: tempValue
+      }))
+      setIsEditing(false)
+    }
+    
+    const handleKeyPress = (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        handleSave()
+      } else if (e.key === 'Escape') {
+        setIsEditing(false)
+        setTempValue('')
+      }
+    }
+    
+    const handleUpdateCategory = () => {
+      const expenseTypeToUse = editingExpenseTypes[transaction._id] ?? transaction.expenseType ?? ''
+      if (expenseTypeToUse.trim()) {
+        updateTransactionCategory(transaction._id, expenseTypeToUse.trim())
+      }
+    }
+    
+    return (
+      <div className="flex items-center gap-2">
+        <span className={`text-sm px-2 py-1 rounded transition-colors ${
+          isSuccess ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'
+        }`}>
+          categorize by expenseType (
+          <span 
+            className="relative cursor-pointer hover:bg-gray-200 px-1 rounded"
+            onClick={handleEdit}
+            title="Click to edit expense type"
+          >
+            {currentExpenseType || 'empty'}
+            {isEditing && (
+              <div className="absolute bottom-full left-0 mb-1 z-10">
+                <input
+                  type="text"
+                  value={tempValue}
+                  onChange={(e) => setTempValue(e.target.value)}
+                  onBlur={handleSave}
+                  onKeyDown={handleKeyPress}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm bg-white shadow-lg min-w-[120px]"
+                  placeholder="Enter expense type"
+                  autoFocus
+                />
+              </div>
+            )}
+          </span>
+          )
+        </span>
+        <button
+          onClick={handleUpdateCategory}
+          disabled={isUpdating || !currentExpenseType.trim()}
+          className={`p-1 rounded transition-colors ${
+            isUpdating 
+              ? 'bg-gray-100 cursor-not-allowed' 
+              : isSuccess
+                ? 'bg-green-100 text-green-600'
+                : 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+          } ${!currentExpenseType.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
+          title={isUpdating ? 'Updating...' : isSuccess ? 'Updated!' : 'Update category'}
+        >
+          {isUpdating ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Check className="h-4 w-4" />
+          )}
+        </button>
+      </div>
+    )
+  }
+
   // Render a transaction row (reused across categories)
   const renderTransactionRow = (transaction: Transaction) => (
     <tr key={transaction._id} className="border-b hover:bg-gray-50">
@@ -328,6 +470,9 @@ export default function ProfitLossPage() {
       <td className="p-3 text-sm">{transaction.vendor || 'N/A'}</td>
       <td className="p-3 text-sm">{transaction.description || 'N/A'}</td>
       <td className="p-3 text-sm">{transaction.paymentMethod || 'N/A'}</td>
+      <td className="p-3 text-sm">
+        <EditableExpenseType transaction={transaction} />
+      </td>
       <td className="p-3 text-sm text-right font-medium text-red-600">
         ${formatNumberWithCommas(transaction.amount)}
       </td>
@@ -571,6 +716,7 @@ export default function ProfitLossPage() {
                                 <th className="text-left p-3 text-sm font-medium text-gray-500">Vendor</th>
                                 <th className="text-left p-3 text-sm font-medium text-gray-500">Description</th>
                                 <th className="text-left p-3 text-sm font-medium text-gray-500">Payment Method</th>
+                                <th className="text-left p-3 text-sm font-medium text-gray-500">Expense Type</th>
                                 <th className="text-right p-3 text-sm font-medium text-gray-500">Amount</th>
                               </tr>
                             </thead>
