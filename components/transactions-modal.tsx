@@ -263,22 +263,30 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <style dangerouslySetInnerHTML={{ __html: fadeInAnimation }} />
-      <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader className="flex flex-row items-center justify-between">
-          <div className="flex items-center gap-3">
-            <DialogTitle>Transactions</DialogTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                onOpenChange(false)
-                router.push('/transactions')
-              }}
-            >
-              View All
-            </Button>
+      <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto ">
+        <DialogHeader>
+          <div className="flex flex-row gap-4">
+            {/* Header section with title and View All button */}
+            <div className="flex-1 space-y-3">
+              <DialogTitle>Transactions</DialogTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onOpenChange(false)
+                  router.push('/transactions')
+                }}
+                className="w-full sm:w-auto"
+              >
+                View All
+              </Button>
+            </div>
+            
+            {/* Sync section */}
+            <div className="flex-1 flex justify-center items-start">
+              <HomeSyncButton />
+            </div>
           </div>
-          <HomeSyncButton />
         </DialogHeader>
 
         {loading ? (
@@ -286,16 +294,16 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
           </div>
         ) : (
-          <div className="space-y-8">
+          <div className="space-y-8 max-w-full overflow-hidden">
             {Object.entries(groupedTransactions)
               .sort((a, b) => b[0].localeCompare(a[0]))
               .map(([date, group]) => (
                 <div key={date} className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <h3 className="text-lg font-semibold">
+                  <div className="flex justify-between items-center gap-4">
+                    <h3 className="text-lg font-semibold min-w-0 flex-shrink">
                       {group.displayDate}
                     </h3>
-                    <div className="text-right text-sm">
+                    <div className="text-right text-sm flex-shrink-0">
                       <div className="text-gray-900">
                         Revenue: ${formatCurrency(dailyTotals[date]?.revenue)}
                         {dailyTotals[date]?.preTaxAmount > 0 && (
@@ -334,12 +342,12 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                     {group.transactions.map((transaction) => (
                       <div
                         key={transaction._id}
-                        className="flex items-start justify-between p-3 rounded-lg group"
+                        className="flex items-start justify-between p-3 rounded-lg group max-w-full"
                         style={{ backgroundColor: transaction.type === 'expense' ? '#FEE2E2' /* bg-red-100 */ : '#F9FAFB' /* bg-gray-50 */ }}
                       >
-                        <div className="space-y-1 flex-grow pr-4">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">
+                        <div className="space-y-1 flex-grow pr-4 min-w-0 max-w-[70%]">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium break-words">
                               {transaction.type === 'expense' ? (transaction.supplier || 'Expense') : (transaction.customer || (transaction.type === 'training' ? 'Training Session' : null))
                               }
                               {/* Add a badge for Sale type */}
@@ -365,15 +373,15 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                             </span>
                           </div>
                           {transaction.description && (
-                            <p className="text-sm text-gray-600">{transaction.description}</p>
+                            <p className="text-sm text-gray-600 break-words">{transaction.description}</p>
                           )}
                           {transaction.type === 'expense' && transaction.purchaseCategory && (
-                            <p className="text-xs text-gray-500">Category: {transaction.purchaseCategory}</p>
+                            <p className="text-xs text-gray-500 break-words">Category: {transaction.purchaseCategory}</p>
                           )}
                           {transaction.products && (
                             <ul className="text-sm text-gray-600">
                               {transaction.products.map((product, index) => (
-                                <li key={index}>
+                                <li key={index} className="break-words">
                                   {product.quantity}x {product.name} - ${formatCurrency(product.totalPrice)}
                                 </li>
                               ))}
@@ -418,7 +426,7 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                             </div>
                           )}
                         </div>
-                        <div className="text-right flex-shrink-0">
+                        <div className="text-right flex-shrink-0 max-w-[30%]">
                           <div className="font-medium">${formatCurrency(transaction.amount)}</div>
                           
                           {/* Conditionally render Tip div */}

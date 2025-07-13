@@ -284,3 +284,49 @@
     -   Lazy-initialises Gemini client with `process.env.GEMINI_API_KEY`.
     -   No change to OpenAI token budget.
     -   File changed: `lib/services/ai-email-parser.ts`
+
+### Enhanced Processing Fee Accuracy in Sync Operations
+
+-   **Two-Phase Sync with Actual API Fees**
+    -   Enhanced both Square and Shopify sync endpoints to use actual processing fees instead of estimates.
+    -   Phase 1: Creates/updates transactions with estimated fees for speed.
+    -   Phase 2: Fetches actual fees from platform APIs for accuracy.
+    -   Square sync calls `/api/transactions/[id]/square-fees` to get actual fees from Square Payments API.
+    -   Shopify sync calls `/api/transactions/[id]/shopify-fees` to get actual fees from Shopify GraphQL API.
+    -   Added fee update tracking in sync results (`feesUpdated`, `feesSkipped`).
+    -   Files changed: `app/api/transactions/sync/square/route.ts`, `app/api/transactions/sync/shopify/route.ts`.
+
+-   **Updated Home Sync Button for Enhanced Results**
+    -   Modified sync button to display fee update results alongside transaction sync results.
+    -   Shows number of fees updated with actual API data in blue text.
+    -   Enhanced TypeScript types to include optional fee tracking fields.
+    -   Files changed: `components/home-sync-button.tsx`.
+
+-   **Fixed Square Product Name Resolution**
+    -   Resolved validation error where Square line items had undefined `name` fields.
+    -   Added robust fallback logic for product name resolution:
+        1. Uses `item.name` if available
+        2. Falls back to Square Catalog API lookup for item and variation names
+        3. Uses existing MongoDB product name if found
+        4. Provides descriptive fallback name as last resort
+    -   Enhanced error handling with detailed logging for debugging name resolution.
+    -   Applied fix to both sync endpoint and webhook handler for consistency.
+    -   Files changed: `app/api/transactions/sync/square/route.ts`, `app/api/webhooks/square/route.ts`.
+
+### Mobile UI Improvements for Transactions Modal
+
+-   **Enhanced Mobile Layout for Transactions Modal**
+    -   Moved "View All" button below the Transactions header instead of alongside it to prevent horizontal scrolling.
+    -   Added responsive width classes (`w-full sm:w-auto`) for better mobile experience.
+    -   Improved header layout with vertical stacking on mobile devices.
+    -   Files changed: `components/transactions-modal.tsx`.
+
+-   **Redesigned Sync Button for Mobile-First UX**
+    -   Completely redesigned HomeSyncButton with mobile-friendly vertical layout.
+    -   Removed horizontal dropdown popover that caused mobile scrolling issues.
+    -   Added smart "days since last sync" display (e.g., "5 days" button shows time since last sync).
+    -   Implemented preset sync options: Today, Last 3 days, Last 7 days, Last 30 days.
+    -   Added custom date range option with date-only inputs (automatically sets Eastern time boundaries).
+    -   Custom dates set to 12:00 AM start and 11:59 PM end in Eastern timezone.
+    -   Enhanced date calculation using `date-fns` for accurate day differences.
+    -   Files changed: `components/home-sync-button.tsx`.

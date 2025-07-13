@@ -169,8 +169,45 @@ export async function POST(request: Request) {
               'platformMetadata.productId': item.catalogObjectId
             }) : null;
 
+          // Determine the product name with fallback logic
+          let productName = item.name;
+          
+          // If no name, try to get it from the catalog object
+          if (!productName && item.catalogObjectId) {
+            try {
+              const { result } = await squareClient.catalogApi.retrieveCatalogObject(item.catalogObjectId);
+              if (result.object && result.object.type === 'ITEM_VARIATION' && result.object.itemVariationData) {
+                // Get the parent item to get the base name
+                const parentId = result.object.itemVariationData.itemId;
+                if (parentId) {
+                  const { result: parentResult } = await squareClient.catalogApi.retrieveCatalogObject(parentId);
+                  if (parentResult.object && parentResult.object.itemData) {
+                    const baseName = parentResult.object.itemData.name;
+                    const variationName = result.object.itemVariationData.name;
+                    productName = variationName ? `${baseName} - ${variationName}` : baseName;
+                  }
+                }
+              }
+            } catch (catalogError) {
+              console.warn(`[Square Sync] Failed to fetch catalog object ${item.catalogObjectId}:`, catalogError);
+            }
+          }
+
+          // Final fallback options
+          if (!productName) {
+            productName = (product?.name) || 
+                         `Square Item ${item.catalogObjectId || 'Unknown'}`;
+          }
+
+          console.log(`[Square Sync] Product name resolution:`, {
+            originalName: item.name,
+            catalogObjectId: item.catalogObjectId,
+            finalName: productName,
+            foundProduct: !!product
+          });
+
           return {
-            name: item.name,
+            name: productName,
             quantity: Number(item.quantity),
             unitPrice: Number(item.basePriceMoney?.amount || 0) / 100,
             totalPrice: Number(item.totalMoney?.amount || 0) / 100,
@@ -227,6 +264,58 @@ export async function POST(request: Request) {
     const updated = results.filter(r => r.action === 'updated').length
     const skipped = results.filter(r => r.action === 'skipped').length
 
+    console.log(`[Square Sync] Phase 1 complete: ${created} created, ${updated} updated, ${skipped} skipped`)
+
+    // Phase 2: Fetch actual processing fees for newly created/updated transactions
+    const transactionsToUpdateFees = results.filter(r => r.action === 'created' || r.action === 'updated')
+    console.log(`[Square Sync] Phase 2: Fetching actual fees for ${transactionsToUpdateFees.length} transactions`)
+
+    let feesUpdated = 0
+    let feesSkipped = 0
+
+    if (transactionsToUpdateFees.length > 0) {
+      const feeOperations = transactionsToUpdateFees.map(async (result) => {
+        try {
+          // Find the transaction in our database
+          const transaction = await mongoose.model('Transaction').findOne({
+            'platformMetadata.platform': 'square',
+            'platformMetadata.orderId': result.id
+          })
+
+          if (!transaction) {
+            console.warn(`[Square Sync] Transaction not found for order ${result.id}`)
+            return { action: 'skipped', orderId: result.id }
+          }
+
+          // Call the actual fee API
+          const feeResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/transactions/${transaction._id}/square-fees`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          })
+
+          if (feeResponse.ok) {
+            const feeData = await feeResponse.json()
+            console.log(`[Square Sync] Updated actual fee for order ${result.id}: $${feeData.processingFee}`)
+            return { action: 'updated', orderId: result.id, fee: feeData.processingFee }
+          } else {
+            console.warn(`[Square Sync] Failed to fetch actual fee for order ${result.id}:`, await feeResponse.text())
+            return { action: 'skipped', orderId: result.id }
+          }
+        } catch (error) {
+          console.warn(`[Square Sync] Error fetching actual fee for order ${result.id}:`, error)
+          return { action: 'skipped', orderId: result.id }
+        }
+      })
+
+      const feeResults = await Promise.all(feeOperations)
+      feesUpdated = feeResults.filter(r => r.action === 'updated').length
+      feesSkipped = feeResults.filter(r => r.action === 'skipped').length
+      
+      console.log(`[Square Sync] Phase 2 complete: ${feesUpdated} fees updated, ${feesSkipped} fees skipped`)
+    }
+
     // Update last successful sync time
     await SyncStateModel.findOneAndUpdate(
       { source: 'square' },
@@ -234,7 +323,7 @@ export async function POST(request: Request) {
         $set: { 
           lastSuccessfulSync: now,
           lastSyncStatus: 'success',
-          lastSyncResults: { created, updated, skipped },
+          lastSyncResults: { created, updated, skipped, feesUpdated, feesSkipped },
           updatedAt: now
         }
       },
@@ -243,7 +332,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      results: { created, updated, skipped }
+      results: { created, updated, skipped, feesUpdated, feesSkipped }
     })
   } catch (error) {
     console.error('Error syncing Square transactions:', error)

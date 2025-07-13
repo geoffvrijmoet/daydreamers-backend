@@ -144,6 +144,58 @@ export async function POST(request: Request) {
     const updated = results.filter(r => r.action === 'updated').length
     const skipped = results.filter(r => r.action === 'skipped').length
 
+    console.log(`[Shopify Sync] Phase 1 complete: ${created} created, ${updated} updated, ${skipped} skipped`)
+
+    // Phase 2: Fetch actual processing fees for newly created/updated transactions
+    const transactionsToUpdateFees = results.filter(r => r.action === 'created' || r.action === 'updated')
+    console.log(`[Shopify Sync] Phase 2: Fetching actual fees for ${transactionsToUpdateFees.length} transactions`)
+
+    let feesUpdated = 0
+    let feesSkipped = 0
+
+    if (transactionsToUpdateFees.length > 0) {
+      const feeOperations = transactionsToUpdateFees.map(async (result) => {
+        try {
+          // Find the transaction in our database
+          const transaction = await mongoose.model('Transaction').findOne({
+            'platformMetadata.platform': 'shopify',
+            'platformMetadata.orderId': result.id.toString()
+          })
+
+          if (!transaction) {
+            console.warn(`[Shopify Sync] Transaction not found for order ${result.id}`)
+            return { action: 'skipped', orderId: result.id }
+          }
+
+          // Call the actual fee API
+          const feeResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/transactions/${transaction._id}/shopify-fees`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          })
+
+          if (feeResponse.ok) {
+            const feeData = await feeResponse.json()
+            console.log(`[Shopify Sync] Updated actual fee for order ${result.id}: $${feeData.processingFee}`)
+            return { action: 'updated', orderId: result.id, fee: feeData.processingFee }
+          } else {
+            console.warn(`[Shopify Sync] Failed to fetch actual fee for order ${result.id}:`, await feeResponse.text())
+            return { action: 'skipped', orderId: result.id }
+          }
+        } catch (error) {
+          console.warn(`[Shopify Sync] Error fetching actual fee for order ${result.id}:`, error)
+          return { action: 'skipped', orderId: result.id }
+        }
+      })
+
+      const feeResults = await Promise.all(feeOperations)
+      feesUpdated = feeResults.filter(r => r.action === 'updated').length
+      feesSkipped = feeResults.filter(r => r.action === 'skipped').length
+      
+      console.log(`[Shopify Sync] Phase 2 complete: ${feesUpdated} fees updated, ${feesSkipped} fees skipped`)
+    }
+
     // Update last successful sync time
     await SyncStateModel.findOneAndUpdate(
       { source: 'shopify' },
@@ -151,7 +203,7 @@ export async function POST(request: Request) {
         $set: { 
           lastSuccessfulSync: now,
           lastSyncStatus: 'success',
-          lastSyncResults: { created, updated, skipped },
+          lastSyncResults: { created, updated, skipped, feesUpdated, feesSkipped },
           updatedAt: now
         }
       },
@@ -160,7 +212,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      results: { created, updated, skipped }
+      results: { created, updated, skipped, feesUpdated, feesSkipped }
     })
   } catch (error) {
     console.error('Error syncing Shopify transactions:', error)

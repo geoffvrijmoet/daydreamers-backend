@@ -156,8 +156,45 @@ export async function POST(request: Request) {
               'platformMetadata.productId': item.catalogObjectId
             }) : null
 
+          // Determine the product name with fallback logic
+          let productName = item.name;
+          
+          // If no name, try to get it from the catalog object
+          if (!productName && item.catalogObjectId) {
+            try {
+              const { result } = await squareClient.catalogApi.retrieveCatalogObject(item.catalogObjectId);
+              if (result.object && result.object.type === 'ITEM_VARIATION' && result.object.itemVariationData) {
+                // Get the parent item to get the base name
+                const parentId = result.object.itemVariationData.itemId;
+                if (parentId) {
+                  const { result: parentResult } = await squareClient.catalogApi.retrieveCatalogObject(parentId);
+                  if (parentResult.object && parentResult.object.itemData) {
+                    const baseName = parentResult.object.itemData.name;
+                    const variationName = result.object.itemVariationData.name;
+                    productName = variationName ? `${baseName} - ${variationName}` : baseName;
+                  }
+                }
+              }
+            } catch (catalogError) {
+              console.warn(`[Square Webhook] Failed to fetch catalog object ${item.catalogObjectId}:`, catalogError);
+            }
+          }
+
+          // Final fallback options
+          if (!productName) {
+            productName = (product?.name) || 
+                         `Square Item ${item.catalogObjectId || 'Unknown'}`;
+          }
+
+          console.log(`[Square Webhook] Product name resolution:`, {
+            originalName: item.name,
+            catalogObjectId: item.catalogObjectId,
+            finalName: productName,
+            foundProduct: !!product
+          });
+
           return {
-            name: item.name,
+            name: productName,
             quantity: Number(item.quantity),
             unitPrice: Number(item.basePriceMoney?.amount || 0) / 100,
             totalPrice: Number(item.totalMoney?.amount || 0) / 100,
