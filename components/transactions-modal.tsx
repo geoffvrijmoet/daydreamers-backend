@@ -68,6 +68,7 @@ interface Transaction {
       profitMargin: number
     }>
   }
+  draft?: boolean // <-- add this
 }
 
 type TransactionsModalProps = {
@@ -356,6 +357,12 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                                   Sale
                                 </span>
                               )}
+                              {/* Add draft badge */}
+                              {transaction.type === 'sale' && transaction.draft && (
+                                <span className="ml-2 px-1.5 py-0.5 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200 animate-pulse">
+                                  Draft
+                                </span>
+                              )}
                               {/* Add payment source/method badge */}
                               {transaction.type === 'sale' && (
                                 <span className="ml-1 px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-800 border border-gray-200">
@@ -371,6 +378,15 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                             <span className="text-sm text-gray-500">
                               {formatInEasternTime(transaction.date, 'h:mm a')}
                             </span>
+                            {/* Finalize button for draft sales */}
+                            {transaction.type === 'sale' && transaction.draft && (
+                              <button
+                                className="ml-2 px-2 py-0.5 text-xs rounded bg-yellow-200 text-yellow-900 border border-yellow-300 hover:bg-yellow-300 transition"
+                                onClick={() => {/* open finalize modal, to be implemented next */}}
+                              >
+                                Finalize
+                              </button>
+                            )}
                           </div>
                           {transaction.description && (
                             <p className="text-sm text-gray-600 break-words">{transaction.description}</p>

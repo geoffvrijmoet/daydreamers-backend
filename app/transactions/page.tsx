@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { TransactionSuperCard } from '@/components/transaction-super-card';
 
 interface Transaction {
   _id: string;
@@ -15,6 +16,17 @@ interface Transaction {
   customer?: string;
   emailId?: string;
   purchaseCategory?: string;
+  invoiceEmailId?: string; // Reference to linked invoice email
+
+  // Products for sales and expenses
+  products?: Array<{
+    productId?: string;
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+    costDiscount?: number;
+  }>;
 
   // Training-specific
   clientName?: string;
@@ -80,6 +92,7 @@ interface InvoiceEmail {
   status: string;
   supplierId?: string;
   supplier?: Supplier;
+  transactionId?: string;
   createdAt: string;
   updatedAt: Date;
 }
@@ -100,10 +113,15 @@ type ListItem = {
   data: Transaction | InvoiceEmail | AmexTransaction;
 };
 
-// Add this interface to track expanded state for each email
-interface ExpandedState {
-  [key: string]: boolean;
-}
+  // Add this interface to track expanded state for each email
+  interface ExpandedState {
+    [key: string]: boolean;
+  }
+
+  // Add this interface to track expanded state for transaction products
+  interface ExpandedTransactionProducts {
+    [key: string]: boolean;
+  }
 
 // Define the data fields we can extract
 type ParsingField = 'orderNumber' | 'total' | 'subtotal' | 'shipping' | 'tax' | 'discount' | 'products';
@@ -116,6 +134,7 @@ interface ParsedProduct {
   costDiscount?: number; // User input for cost discount (e.g., 0.20 for 20% off)
   productId?: string;
   dbName?: string;
+  emailContext?: string; // Context from email where this product was found
 }
 
 // Define the parsing result structure
@@ -270,6 +289,7 @@ export default function TransactionsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedEmails, setExpandedEmails] = useState<ExpandedState>({});
+  const [expandedTransactionProducts, setExpandedTransactionProducts] = useState<ExpandedTransactionProducts>({});
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
   const [selectedText, setSelectedText] = useState<string>('');
   const [selectedField, setSelectedField] = useState<ParsingField | null>(null);
@@ -322,6 +342,87 @@ export default function TransactionsPage() {
   const [previewAmex, setPreviewAmex] = useState<AmexTransaction | null>(null);
   const [savingAmex, setSavingAmex] = useState(false);
   const [draftPayload, setDraftPayload] = useState<string>('');
+
+  // Link invoice email to transaction modal state
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [linkingEmail, setLinkingEmail] = useState<InvoiceEmail | null>(null);
+  const [expenseTransactions, setExpenseTransactions] = useState<Transaction[]>([]);
+  const [potentialMatches, setPotentialMatches] = useState<Transaction[]>([]);
+  const [linkingEmailId, setLinkingEmailId] = useState<string | null>(null);
+
+  // NEW: Amex fetching feedback states
+  const [amexFetching, setAmexFetching] = useState(false);
+  const [amexFetchResult, setAmexFetchResult] = useState<{
+    success: boolean;
+    message: string;
+    count?: number;
+    transactions?: AmexTransaction[];
+  } | null>(null);
+  const [showAmexResults, setShowAmexResults] = useState(false);
+
+  // Helper function to scroll to a specific Amex transaction
+  const scrollToAmexTransaction = (emailId: string) => {
+    const element = document.querySelector(`[data-amex-email-id="${emailId}"]`);
+    if (element) {
+      element.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'center' 
+      });
+      // Add a brief highlight effect
+      element.classList.add('ring-2', 'ring-blue-500', 'ring-opacity-50');
+      setTimeout(() => {
+        element.classList.remove('ring-2', 'ring-blue-500', 'ring-opacity-50');
+      }, 2000);
+    }
+  };
+
+  // Helper function to fetch Amex transactions
+  const fetchAmexTransactions = async (sinceDays: number) => {
+    setAmexFetching(true);
+    setAmexFetchResult(null);
+    setShowAmexResults(false);
+    
+    try {
+      const res = await fetch(`/api/amex?sinceDays=${sinceDays}`);
+      const json = await res.json();
+      
+      if (!res.ok || json.error) {
+        setAmexFetchResult({
+          success: false,
+          message: json.error || 'Failed to fetch Amex transactions'
+        });
+        return;
+      }
+      
+      const fetched: AmexTransaction[] = json.transactions || [];
+      const existingIds = new Set<string>(transactions.map(t => t.emailId).filter(Boolean) as string[]);
+      const unique = fetched.filter(f => !existingIds.has(f.emailId));
+      
+      setAmexTxns(unique);
+      setActiveFilter('invoices');
+      
+      setAmexFetchResult({
+        success: true,
+        message: `Found ${unique.length} new Amex transactions`,
+        count: unique.length,
+        transactions: unique
+      });
+      setShowAmexResults(true);
+      
+      // Auto-hide results after 10 seconds
+      setTimeout(() => {
+        setShowAmexResults(false);
+      }, 10000);
+      
+    } catch (error) {
+      setAmexFetchResult({
+        success: false,
+        message: 'Network error while fetching Amex transactions'
+      });
+    } finally {
+      setAmexFetching(false);
+    }
+  };
 
   const fetchProductSuggestions = async (term: string, emailId: string, index: number) => {
     if (!term) return;
@@ -577,6 +678,14 @@ export default function TransactionsPage() {
         setSelectedEmail(emailId)
       }
     }
+  };
+
+  const toggleTransactionProducts = (transactionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedTransactionProducts(prev => ({
+      ...prev,
+      [transactionId]: !prev[transactionId]
+    }));
   };
 
   const toggleParsingMode = (emailId: string) => {
@@ -1071,21 +1180,28 @@ export default function TransactionsPage() {
       const quantityRegex = new RegExp(patterns.items.quantity.pattern, patterns.items.quantity.flags || 'g');
       const totalRegex = new RegExp(patterns.items.total.pattern, patterns.items.total.flags || 'g');
       
-      const nameMatches: string[] = [];
-      const quantityMatches: number[] = [];
-      const totalMatches: number[] = [];
+      const nameMatches: Array<{ value: string; index: number; context: string }> = [];
+      const quantityMatches: Array<{ value: number; index: number }> = [];
+      const totalMatches: Array<{ value: number; index: number }> = [];
       
-      // Extract matches for each pattern
+      // Extract matches for each pattern with their positions
       let match;
       while ((match = nameRegex.exec(emailBody)) !== null) {
-        nameMatches.push(match[1] || match[0]);
+        const value = match[1] || match[0];
+        const index = match.index;
+        // Get context around the match (50 characters before and after)
+        const start = Math.max(0, index - 50);
+        const end = Math.min(emailBody.length, index + value.length + 50);
+        const context = emailBody.substring(start, end).replace(/\s+/g, ' ').trim();
+        
+        nameMatches.push({ value, index, context });
       }
       
       while ((match = quantityRegex.exec(emailBody)) !== null) {
         const quantityStr = match[1] || match[0];
         const quantity = parseFloat(quantityStr.replace(/[^\d.-]/g, ''));
         if (!isNaN(quantity)) {
-          quantityMatches.push(quantity);
+          quantityMatches.push({ value: quantity, index: match.index });
         }
       }
       
@@ -1093,7 +1209,7 @@ export default function TransactionsPage() {
         const totalStr = match[1] || match[0];
         const total = parseFloat(totalStr.replace(/[^\d.-]/g, ''));
         if (!isNaN(total)) {
-          totalMatches.push(total);
+          totalMatches.push({ value: total, index: match.index });
         }
       }
       
@@ -1112,11 +1228,13 @@ export default function TransactionsPage() {
       
       for (let i = 0; i < minLength; i++) {
         products.push({
-          name: nameMatches[i],
-          quantity: quantityMatches[i] * quantityMultiple, // Apply quantity multiple
-          total: totalMatches[i],
+          name: nameMatches[i].value,
+          quantity: quantityMatches[i].value * quantityMultiple, // Apply quantity multiple
+          total: totalMatches[i].value,
           // Apply cost discount to each product
-          costDiscount: costDiscount
+          costDiscount: costDiscount,
+          // Add email context where this product was found
+          emailContext: nameMatches[i].context
         });
       }
       
@@ -1161,44 +1279,80 @@ export default function TransactionsPage() {
       // Calculate the total after discounts
       const totalAfterDiscounts = products.reduce((sum, p) => sum + p.totalPrice, 0);
       
-      // Call API to create a transaction
-      // This transaction will be saved to MongoDB with the specified data
-      const response = await fetch('/api/transactions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          date: new Date(email.date).toISOString(),
-          amount: totalAfterDiscounts,
-          supplier: email.supplier?.name || email.from.split('<')[0].trim(),
-          notes: `Invoice from ${email.supplier?.name || 'unknown supplier'}`,
-          type: 'expense',
-          source: 'email',
-          emailId: email.emailId,
-          purchaseCategory: 'inventory',
-          supplierOrderNumber: parsingResults[email._id]?.orderNumber?.value || '',
-          products: products // saved
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to create transaction');
+      // Check if email is already linked to a transaction
+      if (email.transactionId) {
+        // Update existing transaction
+        const response = await fetch(`/api/transactions/${email.transactionId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            amount: totalAfterDiscounts,
+            supplier: email.supplier?.name || email.from.split('<')[0].trim(),
+            notes: `Invoice from ${email.supplier?.name || 'unknown supplier'}`,
+            supplierOrderNumber: parsingResults[email._id]?.orderNumber?.value || '',
+            products: products // saved
+          }),
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to update linked transaction');
+        }
+        
+        const result = await response.json();
+        
+        // Update local transactions state
+        setTransactions(prev => 
+          prev.map(t => 
+            t._id === email.transactionId 
+              ? { ...t, amount: totalAfterDiscounts, products: products }
+              : t
+          )
+        );
+        
+        // Show success message
+        alert('Products saved to linked transaction successfully!');
+        
+      } else {
+        // Create new transaction (original behavior)
+        const response = await fetch('/api/transactions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            date: new Date(email.date).toISOString(),
+            amount: totalAfterDiscounts,
+            supplier: email.supplier?.name || email.from.split('<')[0].trim(),
+            notes: `Invoice from ${email.supplier?.name || 'unknown supplier'}`,
+            type: 'expense',
+            source: 'email',
+            emailId: email.emailId,
+            purchaseCategory: 'inventory',
+            supplierOrderNumber: parsingResults[email._id]?.orderNumber?.value || '',
+            products: products // saved
+          }),
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to create transaction');
+        }
+        
+        const result = await response.json();
+        
+        // Update the UI to show the email is processed
+        setInvoiceEmails(prev => 
+          prev.map(e => 
+            e._id === emailId
+              ? { ...e, status: 'processed', transactionId: result.transaction.id }
+              : e
+          )
+        );
+        
+        // Show success message
+        alert('Products saved to transaction successfully!');
       }
-      
-      const result = await response.json();
-      
-      // Update the UI to show the email is processed
-      setInvoiceEmails(prev => 
-        prev.map(e => 
-          e._id === emailId
-            ? { ...e, status: 'processed', transactionId: result.transaction.id }
-            : e
-        )
-      );
-      
-      // Show success message
-      alert('Products saved to transaction successfully!');
       
     } catch (error) {
       console.error('Error saving products to transaction:', error);
@@ -1334,7 +1488,8 @@ export default function TransactionsPage() {
             costDiscount:
               email.supplier?.emailParsing?.products?.costDiscount ??
               email.supplier?.emailParsing?.products?.wholesaleDiscount ??
-              0
+              0,
+            emailContext: `AI parsed: ${p.name} (${p.quantity}x) - ${p.lineTotal}`
           }))
         }
       };
@@ -1598,6 +1753,100 @@ export default function TransactionsPage() {
     }
   };
 
+  // Function to open linking modal and fetch expense transactions
+  const openLinkingModal = async (email: InvoiceEmail) => {
+    setLinkingEmail(email);
+    setShowLinkModal(true);
+    
+    // Fetch expense transactions
+    try {
+      const response = await fetch('/api/transactions?type=expense&limit=100');
+      if (!response.ok) throw new Error('Failed to fetch expense transactions');
+      const data = await response.json();
+      const allExpenseTransactions = data.transactions;
+      setExpenseTransactions(allExpenseTransactions);
+      
+      // Find potential matches based on date proximity and exact amount
+      const emailDate = new Date(email.date);
+      const emailAmount = parsingResults[email._id]?.total?.value 
+        ? parseFloat(parsingResults[email._id].total.value) 
+        : null;
+      
+      if (emailAmount) {
+        const potentialMatches = allExpenseTransactions.filter(transaction => {
+          const transactionDate = new Date(transaction.date);
+          const dateDiff = Math.abs(emailDate.getTime() - transactionDate.getTime());
+          const daysDiff = dateDiff / (1000 * 60 * 60 * 24);
+          
+          // Check if within 3 days and exact amount match
+          return daysDiff <= 3 && Math.abs(transaction.amount - emailAmount) < 0.01;
+        });
+        
+        setPotentialMatches(potentialMatches);
+      } else {
+        setPotentialMatches([]);
+      }
+    } catch (error) {
+      console.error('Error fetching expense transactions:', error);
+      alert('Failed to load expense transactions');
+    }
+  };
+
+  // Function to link invoice email to transaction
+  const linkEmailToTransaction = async (transactionId: string) => {
+    if (!linkingEmail || linkingEmailId) return;
+    
+    setLinkingEmailId(linkingEmail._id);
+    
+    try {
+      // Update both the invoice email and the transaction
+      const [emailResponse, transactionResponse] = await Promise.all([
+        fetch(`/api/invoiceemails/${linkingEmail._id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transactionId })
+        }),
+        fetch(`/api/transactions/${transactionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ invoiceEmailId: linkingEmail._id })
+        })
+      ]);
+
+      if (!emailResponse.ok || !transactionResponse.ok) {
+        throw new Error('Failed to link email to transaction');
+      }
+
+      // Update the local state
+      setInvoiceEmails(prev => 
+        prev.map(email => 
+          email._id === linkingEmail._id 
+            ? { ...email, transactionId: transactionId }
+            : email
+        )
+      );
+
+      setTransactions(prev => 
+        prev.map(transaction => 
+          transaction._id === transactionId 
+            ? { ...transaction, invoiceEmailId: linkingEmail._id }
+            : transaction
+        )
+      );
+
+      // Close modal
+      setShowLinkModal(false);
+      setLinkingEmail(null);
+      
+      alert('Successfully linked invoice email to transaction!');
+    } catch (error) {
+      console.error('Error linking email to transaction:', error);
+      alert('Failed to link email to transaction. Please try again.');
+    } finally {
+      setLinkingEmailId(null);
+    }
+  };
+
   return (
     <div className="p-4">
       <h1 className="text-2xl font-bold mb-4">Transactions & Invoices</h1>
@@ -1606,50 +1855,102 @@ export default function TransactionsPage() {
       <div className="mb-6 relative inline-block">
         <button
           onClick={() => setShowAmexMenu(prev=>!prev)}
-          className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-100 text-blue-700 hover:bg-blue-200"
+          disabled={amexFetching}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            amexFetching 
+              ? 'bg-blue-200 text-blue-600 cursor-not-allowed' 
+              : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+          }`}
         >
-          Find Amex Transactions
+          {amexFetching ? (
+            <span className="flex items-center">
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Fetching...
+            </span>
+          ) : (
+            'Find Amex Transactions'
+          )}
         </button>
+        
+        {/* Amex fetch result feedback */}
+        {amexFetchResult && (
+          <div className={`mt-2 p-3 rounded-lg text-sm ${
+            amexFetchResult.success 
+              ? 'bg-green-50 text-green-800 border border-green-200' 
+              : 'bg-red-50 text-red-800 border border-red-200'
+          }`}>
+            <div className="flex items-center justify-between">
+              <span>{amexFetchResult.message}</span>
+              <button
+                onClick={() => setAmexFetchResult(null)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {/* Amex results list */}
+        {showAmexResults && amexFetchResult?.success && amexFetchResult.transactions && amexFetchResult.transactions.length > 0 && (
+          <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-blue-800">
+                Found {amexFetchResult.count} new transactions:
+              </span>
+              <button
+                onClick={() => setShowAmexResults(false)}
+                className="text-blue-600 hover:text-blue-800 text-sm"
+              >
+                Hide
+              </button>
+            </div>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {amexFetchResult.transactions.slice(0, 5).map((txn) => (
+                <button
+                  key={txn.emailId}
+                  onClick={() => scrollToAmexTransaction(txn.emailId)}
+                  className="block w-full text-left p-2 text-xs bg-white rounded border border-blue-100 hover:bg-blue-100 transition-colors"
+                >
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium truncate">{txn.merchant}</span>
+                    <span className="text-blue-600">${txn.amount.toFixed(2)}</span>
+                  </div>
+                  <div className="text-gray-500 text-xs">
+                    {new Date(txn.date).toLocaleDateString()} • ****{txn.cardLast4}
+                  </div>
+                </button>
+              ))}
+              {amexFetchResult.transactions.length > 5 && (
+                <div className="text-xs text-blue-600 text-center py-1">
+                  +{amexFetchResult.transactions.length - 5} more transactions
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
         {showAmexMenu && (
           <div className="absolute z-10 mt-2 w-40 bg-white border border-gray-200 rounded shadow-lg">
             <button
-              onClick={async () => {
+              onClick={() => {
                 setShowAmexMenu(false);
                 const currentYear = new Date().getUTCFullYear();
                 const yearStart = new Date(Date.UTC(currentYear, 0, 1));
                 const daysSinceYearStart = Math.floor((Date.now() - yearStart.getTime()) / (1000 * 60 * 60 * 24));
-                try {
-                  const res = await fetch(`/api/amex?sinceDays=${daysSinceYearStart}`);
-                  const json = await res.json();
-                  if(!res.ok || json.error){alert(json.error || 'Fetch failed');return;}
-                  const fetched: AmexTransaction[] = json.transactions || [];
-                  const existingIds = new Set<string>(transactions.map(t=>t.emailId).filter(Boolean) as string[]);
-                  const unique = fetched.filter(f=>!existingIds.has(f.emailId));
-                  setAmexTxns(unique);
-                  setActiveFilter('invoices');
-                }catch{
-                  alert('Fetch error');
-                }
+                fetchAmexTransactions(daysSinceYearStart);
               }}
               className="block w-full text-left px-4 py-2 text-sm hover:bg-blue-50 border-b border-gray-100"
             >This Year</button>
             {[7,30,60,90].map(days=> (
               <button
                 key={days}
-                onClick={async () => {
+                onClick={() => {
                   setShowAmexMenu(false);
-                  try {
-                    const res = await fetch(`/api/amex?sinceDays=${days}`);
-                    const json = await res.json();
-                    if(!res.ok || json.error){alert(json.error || 'Fetch failed');return;}
-                    const fetched: AmexTransaction[] = json.transactions || [];
-                    const existingIds = new Set<string>(transactions.map(t=>t.emailId).filter(Boolean) as string[]);
-                    const unique = fetched.filter(f=>!existingIds.has(f.emailId));
-                    setAmexTxns(unique);
-                    setActiveFilter('invoices');
-                  }catch{
-                    alert('Fetch error');
-                  }
+                  fetchAmexTransactions(days);
                 }}
                 className="block w-full text-left px-4 py-2 text-sm hover:bg-blue-50"
               >Last {days} days</button>
@@ -1746,6 +2047,37 @@ export default function TransactionsPage() {
         {filteredItems.map((item) => {
           if (item.type === 'transaction') {
             const transaction = item.data as Transaction;
+            
+            // Check if this transaction has a linked invoice email
+            const linkedEmail = invoiceEmails.find(email => email._id === transaction.invoiceEmailId);
+            
+            // If there's a linked email, render the super card
+            if (linkedEmail) {
+              return (
+                <TransactionSuperCard
+                  key={`super-${transaction._id}`}
+                  transaction={transaction}
+                  invoiceEmail={linkedEmail}
+                  parsingResults={parsingResults[linkedEmail._id]}
+                  expandedTransactionProducts={expandedTransactionProducts}
+                  onToggleTransactionProducts={toggleTransactionProducts}
+                  onDeleteTransaction={deleteTxn}
+                  onParseWithAI={parseWithAI}
+                  onToggleParsingMode={toggleParsingMode}
+                  onSaveAITraining={saveAITraining}
+                  onOpenLinkingModal={openLinkingModal}
+                  isParsingMode={isParsingMode}
+                  selectedEmail={selectedEmail}
+                  aiLoadingEmail={aiLoadingEmail}
+                  linkingEmailId={linkingEmailId}
+                  deletingId={deletingId}
+                  formatCurrency={formatCurrency}
+                  renderEmailBodyWithHighlights={renderEmailBodyWithHighlights}
+                />
+              );
+            }
+            
+            // Otherwise render the regular transaction card
             return (
               <div
                 key={transaction._id}
@@ -1753,14 +2085,26 @@ export default function TransactionsPage() {
               >
                 <div className="flex justify-between items-start">
                   <div>
-                    <p className="text-lg font-semibold">
-                      {(() => {
-                        if (transaction.type === 'training') {
-                          return transaction.clientName || transaction.trainingAgency || 'Unknown';
-                        }
-                        return transaction.merchant || transaction.supplier || transaction.customer || transaction.clientName || transaction.trainingAgency || 'Unknown';
-                      })()}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-lg font-semibold">
+                        {(() => {
+                          if (transaction.type === 'training') {
+                            return transaction.clientName || transaction.trainingAgency || 'Unknown';
+                          }
+                          return transaction.merchant || transaction.supplier || transaction.customer || transaction.clientName || transaction.trainingAgency || 'Unknown';
+                        })()}
+                      </p>
+                      {transaction.invoiceEmailId && (
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                          📧 Has Invoice Email
+                        </span>
+                      )}
+                      {transaction.products && transaction.products.length > 0 && (
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800 border border-green-200">
+                          📦 {transaction.products.length} Products
+                        </span>
+                      )}
+                    </div>
                     <p className="text-sm text-gray-600">
                       {new Date(transaction.date).toLocaleDateString()} • {transaction.type} • {transaction.source}
                     </p>
@@ -1802,6 +2146,56 @@ export default function TransactionsPage() {
                   </p>
                 </div>
 
+                {/* Products dropdown button and display */}
+                {transaction.products && transaction.products.length > 0 && (
+                  <div className="mt-3">
+                    <button
+                      onClick={(e) => toggleTransactionProducts(transaction._id, e)}
+                      className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+                    >
+                      <span>View Products ({transaction.products.length})</span>
+                      <svg 
+                        xmlns="http://www.w3.org/2000/svg" 
+                        className={`h-4 w-4 transition-transform ${expandedTransactionProducts[transaction._id] ? 'rotate-180' : ''}`} 
+                        fill="none" 
+                        viewBox="0 0 24 24" 
+                        stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    
+                    {expandedTransactionProducts[transaction._id] && (
+                      <div className="mt-2 p-3 bg-gray-50 rounded-lg border">
+                        <div className="space-y-2">
+                          {transaction.products.map((product, index) => (
+                            <div key={index} className="flex justify-between items-center text-sm">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{product.quantity}x</span>
+                                <span>{product.name}</span>
+                                {product.productId && (
+                                  <span className="text-xs text-gray-500">(ID: {product.productId})</span>
+                                )}
+                              </div>
+                              <div className="text-right">
+                                <div className="font-medium">${product.totalPrice.toFixed(2)}</div>
+                                <div className="text-xs text-gray-500">
+                                  ${product.unitPrice.toFixed(2)} each
+                                  {product.costDiscount && product.costDiscount > 0 && (
+                                    <span className="text-green-600 ml-1">
+                                      (-{Math.round(product.costDiscount * 100)}%)
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Delete button */}
                 <button
                   onClick={async () => {
@@ -1826,7 +2220,11 @@ export default function TransactionsPage() {
           } else if (item.type === 'amex') {
             const a = item.data as AmexTransaction;
             return (
-              <div key={a.emailId} className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+              <div 
+                key={a.emailId} 
+                className="bg-blue-50 p-4 rounded-lg border border-blue-200"
+                data-amex-email-id={a.emailId}
+              >
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="font-semibold">{a.merchant}</p>
@@ -1871,9 +2269,16 @@ export default function TransactionsPage() {
                   onClick={(e) => toggleEmailBody(email._id, e)}
                 >
                   <div>
-                    <p className="text-lg font-semibold">
-                      {email.supplier?.name || email.from.split('<')[0].trim()}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-lg font-semibold">
+                        {email.supplier?.name || email.from.split('<')[0].trim()}
+                      </p>
+                      {email.transactionId && (
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800 border border-green-200">
+                          ✓ Linked to Transaction
+                        </span>
+                      )}
+                    </div>
                     <p className="text-sm text-gray-600">
                       {new Date(email.date).toLocaleDateString()} • Invoice Email • {email.status}
                     </p>
@@ -1948,11 +2353,26 @@ export default function TransactionsPage() {
                               e.stopPropagation();
                               saveAITraining(email);
                             }}
-                            className="px-2 py-1 text-xs rounded bg-green-200 text-green-700 hover:bg-green-300"
+                            className="mr-3 px-2 py-1 text-xs rounded bg-green-200 text-green-700 hover:bg-green-300"
                           >
                             Save as Correct
                           </button>
                         )}
+                        
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openLinkingModal(email);
+                          }}
+                          disabled={linkingEmailId === email._id}
+                          className={`mr-3 px-2 py-1 text-xs rounded ${
+                            email.transactionId 
+                              ? 'bg-green-200 text-green-700 hover:bg-green-300' 
+                              : 'bg-orange-200 text-orange-700 hover:bg-orange-300'
+                          } ${linkingEmailId === email._id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          {linkingEmailId === email._id ? 'Linking...' : (email.transactionId ? 'Change Link' : 'Link to Transaction')}
+                        </button>
                       </>
                     )}
                     <div className="text-purple-600">
@@ -2047,6 +2467,7 @@ export default function TransactionsPage() {
                           <thead>
                             <tr className="bg-gray-50">
                               <th className="px-3 py-2 text-left">Product</th>
+                              <th className="px-3 py-2 text-left">Email Context</th>
                               <th className="px-3 py-2 text-right">Quantity</th>
                               <th className="px-3 py-2 text-right">Total</th>
                               <th className="px-3 py-2 text-right">Adjusted Total</th>
@@ -2094,6 +2515,18 @@ export default function TransactionsPage() {
                                       })()}
                                     </div>
                                   </td>
+                                  {/* Email Context */}
+                                  <td className="px-3 py-2">
+                                    {product.emailContext ? (
+                                      <div className="text-xs text-gray-600 max-w-xs">
+                                        <div className="font-mono bg-gray-50 p-1 rounded border truncate" title={product.emailContext}>
+                                          {product.emailContext}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs text-gray-400 italic">No context</span>
+                                    )}
+                                  </td>
                                   {/* Quantity editable */}
                                   <td className="px-3 py-2 text-right">
                                     <input
@@ -2126,7 +2559,7 @@ export default function TransactionsPage() {
                           </tbody>
                           <tfoot>
                             <tr className="bg-gray-50 font-medium">
-                              <td className="px-3 py-2" colSpan={2}>Total</td>
+                              <td className="px-3 py-2" colSpan={3}>Total</td>
                               <td className="px-3 py-2 text-right">
                                 {formatCurrency(
                                   (parsingResults[email._id].products?.products || [])
@@ -2666,6 +3099,170 @@ export default function TransactionsPage() {
                   }
                 }}
               >{savingAmex? 'Saving…':'Commit'}</button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+      
+      {/* Link Invoice Email to Transaction Modal */}
+      {showLinkModal && linkingEmail && (
+        <Dialog open={showLinkModal} onOpenChange={setShowLinkModal}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Link Invoice Email to Transaction</DialogTitle>
+              
+              {/* Invoice Email Details */}
+              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <h4 className="font-medium text-blue-900 mb-2">Invoice Email Details:</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <span className="text-blue-700 font-medium">Date:</span>
+                    <span className="ml-2 text-blue-900">
+                      {new Date(linkingEmail.date).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-blue-700 font-medium">Amount:</span>
+                    <span className="ml-2 text-blue-900">
+                      {parsingResults[linkingEmail._id]?.total?.value 
+                        ? `$${parseFloat(parsingResults[linkingEmail._id].total.value).toFixed(2)}`
+                        : 'Not parsed'
+                      }
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-blue-700 font-medium">Supplier:</span>
+                    <span className="ml-2 text-blue-900">
+                      {linkingEmail.supplier?.name || linkingEmail.from.split('<')[0].trim()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </DialogHeader>
+            
+            <div className="mt-4">
+              {/* Potential Matches Section */}
+              {potentialMatches.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-medium mb-3 text-green-700">
+                    🎯 Potential Matches (Date ±3 days, Exact Amount)
+                  </h3>
+                  <div className="space-y-2 mb-4">
+                                      {potentialMatches.map((transaction) => {
+                    // Check for exact matches
+                    const emailDate = new Date(linkingEmail.date).toLocaleDateString();
+                    const transactionDate = new Date(transaction.date).toLocaleDateString();
+                    const emailAmount = parsingResults[linkingEmail._id]?.total?.value 
+                      ? parseFloat(parsingResults[linkingEmail._id].total.value) 
+                      : null;
+                    const emailSupplier = linkingEmail.supplier?.name || linkingEmail.from.split('<')[0].trim();
+                    const transactionSupplier = transaction.supplier || 'Unknown Supplier';
+                    
+                    const exactDateMatch = emailDate === transactionDate;
+                    const exactAmountMatch = emailAmount && Math.abs(transaction.amount - emailAmount) < 0.01;
+                    const exactSupplierMatch = emailSupplier.toLowerCase() === transactionSupplier.toLowerCase();
+                    
+                    return (
+                      <div
+                        key={transaction._id}
+                        className="flex items-center justify-between p-3 border-2 border-green-200 rounded-lg hover:bg-green-50 cursor-pointer bg-green-50"
+                        onClick={() => linkEmailToTransaction(transaction._id)}
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`font-medium ${exactSupplierMatch ? 'text-green-900 bg-green-300 px-2 py-1 rounded' : 'text-green-800'}`}>
+                              {transaction.supplier || 'Unknown Supplier'}
+                              {exactSupplierMatch && <span className="ml-1 text-xs">✓</span>}
+                            </span>
+                            <span className={`text-sm ${exactDateMatch ? 'text-green-900 bg-green-300 px-2 py-1 rounded font-medium' : 'text-green-600'}`}>
+                              {transactionDate}
+                              {exactDateMatch && <span className="ml-1 text-xs">✓</span>}
+                            </span>
+                            <span className="px-2 py-1 text-xs bg-green-200 text-green-800 rounded-full">
+                              Potential Match
+                            </span>
+                          </div>
+                          
+                          {transaction.purchaseCategory && (
+                            <div className="text-sm text-green-700">
+                              Category: {transaction.purchaseCategory}
+                            </div>
+                          )}
+                          
+                          <div className="text-sm text-green-600">
+                            Source: {transaction.source}
+                          </div>
+                        </div>
+                        
+                        <div className="text-right">
+                          <div className={`font-medium ${exactAmountMatch ? 'text-green-900 bg-green-300 px-2 py-1 rounded' : 'text-green-800'}`}>
+                            ${transaction.amount.toFixed(2)}
+                            {exactAmountMatch && <span className="ml-1 text-xs">✓</span>}
+                          </div>
+                          <button
+                            className="mt-1 px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                            disabled={linkingEmailId}
+                          >
+                            {linkingEmailId ? 'Linking...' : 'Link'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  </div>
+                </div>
+              )}
+              
+              <h3 className="text-lg font-medium mb-3">All Expense Transactions:</h3>
+              
+              {expenseTransactions.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  No expense transactions found. Create an expense transaction first.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {expenseTransactions.map((transaction) => (
+                    <div
+                      key={transaction._id}
+                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 cursor-pointer"
+                      onClick={() => linkEmailToTransaction(transaction._id)}
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">
+                            {transaction.supplier || 'Unknown Supplier'}
+                          </span>
+                          <span className="text-sm text-gray-500">
+                            {new Date(transaction.date).toLocaleDateString()}
+                          </span>
+                        </div>
+                        
+                        {transaction.purchaseCategory && (
+                          <div className="text-sm text-gray-600">
+                            Category: {transaction.purchaseCategory}
+                          </div>
+                        )}
+                        
+                        <div className="text-sm text-gray-500">
+                          Source: {transaction.source}
+                        </div>
+                      </div>
+                      
+                      <div className="text-right">
+                        <div className="font-medium">
+                          ${transaction.amount.toFixed(2)}
+                        </div>
+                        <button
+                          className="mt-1 px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
+                          disabled={linkingEmailId}
+                        >
+                          {linkingEmailId ? 'Linking...' : 'Link'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </DialogContent>
         </Dialog>

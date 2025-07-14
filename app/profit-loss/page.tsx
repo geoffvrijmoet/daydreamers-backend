@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatNumberWithCommas } from "@/lib/utils"
 import { Loader2, ChevronDown, ChevronRight, Check, RefreshCw } from "lucide-react"
@@ -96,6 +96,12 @@ export default function ProfitLossPage() {
   const [syncingRevenue, setSyncingRevenue] = useState<Set<string>>(new Set())
   const [fetchingFees, setFetchingFees] = useState<Set<string>>(new Set())
   const [ccFeeTransactions, setCcFeeTransactions] = useState<Transaction[]>([])
+  const [isTrainingCollapsed, setIsTrainingCollapsed] = useState(true)
+  const [isExpensesCollapsed, setIsExpensesCollapsed] = useState(true)
+  const [isTaxesCollapsed, setIsTaxesCollapsed] = useState(true)
+  const trainingRef = useRef<HTMLDivElement>(null)
+  const expensesRef = useRef<HTMLDivElement>(null)
+  const taxesRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setIsClient(true)
@@ -1096,12 +1102,38 @@ export default function ProfitLossPage() {
     </tr>
   )
 
+  // Handler for sticky bar buttons
+  const handleSectionToggle = (section: 'training' | 'expenses' | 'taxes') => {
+    if (section === 'training') {
+      setIsTrainingCollapsed((prev) => {
+        if (prev && trainingRef.current) {
+          trainingRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+        return !prev
+      })
+    } else if (section === 'expenses') {
+      setIsExpensesCollapsed((prev) => {
+        if (prev && expensesRef.current) {
+          expensesRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+        return !prev
+      })
+    } else {
+      setIsTaxesCollapsed((prev) => {
+        if (prev && taxesRef.current) {
+          taxesRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+        return !prev
+      })
+    }
+  }
+
   return (
-    <div className="container mx-auto py-8">
+    <div className="container mx-auto py-8 pb-32">
       <h1 className="text-2xl font-bold mb-6">Profit & Loss</h1>
       
       {/* Date range selectors */}
-      <div className="mb-8 p-4 bg-gray-50 rounded-lg">
+      <div className="mb-8 p-4 bg-gray-50 rounded-lg sticky top-0 z-30 shadow">
         <h3 className="text-lg font-medium mb-4">Time Period</h3>
         <div className="flex flex-wrap items-center gap-4">
           {/* Quick range selectors */}
@@ -1343,231 +1375,749 @@ export default function ProfitLossPage() {
         </CardContent>
       </Card>
 
-      {/* Training Transactions Section */}
-      <Card className="mb-8">
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <div>
-              <CardTitle>Training Transactions</CardTitle>
-              <CardDescription>
-                All training sessions and revenue
-                {isClient && startDate && endDate && (
-                  <span className="ml-1">
-                    ({format(startDate, "MMM d, yyyy")} - {format(endDate, "MMM d, yyyy")})
-                  </span>
-                )}
-              </CardDescription>
-            </div>
+      {/* Collapsible Taxes Section */}
+      <div ref={taxesRef} className="mb-8">
+        <div className="flex items-center justify-between cursor-pointer rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 mb-2 sticky top-0 z-10" onClick={() => setIsTaxesCollapsed((prev) => !prev)} aria-expanded={!isTaxesCollapsed} tabIndex={0} role="button">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">📊</span>
+            <span className="font-semibold text-orange-900">Tax Summary</span>
           </div>
-        </CardHeader>
-        <CardContent>
-          {(() => {
-            const trainingTransactions = transactions.filter(t => t.type === 'training')
-            const trainingTotal = revenueBreakdown.training.revenue
-            
-            if (loading) {
-              return (
+          <span className="ml-2">{isTaxesCollapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}</span>
+        </div>
+        <div className={`transition-all duration-300 overflow-hidden ${isTaxesCollapsed ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-[2000px] opacity-100'}`}> 
+          <Card className="mb-8 mt-0">
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle>Tax Summary</CardTitle>
+                  <CardDescription>
+                    Sales tax collected and taxable sales breakdown
+                    {isClient && startDate && endDate && (
+                      <span className="ml-1">
+                        ({format(startDate, "MMM d, yyyy")} - {format(endDate, "MMM d, yyyy")})
+                      </span>
+                    )}
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="h-8 w-8 text-blue-500 animate-spin mr-2" />
-                  <p>Loading training transactions...</p>
+                  <p>Loading tax data...</p>
                 </div>
-              )
-            }
-            
-            if (error) {
-              return (
+              ) : error ? (
                 <div className="text-red-500 py-4">
                   Error: {error}
                 </div>
-              )
-            }
-            
-            if (trainingTransactions.length === 0) {
-              return (
-                <div className="text-center py-8 text-gray-500">
-                  No training transactions found for the selected period.
-                </div>
-              )
-            }
-            
-            return (
-              <div>
-                <div className="bg-green-100 p-4 rounded-lg mb-6">
-                  <h2 className="text-lg font-medium mb-2">Total Training Revenue</h2>
-                  <p className="text-3xl font-bold text-green-600">
-                    ${formatNumberWithCommas(trainingTotal)}
-                  </p>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Total from {trainingTransactions.length} training sessions
-                  </p>
-                </div>
-                
-                                 <div className="overflow-x-auto">
-                   <table className="w-full border-collapse border rounded-md">
-                     <thead>
-                       <tr className="bg-gray-50">
-                         <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Date</th>
-                         <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Client</th>
-                         <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Dog</th>
-                         <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Trainer</th>
-                         <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Agency</th>
-                         <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Sales Tax</th>
-                         <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Revenue</th>
-                       </tr>
-                     </thead>
-                     <tbody>
-                       {trainingTransactions.map(transaction => (
-                         <tr key={transaction._id} className="border-b hover:bg-gray-50">
-                           <td className="p-3 text-sm">{formatTransactionDate(transaction.date)}</td>
-                           <td className="p-3 text-sm">{transaction.clientName || 'N/A'}</td>
-                           <td className="p-3 text-sm">{transaction.dogName || 'N/A'}</td>
-                           <td className="p-3 text-sm">{transaction.trainer || 'N/A'}</td>
-                           <td className="p-3 text-sm">{transaction.trainingAgency || 'N/A'}</td>
-                           <td className="p-3 text-sm">
-                             <TaxCell transaction={transaction} />
-                           </td>
-                           <td className="p-3 text-sm text-right">
-                             <RevenueCell transaction={transaction} />
-                           </td>
-                         </tr>
-                       ))}
-                     </tbody>
-                   </table>
-                 </div>
-              </div>
-            )
-          })()}
-        </CardContent>
-      </Card>
+              ) : (
+                <div className="space-y-6">
+                  {/* Tax Overview */}
+                  <div className="bg-orange-100 p-4 rounded-lg">
+                    <h2 className="text-lg font-medium mb-4">Tax Overview</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-orange-600">
+                          ${formatNumberWithCommas(revenueBreakdown.total.tax)}
+                        </p>
+                        <p className="text-sm text-orange-700">Total Tax Collected</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-orange-600">
+                          ${formatNumberWithCommas(revenueBreakdown.total.taxable)}
+                        </p>
+                        <p className="text-sm text-orange-700">Taxable Sales</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-orange-600">
+                          {revenueBreakdown.total.taxable > 0 
+                            ? ((revenueBreakdown.total.tax / revenueBreakdown.total.taxable) * 100).toFixed(2)
+                            : '0.00'}%
+                        </p>
+                        <p className="text-sm text-orange-700">Effective Tax Rate</p>
+                      </div>
+                    </div>
+                  </div>
 
-      {/* Expenses Card */}
-      <Card className="mb-8">
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <div>
-              <CardTitle>Total Expenses</CardTitle>
-              <CardDescription>
-                Total amount of all expenses
-                {isClient && startDate && endDate && (
-                  <span className="ml-1">
-                    ({format(startDate, "MMM d, yyyy")} - {format(endDate, "MMM d, yyyy")})
-                  </span>
-                )}
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        
-        <CardContent>
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-8 w-8 text-blue-500 animate-spin mr-2" />
-              <p>Loading expenses...{loadingProgress ? ` ${loadingProgress}` : ''}</p>
-            </div>
-          ) : error ? (
-            <div className="text-red-500 py-4">
-              Error: {error}
-            </div>
-          ) : (
-            <div>
-              <div className="bg-gray-100 p-4 rounded-lg mb-6">
-                <h2 className="text-lg font-medium mb-2">Total Expenses</h2>
-                <p className="text-3xl font-bold text-red-600">
-                  ${formatNumberWithCommas(totalAmount)}
-                </p>
-                <p className="text-sm text-gray-500 mt-1">
-                  Total from {transactions.filter(t => t.type === 'expense').length} expense transactions + credit card fees
-                </p>
-              </div>
-              
-              {/* Category Summary */}
-              <div className="mb-6">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-medium">Expense Categories</h3>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={toggleAllCategories}
-                    className="flex items-center gap-1 text-sm"
-                  >
-                    {expandedCategories.has('all') ? (
-                      <>
-                        <ChevronDown className="h-4 w-4" />
-                        Collapse All
-                      </>
-                    ) : (
-                      <>
-                        <ChevronRight className="h-4 w-4" />
-                        Expand All
-                      </>
-                    )}
-                  </Button>
-                </div>
-                
-                <div className="space-y-4">
-                  {categoryGroups.map(group => (
-                    <div key={group.name} className="border rounded-md overflow-hidden">
-                      {/* Category Header */}
-                      <div 
-                        className="bg-gray-50 p-3 flex justify-between items-center cursor-pointer"
-                        onClick={() => toggleCategory(group.name)}
-                      >
-                        <div className="flex items-center gap-2">
-                          {expandedCategories.has(group.name) ? (
-                            <ChevronDown className="h-4 w-4" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4" />
-                          )}
-                          <h4 className="font-medium">{group.name}</h4>
-                          <span className="text-sm text-gray-500">
-                            ({group.transactions.length} transactions)
-                          </span>
-                        </div>
-                        <div className="font-semibold text-red-600">
-                          ${formatNumberWithCommas(group.subtotal)}
+                  {/* Tax Breakdown by Source */}
+                  <div>
+                    <h3 className="text-lg font-medium mb-4">Tax Breakdown by Source</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Retail Tax */}
+                      <div className="border rounded-lg p-4">
+                        <h4 className="font-medium text-blue-800 mb-3 flex items-center gap-2">
+                          <span className="w-3 h-3 bg-blue-500 rounded-full"></span>
+                          Retail Sales Tax
+                        </h4>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span>Tax Collected:</span>
+                            <span className="font-medium">${formatNumberWithCommas(revenueBreakdown.retail.tax)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Taxable Sales:</span>
+                            <span className="font-medium">${formatNumberWithCommas(revenueBreakdown.retail.taxable)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Non-taxable Sales:</span>
+                            <span className="font-medium">
+                              ${formatNumberWithCommas(revenueBreakdown.retail.sales - revenueBreakdown.retail.taxable)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between border-t pt-2">
+                            <span>Tax Rate:</span>
+                            <span className="font-medium">
+                              {revenueBreakdown.retail.taxable > 0 
+                                ? ((revenueBreakdown.retail.tax / revenueBreakdown.retail.taxable) * 100).toFixed(2)
+                                : '0.00'}%
+                            </span>
+                          </div>
                         </div>
                       </div>
-                      
-                      {/* Category Transactions */}
-                      {expandedCategories.has(group.name) && (
-                        <div className="overflow-x-auto">
-                                                     {group.name === 'Credit Card Transaction Fees' ? (
-                             // Special UI for Credit Card Transaction Fees
-                             <div>
-                               <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                                                                    <p className="text-sm text-blue-800">
-                                     <strong>Credit Card Transaction Fees:</strong> Processing fees are automatically stored when Square and Shopify transactions are synced.
-                                     For transactions missing fee data, click &quot;Fetch Fee&quot; to retrieve actual Shopify fees from their API or calculate Square fees (2.6% + $0.10).
-                                   </p>
-                               </div>
-                               <table className="w-full border-collapse">
-                              <thead>
-                                <tr className="bg-gray-50 border-t border-b">
-                                  <th className="text-left p-3 text-sm font-medium text-gray-500">Date</th>
-                                  <th className="text-left p-3 text-sm font-medium text-gray-500">Source</th>
-                                  <th className="text-left p-3 text-sm font-medium text-gray-500">Customer</th>
-                                  <th className="text-right p-3 text-sm font-medium text-gray-500">Revenue</th>
+
+                      {/* Training Tax */}
+                      <div className="border rounded-lg p-4">
+                        <h4 className="font-medium text-purple-800 mb-3 flex items-center gap-2">
+                          <span className="w-3 h-3 bg-purple-500 rounded-full"></span>
+                          Training Sales Tax
+                        </h4>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span>Tax Collected:</span>
+                            <span className="font-medium">${formatNumberWithCommas(revenueBreakdown.training.tax)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Taxable Sales:</span>
+                            <span className="font-medium">${formatNumberWithCommas(revenueBreakdown.training.taxable)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Non-taxable Sales:</span>
+                            <span className="font-medium">
+                              ${formatNumberWithCommas(revenueBreakdown.training.sales - revenueBreakdown.training.taxable)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between border-t pt-2">
+                            <span>Tax Rate:</span>
+                            <span className="font-medium">
+                              {revenueBreakdown.training.taxable > 0 
+                                ? ((revenueBreakdown.training.tax / revenueBreakdown.training.taxable) * 100).toFixed(2)
+                                : '0.00'}%
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Tax Details Table */}
+                  <div>
+                    <h3 className="text-lg font-medium mb-4">Detailed Tax Information</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse border rounded-md">
+                        <thead>
+                          <tr className="bg-gray-50">
+                            <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Category</th>
+                            <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Total Revenue</th>
+                            <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Pre-Tax Sales</th>
+                            <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Taxable Amount</th>
+                            <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Tax Collected</th>
+                            <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Tax Rate</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr className="border-b hover:bg-blue-50">
+                            <td className="p-3 text-sm font-medium text-blue-800">Retail</td>
+                            <td className="p-3 text-sm text-right">${formatNumberWithCommas(revenueBreakdown.retail.revenue)}</td>
+                            <td className="p-3 text-sm text-right">${formatNumberWithCommas(revenueBreakdown.retail.sales)}</td>
+                            <td className="p-3 text-sm text-right">${formatNumberWithCommas(revenueBreakdown.retail.taxable)}</td>
+                            <td className="p-3 text-sm text-right font-medium">${formatNumberWithCommas(revenueBreakdown.retail.tax)}</td>
+                            <td className="p-3 text-sm text-right">
+                              {revenueBreakdown.retail.taxable > 0 
+                                ? ((revenueBreakdown.retail.tax / revenueBreakdown.retail.taxable) * 100).toFixed(2)
+                                : '0.00'}%
+                            </td>
+                          </tr>
+                          <tr className="border-b hover:bg-purple-50">
+                            <td className="p-3 text-sm font-medium text-purple-800">Training</td>
+                            <td className="p-3 text-sm text-right">${formatNumberWithCommas(revenueBreakdown.training.revenue)}</td>
+                            <td className="p-3 text-sm text-right">${formatNumberWithCommas(revenueBreakdown.training.sales)}</td>
+                            <td className="p-3 text-sm text-right">${formatNumberWithCommas(revenueBreakdown.training.taxable)}</td>
+                            <td className="p-3 text-sm text-right font-medium">${formatNumberWithCommas(revenueBreakdown.training.tax)}</td>
+                            <td className="p-3 text-sm text-right">
+                              {revenueBreakdown.training.taxable > 0 
+                                ? ((revenueBreakdown.training.tax / revenueBreakdown.training.taxable) * 100).toFixed(2)
+                                : '0.00'}%
+                            </td>
+                          </tr>
+                        </tbody>
+                        <tfoot>
+                          <tr className="bg-orange-50 border-t-2">
+                            <td className="p-3 text-sm font-bold text-orange-800">Total</td>
+                            <td className="p-3 text-sm text-right font-bold">${formatNumberWithCommas(revenueBreakdown.total.revenue)}</td>
+                            <td className="p-3 text-sm text-right font-bold">${formatNumberWithCommas(revenueBreakdown.total.sales)}</td>
+                            <td className="p-3 text-sm text-right font-bold">${formatNumberWithCommas(revenueBreakdown.total.taxable)}</td>
+                            <td className="p-3 text-sm text-right font-bold text-orange-600">${formatNumberWithCommas(revenueBreakdown.total.tax)}</td>
+                            <td className="p-3 text-sm text-right font-bold">
+                              {revenueBreakdown.total.taxable > 0 
+                                ? ((revenueBreakdown.total.tax / revenueBreakdown.total.taxable) * 100).toFixed(2)
+                                : '0.00'}%
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* LLC Tax Form Previews */}
+                  <div>
+                    <h3 className="text-lg font-medium mb-4">Tax Form Previews</h3>
+                    <div className="space-y-6">
+                      {/* Partnership Period (Jan 1 - June 10, 2025) */}
+                      <div className="border rounded-lg p-4 bg-blue-50 border-blue-200">
+                        <h4 className="font-medium text-blue-800 mb-3 flex items-center gap-2">
+                          <span className="w-3 h-3 bg-blue-500 rounded-full"></span>
+                          Partnership Period: January 1 - June 10, 2025
+                        </h4>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {/* Form 1065 Preview */}
+                          <div className="bg-white border rounded p-3">
+                            <h5 className="font-medium text-gray-800 mb-2">Form 1065 - Partnership Return</h5>
+                            <div className="space-y-1 text-sm">
+                              <div className="flex justify-between">
+                                <span>Entity Name:</span>
+                                <span className="font-medium">Daydreamers Pet Supply LLC</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Total Revenue:</span>
+                                <span className="font-medium">${formatNumberWithCommas(
+                                  (() => {
+                                    const partnershipEndDate = new Date('2025-06-10');
+                                    const partnershipRevenue = transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate <= partnershipEndDate && (t.type === 'sale' || t.type === 'training');
+                                      })
+                                      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                    return partnershipRevenue;
+                                  })()
+                                )}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Total Expenses:</span>
+                                <span className="font-medium">${formatNumberWithCommas(
+                                  (() => {
+                                    const partnershipEndDate = new Date('2025-06-10');
+                                    const partnershipExpenses = transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate <= partnershipEndDate && t.type === 'expense';
+                                      })
+                                      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                    return partnershipExpenses;
+                                  })()
+                                )}</span>
+                              </div>
+                              <div className="flex justify-between border-t pt-1">
+                                <span className="font-medium">Net Income:</span>
+                                <span className="font-bold">${formatNumberWithCommas(
+                                  (() => {
+                                    const partnershipEndDate = new Date('2025-06-10');
+                                    const revenue = transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate <= partnershipEndDate && (t.type === 'sale' || t.type === 'training');
+                                      })
+                                      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                    const expenses = transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate <= partnershipEndDate && t.type === 'expense';
+                                      })
+                                      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                    return revenue - expenses;
+                                  })()
+                                )}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* K-1 Distributions */}
+                          <div className="bg-white border rounded p-3">
+                            <h5 className="font-medium text-gray-800 mb-2">Schedule K-1 Distributions</h5>
+                            <div className="space-y-2 text-sm">
+                              <div className="bg-gray-50 p-2 rounded">
+                                <div className="font-medium text-gray-700">Geoff Vrijmoet (50%)</div>
+                                <div className="flex justify-between">
+                                  <span>Distributive Share:</span>
+                                  <span className="font-medium">${formatNumberWithCommas(
+                                    (() => {
+                                      const partnershipEndDate = new Date('2025-06-10');
+                                      const revenue = transactions
+                                        .filter(t => {
+                                          const txDate = new Date(t.date);
+                                          return txDate <= partnershipEndDate && (t.type === 'sale' || t.type === 'training');
+                                        })
+                                        .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                      const expenses = transactions
+                                        .filter(t => {
+                                          const txDate = new Date(t.date);
+                                          return txDate <= partnershipEndDate && t.type === 'expense';
+                                        })
+                                        .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                      return (revenue - expenses) * 0.5;
+                                    })()
+                                  )}</span>
+                                </div>
+                              </div>
+                              <div className="bg-gray-50 p-2 rounded">
+                                <div className="font-medium text-gray-700">Madeline (50%)</div>
+                                <div className="flex justify-between">
+                                  <span>Distributive Share:</span>
+                                  <span className="font-medium">${formatNumberWithCommas(
+                                    (() => {
+                                      const partnershipEndDate = new Date('2025-06-10');
+                                      const revenue = transactions
+                                        .filter(t => {
+                                          const txDate = new Date(t.date);
+                                          return txDate <= partnershipEndDate && (t.type === 'sale' || t.type === 'training');
+                                        })
+                                        .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                      const expenses = transactions
+                                        .filter(t => {
+                                          const txDate = new Date(t.date);
+                                          return txDate <= partnershipEndDate && t.type === 'expense';
+                                        })
+                                        .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                      return (revenue - expenses) * 0.5;
+                                    })()
+                                  )}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3 p-2 bg-blue-100 rounded text-sm text-blue-800">
+                          <strong>Note:</strong> NYS Form 204 also required for this partnership period.
+                        </div>
+                      </div>
+
+                      {/* Single-Member LLC Period (June 11, 2025 onwards) */}
+                      <div className="border rounded-lg p-4 bg-green-50 border-green-200">
+                        <h4 className="font-medium text-green-800 mb-3 flex items-center gap-2">
+                          <span className="w-3 h-3 bg-green-500 rounded-full"></span>
+                          Single-Member LLC Period: June 11, 2025 onwards
+                        </h4>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {/* Schedule C Preview */}
+                          <div className="bg-white border rounded p-3">
+                            <h5 className="font-medium text-gray-800 mb-2">Schedule C - Business Income (Geoff&apos;s Return)</h5>
+                            <div className="space-y-1 text-sm">
+                              <div className="flex justify-between">
+                                <span>Business Name:</span>
+                                <span className="font-medium">Daydreamers Pet Supply LLC</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Gross Receipts:</span>
+                                <span className="font-medium">${formatNumberWithCommas(
+                                  (() => {
+                                    const singleMemberStartDate = new Date('2025-06-11');
+                                    const singleMemberRevenue = transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate >= singleMemberStartDate && (t.type === 'sale' || t.type === 'training');
+                                      })
+                                      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                    return singleMemberRevenue;
+                                  })()
+                                )}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Total Expenses:</span>
+                                <span className="font-medium">${formatNumberWithCommas(
+                                  (() => {
+                                    const singleMemberStartDate = new Date('2025-06-11');
+                                    const singleMemberExpenses = transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate >= singleMemberStartDate && t.type === 'expense';
+                                      })
+                                      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                    // Add Madeline's contractor payments
+                                    const madelinePayments = transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate >= singleMemberStartDate && t.type === 'training';
+                                      })
+                                      .reduce((sum, t) => {
+                                        // Training revenue minus sales tax = payment to Madeline
+                                        const preTaxAmount = Number(t.preTaxAmount) || Number(t.amount) || 0;
+                                        return sum + preTaxAmount;
+                                      }, 0);
+                                    return singleMemberExpenses + madelinePayments;
+                                  })()
+                                )}</span>
+                              </div>
+                              <div className="flex justify-between border-t pt-1">
+                                <span className="font-medium">Net Profit:</span>
+                                <span className="font-bold">${formatNumberWithCommas(
+                                  (() => {
+                                    const singleMemberStartDate = new Date('2025-06-11');
+                                    const revenue = transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate >= singleMemberStartDate && (t.type === 'sale' || t.type === 'training');
+                                      })
+                                      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                    const expenses = transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate >= singleMemberStartDate && t.type === 'expense';
+                                      })
+                                      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                    const madelinePayments = transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate >= singleMemberStartDate && t.type === 'training';
+                                      })
+                                      .reduce((sum, t) => {
+                                        const preTaxAmount = Number(t.preTaxAmount) || Number(t.amount) || 0;
+                                        return sum + preTaxAmount;
+                                      }, 0);
+                                    return revenue - expenses - madelinePayments;
+                                  })()
+                                )}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 1099-NEC Preview */}
+                          <div className="bg-white border rounded p-3">
+                            <h5 className="font-medium text-gray-800 mb-2">1099-NEC for Madeline (Annual)</h5>
+                            <div className="space-y-1 text-sm">
+                              <div className="flex justify-between">
+                                <span>Contractor:</span>
+                                <span className="font-medium">Madeline (Dog Training Services)</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Total Training Sessions:</span>
+                                <span className="font-medium">{
+                                  (() => {
+                                    const singleMemberStartDate = new Date('2025-06-11');
+                                    return transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate >= singleMemberStartDate && t.type === 'training';
+                                      }).length;
+                                  })()
+                                }</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Gross Training Revenue:</span>
+                                <span className="font-medium">${formatNumberWithCommas(
+                                  (() => {
+                                    const singleMemberStartDate = new Date('2025-06-11');
+                                    return transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate >= singleMemberStartDate && t.type === 'training';
+                                      })
+                                      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+                                  })()
+                                )}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Sales Tax Withheld:</span>
+                                <span className="font-medium">${formatNumberWithCommas(
+                                  (() => {
+                                    const singleMemberStartDate = new Date('2025-06-11');
+                                    return transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate >= singleMemberStartDate && t.type === 'training';
+                                      })
+                                      .reduce((sum, t) => sum + (Number(t.taxAmount) || 0), 0);
+                                  })()
+                                )}</span>
+                              </div>
+                              <div className="flex justify-between border-t pt-1">
+                                <span className="font-medium">Payment to Madeline:</span>
+                                <span className="font-bold">${formatNumberWithCommas(
+                                  (() => {
+                                    const singleMemberStartDate = new Date('2025-06-11');
+                                    return transactions
+                                      .filter(t => {
+                                        const txDate = new Date(t.date);
+                                        return txDate >= singleMemberStartDate && t.type === 'training';
+                                      })
+                                      .reduce((sum, t) => {
+                                        const preTaxAmount = Number(t.preTaxAmount) || Number(t.amount) || 0;
+                                        return sum + preTaxAmount;
+                                      }, 0);
+                                  })()
+                                )}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3 p-2 bg-green-100 rounded text-sm text-green-800">
+                          <strong>Note:</strong> Madeline becomes independent contractor; Daydreamers handles sales tax and billing for training services.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Collapsible Training Transactions Section */}
+      <div ref={trainingRef} className="mb-8">
+        <div className="flex items-center justify-between cursor-pointer rounded-lg border border-purple-200 bg-purple-50 px-4 py-3 mb-2 sticky top-0 z-10" onClick={() => setIsTrainingCollapsed((prev) => !prev)} aria-expanded={!isTrainingCollapsed} tabIndex={0} role="button">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">🏋️</span>
+            <span className="font-semibold text-purple-900">Training Transactions</span>
+          </div>
+          <span className="ml-2">{isTrainingCollapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}</span>
+        </div>
+        <div className={`transition-all duration-300 overflow-hidden ${isTrainingCollapsed ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-[2000px] opacity-100'}`}> 
+          <Card className="mb-8 mt-0">
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle>Training Transactions</CardTitle>
+                  <CardDescription>
+                    All training sessions and revenue
+                    {isClient && startDate && endDate && (
+                      <span className="ml-1">
+                        ({format(startDate, "MMM d, yyyy")} - {format(endDate, "MMM d, yyyy")})
+                      </span>
+                    )}
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const trainingTransactions = transactions.filter(t => t.type === 'training')
+                const trainingTotal = revenueBreakdown.training.revenue
+                
+                if (loading) {
+                  return (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-8 w-8 text-blue-500 animate-spin mr-2" />
+                      <p>Loading training transactions...</p>
+                    </div>
+                  )
+                }
+                
+                if (error) {
+                  return (
+                    <div className="text-red-500 py-4">
+                      Error: {error}
+                    </div>
+                  )
+                }
+                
+                if (trainingTransactions.length === 0) {
+                  return (
+                    <div className="text-center py-8 text-gray-500">
+                      No training transactions found for the selected period.
+                    </div>
+                  )
+                }
+                
+                return (
+                  <div>
+                    <div className="bg-green-100 p-4 rounded-lg mb-6">
+                      <h2 className="text-lg font-medium mb-2">Total Training Revenue</h2>
+                      <p className="text-3xl font-bold text-green-600">
+                        ${formatNumberWithCommas(trainingTotal)}
+                      </p>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Total from {trainingTransactions.length} training sessions
+                      </p>
+                    </div>
+                    
+                                     <div className="overflow-x-auto">
+                       <table className="w-full border-collapse border rounded-md">
+                         <thead>
+                           <tr className="bg-gray-50">
+                             <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Date</th>
+                             <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Client</th>
+                             <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Dog</th>
+                             <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Trainer</th>
+                             <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Agency</th>
+                             <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Sales Tax</th>
+                             <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Revenue</th>
+                           </tr>
+                         </thead>
+                         <tbody>
+                           {trainingTransactions.map(transaction => (
+                             <tr key={transaction._id} className="border-b hover:bg-gray-50">
+                               <td className="p-3 text-sm">{formatTransactionDate(transaction.date)}</td>
+                               <td className="p-3 text-sm">{transaction.clientName || 'N/A'}</td>
+                               <td className="p-3 text-sm">{transaction.dogName || 'N/A'}</td>
+                               <td className="p-3 text-sm">{transaction.trainer || 'N/A'}</td>
+                               <td className="p-3 text-sm">{transaction.trainingAgency || 'N/A'}</td>
+                               <td className="p-3 text-sm">
+                                 <TaxCell transaction={transaction} />
+                               </td>
+                               <td className="p-3 text-sm text-right">
+                                 <RevenueCell transaction={transaction} />
+                               </td>
+                             </tr>
+                           ))}
+                         </tbody>
+                       </table>
+                     </div>
+                  </div>
+                )
+              })()}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Collapsible Expenses Section */}
+      <div ref={expensesRef} className="mb-8">
+        <div className="flex items-center justify-between cursor-pointer rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 mb-2 sticky top-0 z-10" onClick={() => setIsExpensesCollapsed((prev) => !prev)} aria-expanded={!isExpensesCollapsed} tabIndex={0} role="button">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">💸</span>
+            <span className="font-semibold text-blue-900">Total Expenses</span>
+          </div>
+          <span className="ml-2">{isExpensesCollapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}</span>
+        </div>
+        <div className={`transition-all duration-300 overflow-hidden ${isExpensesCollapsed ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-[2000px] opacity-100'}`}> 
+          <Card className="mb-8 mt-0">
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle>Total Expenses</CardTitle>
+                  <CardDescription>
+                    Total amount of all expenses
+                    {isClient && startDate && endDate && (
+                      <span className="ml-1">
+                        ({format(startDate, "MMM d, yyyy")} - {format(endDate, "MMM d, yyyy")})
+                      </span>
+                    )}
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            
+            <CardContent>
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-8 w-8 text-blue-500 animate-spin mr-2" />
+                  <p>Loading expenses...{loadingProgress ? ` ${loadingProgress}` : ''}</p>
+                </div>
+              ) : error ? (
+                <div className="text-red-500 py-4">
+                  Error: {error}
+                </div>
+              ) : (
+                <div>
+                  <div className="bg-gray-100 p-4 rounded-lg mb-6">
+                    <h2 className="text-lg font-medium mb-2">Total Expenses</h2>
+                    <p className="text-3xl font-bold text-red-600">
+                      ${formatNumberWithCommas(totalAmount)}
+                    </p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Total from {transactions.filter(t => t.type === 'expense').length} expense transactions + credit card fees
+                    </p>
+                  </div>
+                  
+                  {/* Category Summary */}
+                  <div className="mb-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-medium">Expense Categories</h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={toggleAllCategories}
+                        className="flex items-center gap-1 text-sm"
+                      >
+                        {expandedCategories.has('all') ? (
+                          <>
+                            <ChevronDown className="h-4 w-4" />
+                            Collapse All
+                          </>
+                        ) : (
+                          <>
+                            <ChevronRight className="h-4 w-4" />
+                            Expand All
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    
+                    <div className="space-y-4">
+                      {categoryGroups.map(group => (
+                        <div key={group.name} className="border rounded-md overflow-hidden">
+                          {/* Category Header */}
+                          <div 
+                            className="bg-gray-50 p-3 flex justify-between items-center cursor-pointer"
+                            onClick={() => toggleCategory(group.name)}
+                          >
+                            <div className="flex items-center gap-2">
+                              {expandedCategories.has(group.name) ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                              <h4 className="font-medium">{group.name}</h4>
+                              <span className="text-sm text-gray-500">
+                                ({group.transactions.length} transactions)
+                              </span>
+                            </div>
+                            <div className="font-semibold text-red-600">
+                              ${formatNumberWithCommas(group.subtotal)}
+                            </div>
+                          </div>
+                          
+                          {/* Category Transactions */}
+                          {expandedCategories.has(group.name) && (
+                            <div className="overflow-x-auto">
+                                                         {group.name === 'Credit Card Transaction Fees' ? (
+                                 // Special UI for Credit Card Transaction Fees
+                                 <div>
+                                   <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                                                        <p className="text-sm text-blue-800">
+                                       <strong>Credit Card Transaction Fees:</strong> Processing fees are automatically stored when Square and Shopify transactions are synced.
+                                       For transactions missing fee data, click &quot;Fetch Fee&quot; to retrieve actual Shopify fees from their API or calculate Square fees (2.6% + $0.10).
+                                     </p>
+                                 </div>
+                                 <table className="w-full border-collapse">
+                                <thead>
+                                  <tr className="bg-gray-50 border-t border-b">
+                                    <th className="text-left p-3 text-sm font-medium text-gray-500">Date</th>
+                                    <th className="text-left p-3 text-sm font-medium text-gray-500">Source</th>
+                                    <th className="text-left p-3 text-sm font-medium text-gray-500">Customer</th>
+                                    <th className="text-right p-3 text-sm font-medium text-gray-500">Revenue</th>
                                                                      <th className="text-right p-3 text-sm font-medium text-gray-500">Processing Fee</th>
                                    <th className="text-center p-3 text-sm font-medium text-gray-500">Actions</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {ccFeeTransactions.map(transaction => (
-                                  <tr key={transaction._id} className="border-b hover:bg-gray-50">
-                                    <td className="p-3 text-sm">{formatTransactionDate(transaction.date)}</td>
-                                    <td className="p-3 text-sm">
-                                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                        transaction.source === 'shopify' 
-                                          ? 'bg-green-100 text-green-800' 
-                                          : 'bg-blue-100 text-blue-800'
-                                      }`}>
-                                        {transaction.source.charAt(0).toUpperCase() + transaction.source.slice(1)}
-                                      </span>
-                                    </td>
-                                    <td className="p-3 text-sm">{transaction.customer || transaction.clientName || 'N/A'}</td>
-                                    <td className="p-3 text-sm text-right font-medium">
-                                      ${formatNumberWithCommas(transaction.amount)}
-                                    </td>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {ccFeeTransactions.map(transaction => (
+                                    <tr key={transaction._id} className="border-b hover:bg-gray-50">
+                                      <td className="p-3 text-sm">{formatTransactionDate(transaction.date)}</td>
+                                      <td className="p-3 text-sm">
+                                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                          transaction.source === 'shopify' 
+                                            ? 'bg-green-100 text-green-800' 
+                                            : 'bg-blue-100 text-blue-800'
+                                        }`}>
+                                          {transaction.source.charAt(0).toUpperCase() + transaction.source.slice(1)}
+                                        </span>
+                                      </td>
+                                      <td className="p-3 text-sm">{transaction.customer || transaction.clientName || 'N/A'}</td>
+                                      <td className="p-3 text-sm text-right font-medium">
+                                        ${formatNumberWithCommas(transaction.amount)}
+                                      </td>
                                                                                                               <td className="p-3 text-sm text-right">
                                        <span className={`font-medium ${
                                          transaction.source === 'shopify' ? 'text-green-600' : 'text-blue-600'
@@ -1660,6 +2210,36 @@ export default function ProfitLossPage() {
           )}
         </CardContent>
       </Card>
+    </div>
+
+      {/* Sticky Bottom Bar */}
+      <div className="fixed bottom-0 left-0 w-full z-50 flex justify-center items-center bg-white/80 backdrop-blur border-t border-blue-200 py-3 gap-4">
+        <button
+          className="flex items-center gap-2 px-6 py-2 rounded-full border-2 border-purple-500 text-purple-900 font-semibold bg-white shadow hover:bg-purple-50 transition-all focus:outline-none focus:ring-2 focus:ring-purple-400"
+          onClick={() => handleSectionToggle('training')}
+          aria-label="Go to Training Transactions"
+        >
+          <span className="text-2xl">🏋️</span>
+          <span>Training</span>
+        </button>
+        <button
+          className="flex items-center gap-2 px-6 py-2 rounded-full border-2 border-orange-500 text-orange-900 font-semibold bg-white shadow hover:bg-orange-50 transition-all focus:outline-none focus:ring-2 focus:ring-orange-400"
+          onClick={() => handleSectionToggle('taxes')}
+          aria-label="Go to Tax Summary"
+        >
+          <span className="text-2xl">📊</span>
+          <span>Taxes</span>
+        </button>
+        <button
+          className="flex items-center gap-2 px-6 py-2 rounded-full border-2 border-blue-500 text-blue-900 font-semibold bg-white shadow hover:bg-blue-50 transition-all focus:outline-none focus:ring-2 focus:ring-blue-400"
+          onClick={() => handleSectionToggle('expenses')}
+          aria-label="Go to Total Expenses"
+        >
+          <span className="text-2xl">💸</span>
+          <span>Expenses</span>
+        </button>
+      </div>
+    </div>
     </div>
   )
 } 

@@ -78,6 +78,18 @@ export async function PATCH(
     // Log the incoming update request
     console.log(`[API] Updating transaction ${params.id}:`, updates);
     
+    // Convert invoiceEmailId to ObjectId if it's being updated
+    if (updates.invoiceEmailId) {
+      if (!mongoose.Types.ObjectId.isValid(updates.invoiceEmailId)) {
+        console.error('[API] Invalid invoiceEmailId provided:', updates.invoiceEmailId);
+        return NextResponse.json(
+          { error: 'Invalid invoiceEmailId format' },
+          { status: 400 }
+        );
+      }
+      updates.invoiceEmailId = new mongoose.Types.ObjectId(updates.invoiceEmailId);
+    }
+    
     // Validate amount if it's being updated
     if (updates.amount !== undefined) {
       const numericAmount = Number(updates.amount);

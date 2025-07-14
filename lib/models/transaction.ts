@@ -21,6 +21,7 @@ interface IBaseTransaction extends Document {
   updatedAt: Date;
   platformMetadata?: IPlatformMetadata;
   emailId?: string; // Gmail message ID for Amex transactions
+  draft: boolean;
 }
 
 interface ILineItem {
@@ -106,6 +107,7 @@ interface IExpenseTransaction extends IBaseTransaction {
   purchaseCategory?: string;
   isRecurring?: boolean;
   supplierOrderNumber?: string;
+  invoiceEmailId?: Types.ObjectId; // Reference to linked invoice email
   // Optional products from parsed invoice emails
   products?: Array<{
     productId?: Types.ObjectId;
@@ -148,6 +150,10 @@ const BaseTransactionSchema = new Schema<IBaseTransaction>({
   notes: { type: String },
   platformMetadata: PlatformMetadataSchema,
   emailId: { type: String }, // Gmail message ID for Amex transactions
+  draft: {
+    type: Boolean,
+    default: false,
+  },
 }, {
   timestamps: true,
   discriminatorKey: 'type'
@@ -223,6 +229,7 @@ const ExpenseTransactionSchema = new Schema<IExpenseTransaction>({
   purchaseCategory: { type: String },
   supplierOrderNumber: { type: String },
   isRecurring: { type: Boolean },
+  invoiceEmailId: { type: Schema.Types.ObjectId, ref: 'InvoiceEmail' },
   // Add products field for invoice email products
   products: [EmailProductSchema]
 });

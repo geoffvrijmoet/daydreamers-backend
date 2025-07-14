@@ -1,4 +1,21 @@
 
+### Invoice Email to Transaction Linking
+
+-   **Implemented Invoice Email to Transaction Linking Feature**
+    -   Added functionality to link invoice emails to existing expense transactions for better data organization.
+    -   Created bi-directional relationship between invoice emails and transactions using `transactionId` and `invoiceEmailId` fields.
+    -   Added "Link to Transaction" button to invoice email cards in the transactions page.
+    -   Created modal interface that displays filterable list of expense transactions for selection.
+    -   Implemented API endpoints for updating both invoice emails and transactions to maintain referential integrity.
+    -   Added visual indicators to show when invoice emails are linked to transactions.
+    -   Fixed ObjectId conversion in transaction API to ensure proper MongoDB references.
+    -   Added visual badges showing linked status on both invoice emails and transactions.
+    -   Updated button text to show "Change Link" when email is already linked.
+    -   Fixed UI issue where all "Link to Transaction" buttons showed "linking" state - now only the specific email being linked shows the loading state.
+    -   Enhanced "Save as Correct" functionality to update existing linked transactions instead of creating new ones when an invoice email is already linked to a transaction.
+    -   Added visual indicators and dropdown functionality for transactions with products - shows product count badge and expandable product list with details.
+    -   Files changed: `lib/models/transaction.ts`, `lib/models/InvoiceEmail.ts`, `app/transactions/page.tsx`, `app/api/invoiceemails/[id]/route.ts`, `app/api/transactions/[id]/route.ts`.
+
 ### Transaction Processing Enhancements
 
 -   **Enhanced Order Total Editing**
@@ -330,3 +347,50 @@
     -   Custom dates set to 12:00 AM start and 11:59 PM end in Eastern timezone.
     -   Enhanced date calculation using `date-fns` for accurate day differences.
     -   Files changed: `components/home-sync-button.tsx`.
+
+### Combined Invoice Email + Transaction Super Cards (Latest)
+
+-   **Implemented Unified Super Card Component**
+    -   Created `TransactionSuperCard` component that combines transaction and invoice email data in a single, enhanced card.
+    -   Features gradient background with purple/blue/indigo color scheme and glowing border effects on hover.
+    -   Displays both transaction and invoice email information with clear visual separation and badges.
+    -   Maintains all existing functionality: AI parsing, manual parsing, linking, product display, email body viewing.
+    -   Enhanced styling includes backdrop blur effects, rounded corners, and smooth transitions.
+    -   Shows extracted data prominently with color-coded badges for different field types.
+    -   Responsive design with proper mobile/desktop layout considerations.
+    -   Files changed: `components/transaction-super-card.tsx`, `app/transactions/page.tsx`.
+
+-   **Enhanced Transaction Page Rendering Logic**
+    -   Modified transactions page to automatically detect when a transaction has a linked invoice email.
+    -   Renders the super card instead of separate transaction and invoice email cards for linked items.
+    -   Maintains backward compatibility - unlinked transactions and emails still render as separate cards.
+    -   Seamless integration with existing filtering, parsing, and management functionality.
+    -   Files changed: `app/transactions/page.tsx`.
+
+-   **Added Email Context Display for Parsed Products**
+    -   Enhanced the `ParsedProduct` interface to include `emailContext` field for storing surrounding text.
+    -   Modified `extractProductsFromEmail` function to capture 50 characters before and after each product name match.
+    -   Added new "Email Context" column to the parsed products table showing where each product was found in the email.
+    -   Context is displayed in a monospace font with gray background for easy reading.
+    -   Added fallback display for products without context (shows "No context").
+    -   Updated AI parsing to include basic context information for AI-parsed products.
+    -   Files changed: `app/transactions/page.tsx`.
+
+## 🎯 Current To-Do Items / Questions for AI
+
+-   **Fix Linter Errors in Email Context Feature**
+    -   There are TypeScript linter errors in the `extractProductsFromEmail` function after adding email context capture
+    -   Need to resolve syntax issues around lines 1124-1137 in `app/transactions/page.tsx`
+    -   The email context feature is implemented but needs syntax fixes to compile properly
+
+## ✅ Recently Completed Tasks
+
+-   **Enhanced Invoice Email Linking with Potential Matches**
+    -   Added intelligent potential match detection when linking invoice emails to transactions
+    -   System now finds expense transactions within ±3 days of invoice email date with exact amount match
+    -   Potential matches are displayed at the top of the linking modal with green styling and "Potential Match" badges
+    -   Uses parsed total amount from invoice email (if available) to find exact amount matches
+    -   Added invoice email details section at top of modal showing date, amount, and supplier for quick reference
+    -   Enhanced potential matches with visual indicators for exact matches (date, amount, supplier) using green highlighting and checkmarks
+    -   Maintains all existing functionality while providing smart suggestions for faster linking
+    -   Files changed: `app/transactions/page.tsx`
