@@ -25,6 +25,7 @@ interface BaseTransactionDocument {
   emailId?: string;
   merchant?: string;
   description?: string;
+  draft?: boolean;
 }
 
 // Sale transaction specific fields
@@ -169,7 +170,8 @@ export async function POST(request: Request) {
       dogName,
       sessionNotes, // Could also be part of notes
       revenue,
-      trainingAgency
+      trainingAgency,
+      draft // Add draft field
     } = body
     
     // Base transaction object
@@ -182,6 +184,11 @@ export async function POST(request: Request) {
       createdAt: new Date(),
       updatedAt: new Date()
     };
+
+    // Add draft field if provided
+    if (draft !== undefined) {
+      transactionToSave.draft = draft;
+    }
 
     if (cardLast4) transactionToSave.cardLast4 = cardLast4;
     if (emailId) transactionToSave.emailId = emailId;

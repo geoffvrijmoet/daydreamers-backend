@@ -86,13 +86,48 @@ type TrainingPayloadExtended = Omit<TrainingFormData, 'date'> & BasePayload & { 
 
 type TransactionPayload = SalePayload | ExpensePayload | TrainingPayloadExtended;
 
+// Add Transaction type for edit mode
+interface Transaction {
+  _id: string
+  date: string
+  type: 'sale' | 'expense' | 'training'
+  amount: number
+  customer?: string
+  description?: string
+  supplier?: string
+  purchaseCategory?: string
+  products?: Array<{
+    name: string
+    quantity: number
+    unitPrice: number
+    totalPrice: number
+  }>
+  lineItems?: Array<{
+    name: string
+    quantity: number
+    price: number
+  }>
+  source: 'manual' | 'shopify' | 'square' | 'amex'
+  paymentMethod?: string
+  isTaxable?: boolean
+  preTaxAmount?: number
+  taxAmount?: number
+  tip?: number
+  discount?: number
+  shipping?: number
+  draft?: boolean
+  email?: string
+  notes?: string
+}
+
 type NewSaleModalProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSuccess?: () => void
+  onSuccess?: (updatedTransaction: Transaction) => void
+  transactionToEdit?: Transaction | null
 }
 
-function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProps) {
+function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit }: NewSaleModalProps) {
   const [products, setProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [popularProducts, setPopularProducts] = useState<Product[]>([])
@@ -125,25 +160,41 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
   const [showProducts, setShowProducts] = useState(false);
   const [isDraft, setIsDraft] = useState(false);
 
-  // Reset form when modal opens
+  // Reset or prefill form when modal opens
   useEffect(() => {
     if (open) {
-      setFormData({
-        type: 'sale',
-        date: new Date().toISOString().split('T')[0],
-        amount: 0,
-        source: 'manual' as Source,
-        paymentMethod: 'Venmo',
-        customer: '',
-        email: '',
-        isTaxable: true,
-        preTaxAmount: 0,
-        taxAmount: 0,
-        products: [],
-        tip: 0,
-        discount: 0,
-        shipping: 0,
-      } as SaleFormData)
+      if (transactionToEdit) {
+        // Prefill all fields from transactionToEdit
+        setFormData({
+          ...transactionToEdit,
+          products: (transactionToEdit.products || []).map(p => ({
+            productId: undefined,
+            isTaxable: true,
+            ...p
+          })),
+          type: transactionToEdit.type as TransactionType,
+          date: transactionToEdit.date.split('T')[0],
+        } as TransactionFormData);
+        setIsDraft(!!transactionToEdit.draft);
+      } else {
+        setFormData({
+          type: 'sale',
+          date: new Date().toISOString().split('T')[0],
+          amount: 0,
+          source: 'manual' as Source,
+          paymentMethod: 'Venmo',
+          customer: '',
+          email: '',
+          isTaxable: true,
+          preTaxAmount: 0,
+          taxAmount: 0,
+          products: [],
+          tip: 0,
+          discount: 0,
+          shipping: 0,
+        } as SaleFormData)
+        setIsDraft(false);
+      }
       // Also reset create product state if modal reopens
       setIsCreatingProduct(false);
       setNewProductFormData({});
@@ -151,7 +202,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
       setProductSearchTerm('');
       setIsDraft(false); // Reset draft state
     }
-  }, [open])
+  }, [open, transactionToEdit])
 
   // Fetch products on component mount
   useEffect(() => {
@@ -489,131 +540,32 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
       console.log('Client: handleSubmit: preTaxAmount:', formData.type === 'sale' ? ((formData as SaleFormData).preTaxAmount).toFixed(2) : 'N/A');
       console.log('Client: handleSubmit: taxAmount:', formData.type === 'sale' ? ((formData as SaleFormData).taxAmount).toFixed(2) : 'N/A');
 
-      const response = await fetch('/api/transactions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      })
-
-      console.log('Client: handleSubmit: API Response Status:', response.status);
-      const responseData = await response.json();
-      console.log('Client: handleSubmit: API Response Data:', responseData);
-
-      if (!response.ok) {
-         const errorText = await response.text();
-         console.error("API Error:", errorText);
-        throw new Error(`Failed to create transaction: ${response.status} ${errorText.substring(0, 100)}`)
-      }
-
-      // Create corresponding expense transaction for Madeline's 1099 payment (training sessions only)
-      if (payload.type === 'training') {
-        const trainingData = formData as TrainingFormData;
-        const trainingDate = new Date(formData.date);
-        const singleMemberStartDate = new Date('2025-06-11');
-        
-        // Only create expense for single-member LLC period (June 11, 2025 onwards)
-        if (trainingDate >= singleMemberStartDate) {
-          console.log('Creating corresponding expense transaction for Madeline\'s 1099 payment...');
-          
-          const expensePayload: ExpensePayload = {
-            type: 'expense',
-            date: date.toISOString(),
-            amount: trainingData.sale, // Pre-tax amount goes to Madeline
-            source: 'manual' as Source,
-            paymentMethod: 'Manual', // Default payment method for contractor payments
-            supplier: 'Madeline - Dog Training Services',
-            supplierOrderNumber: '', // Not applicable for contractor payments
-            purchaseCategory: 'Contractor Payments',
-            products: [],
-            notes: `1099 payment for training session: ${trainingData.clientName} - ${trainingData.dogName}`
-          };
-
-          try {
-            console.log('Creating expense transaction:', expensePayload);
-            const expenseResponse = await fetch('/api/transactions', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(expensePayload),
-            });
-
-            if (!expenseResponse.ok) {
-              const expenseErrorText = await expenseResponse.text();
-              console.error("Failed to create expense transaction for Madeline:", expenseErrorText);
-              // Don't throw here - we don't want to fail the whole operation if expense creation fails
-              alert(`Training transaction created successfully, but failed to create corresponding expense transaction for Madeline: ${expenseErrorText.substring(0, 100)}`);
-            } else {
-              console.log('Successfully created expense transaction for Madeline\'s 1099 payment');
-            }
-          } catch (expenseError) {
-            console.error('Error creating expense transaction for Madeline:', expenseError);
-            alert('Training transaction created successfully, but failed to create corresponding expense transaction for Madeline.');
-          }
-        }
-      }
-
-      // --- Update lastPurchasePrice for expense products --- 
-      if (payload.type === 'expense' && payload.products && payload.products.length > 0) {
-        console.log('Updating last purchase prices for expense products...');
-        const updatePromises = payload.products.map(item => {
-          if (!item.productId) {
-            console.warn('Skipping price update for item without productId:', item.name);
-            return Promise.resolve(); // Skip if no productId
-          }
-          return fetch(`/api/products/${item.productId}`, {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ lastPurchasePrice: item.unitPrice })
-          })
-          .then(updateResponse => {
-            if (!updateResponse.ok) {
-              console.error(`Failed to update lastPurchasePrice for product ${item.productId} (${item.name}): ${updateResponse.status}`);
-              // Decide if you want to throw an error here or just log it
-            }
-          })
-          .catch(updateError => {
-             console.error(`Error updating lastPurchasePrice for product ${item.productId} (${item.name}):`, updateError);
-             // Decide if you want to throw an error here or just log it
-          });
+      let response;
+      let updatedTransaction: Transaction;
+      if (transactionToEdit) {
+        // Edit/finalize mode: PUT to /api/transactions/[id]
+        response = await fetch(`/api/transactions/${transactionToEdit._id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...formData, draft: false }),
         });
-
-        // Wait for all updates to attempt (optional, depending on desired UX)
-        try {
-          await Promise.all(updatePromises);
-           console.log('Finished attempting price updates.');
-        } catch (error) {
-          // This catch block might be redundant if individual promises don't throw
-          console.error('An error occurred during one or more price updates.', error);
-        }
+        if (!response.ok) throw new Error('Failed to update transaction');
+        updatedTransaction = await response.json();
+      } else {
+        // Create mode
+        response = await fetch('/api/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...formData, draft: isDraft }),
+        });
+        if (!response.ok) throw new Error('Failed to create transaction');
+        updatedTransaction = await response.json();
       }
-      // --- End of price update logic ---
-
-      // Reset form and close modal
-      setFormData({
-        type: 'sale',
-        date: new Date().toISOString().split('T')[0],
-        amount: 0,
-        source: 'manual' as Source,
-        paymentMethod: 'Venmo',
-        customer: '',
-        email: '',
-        isTaxable: true,
-        preTaxAmount: 0,
-        taxAmount: 0,
-        products: [],
-        tip: 0,
-        discount: 0,
-        shipping: 0,
-      })
-      onOpenChange(false)
-      if (onSuccess) onSuccess()
+      if (onSuccess) onSuccess(updatedTransaction);
+      onOpenChange(false);
     } catch (error) {
       console.error('Error creating transaction:', error)
+      alert('Failed to save transaction');
     }
   }
 
@@ -1380,279 +1332,273 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
           {/* Product Section (Visible for Sale and Expense) */}
           {(formData.type === 'sale' || formData.type === 'expense') && (
              <div className="space-y-4">
-                {/* Only show expand/collapse button on mobile */}
-                {!isDesktop && (
-                  <button
-                    type="button"
-                    onClick={() => setShowProducts(prev => !prev)}
-                    className="flex items-center gap-1 text-md font-medium text-blue-600 hover:underline"
-                  >
-                    {showProducts ? 'Hide Products ▲' : (formData.type === 'sale' ? 'Add Products to Sale ▼' : 'Add Products Purchased ▼')}
-                  </button>
+                <button
+                  type="button"
+                  onClick={() => setShowProducts(prev => !prev)}
+                  className="flex items-center gap-1 text-md font-medium text-blue-600 hover:underline"
+                >
+                  {showProducts ? 'Hide Products ▲' : (formData.type === 'sale' ? 'Add Products to Sale ▼' : 'Add Products Purchased ▼')}
+                </button>
+
+                {showProducts && (
+                <>
+                
+                {/* Quick-add popular products (mobile only) */}
+                {!isDesktop && popularProducts.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {popularProducts.map((product) => (
+                      <button
+                        key={product._id}
+                        type="button"
+                        onClick={() => handleAddProduct(product)}
+                        className="px-3 py-1 rounded-full bg-gray-100 text-sm hover:bg-blue-100 border border-gray-300"
+                      >
+                        {product.name}
+                      </button>
+                    ))}
+                  </div>
                 )}
 
-                {/* Always show products section on desktop, or if expanded on mobile */}
-                {(isDesktop || showProducts) && (
-                  <>
-                    {/* Quick-add popular products (mobile only) */}
-                    {!isDesktop && popularProducts.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {popularProducts.map((product) => (
-                          <button
-                            key={product._id}
-                            type="button"
-                            onClick={() => handleAddProduct(product)}
-                            className="px-3 py-1 rounded-full bg-gray-100 text-sm hover:bg-blue-100 border border-gray-300"
-                          >
-                            {product.name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                <div>
+                  <input
+                    type="text"
+                    placeholder="Search products by name or SKU..."
+                    value={productSearchTerm}
+                    onChange={(e) => {
+                      const searchTerm = e.target.value;
+                      setProductSearchTerm(searchTerm);
+                      const lowerSearchTerm = searchTerm.toLowerCase();
+                      const filtered = products.filter(p =>
+                        p.name.toLowerCase().includes(lowerSearchTerm) ||
+                        (p.sku?.toLowerCase() || '').includes(lowerSearchTerm)
+                      );
+                      setFilteredProducts(filtered);
+                    }}
+                    className="w-full px-4 py-2 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                </div>
 
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="Search products by name or SKU..."
-                        value={productSearchTerm}
-                        onChange={(e) => {
-                          const searchTerm = e.target.value;
-                          setProductSearchTerm(searchTerm);
-                          const lowerSearchTerm = searchTerm.toLowerCase();
-                          const filtered = products.filter(p =>
-                            p.name.toLowerCase().includes(lowerSearchTerm) ||
-                            (p.sku?.toLowerCase() || '').includes(lowerSearchTerm)
-                          );
-                          setFilteredProducts(filtered);
-                        }}
-                        onFocus={() => setFilteredProducts(products)}
-                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                      />
-                      {/* Suggestions dropdown (always for desktop, on search for mobile) */}
-                      {productSearchTerm && filteredProducts.length > 0 && (
-                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded shadow-lg max-h-60 overflow-y-auto">
-                          {filteredProducts.map((product) => (
-                            <div
-                              key={product._id}
-                              onClick={() => {
-                                handleAddProduct(product);
-                                setProductSearchTerm('');
-                                setFilteredProducts(products);
-                              }}
-                              className="p-2 hover:bg-blue-50 cursor-pointer"
-                            >
-                              <div className="font-medium">{product.name}</div>
-                              <div className="text-xs text-gray-500">SKU: {product.sku}</div>
-                            </div>
-                          ))}
-                        </div>
+                {/* Product Suggestions List */}
+                <div className="max-h-[200px] overflow-y-auto space-y-1 border rounded p-2">
+                  {filteredProducts.map((product) => (
+                    <button
+                      key={product._id ?? product.sku ?? product.name}
+                      type="button"
+                      onClick={() => handleAddProduct(product)}
+                      className="w-full flex items-center justify-between p-2 rounded hover:bg-blue-50 focus:outline-none"
+                    >
+                      <span className="text-sm text-left">{product.name}</span>
+                      {typeof product.price === 'number' && !isNaN(product.price) && (
+                        <span className="text-xs text-gray-500 ml-2">${product.price.toFixed(2)}</span>
                       )}
-                    </div>
+                    </button>
+                  ))}
+                </div>
 
-                    {/* Show 'Create Product' button for Expenses if term entered and no exact match */}
-                    {formData.type === 'expense' && 
-                     productSearchTerm.trim() && 
-                     !isCreatingProduct && // Don't show if already creating
-                     !filteredProducts.some(p => p.name.toLowerCase() === productSearchTerm.trim().toLowerCase()) && (
-                       <div className="mt-2 text-center">
-                         <Button 
-                           type="button" 
-                           variant="outline"
-                           size="sm"
-                           onClick={() => {
-                             setIsCreatingProduct(true); // Show the new product form
-                             // Reset checkbox state when starting a new creation
-                             setIsIngredientChecked(false); 
-                             setNewProductFormData({ 
-                               // Initialize without isIngredient field
-                               name: productSearchTerm.trim(),
-                               sku: productSearchTerm.trim().toLowerCase().replace(/\s+/g, '-').substring(0, 30),
-                               category: 'Uncategorized', 
-                               price: 0, 
-                               lastPurchasePrice: 0, 
-                               stock: 0,
-                               active: true,
-                               baseProductName: productSearchTerm.trim(),
-                               variantName: 'Default',
-                               minimumStock: 0,
-                               averageCost: 0,
-                               costHistory: [],
-                               totalSpent: 0,
-                               totalPurchased: 0,
-                               platformMetadata: [],
-                               syncStatus: { lastSyncAttempt: '', lastSuccessfulSync: '', errors: [] },
-                               // Ensure other potentially required Partial<Product> fields have defaults
-                               description: '',
-                               barcode: '',
-                               supplier: '',
-                               isProxied: false,
-                             }); 
-                           }}
-                           className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                         >
-                           Create &quot;{productSearchTerm.trim()}&quot; as new product
-                         </Button>
-                       </div>
-                     )}
+                {/* Show 'Create Product' button for Expenses if term entered and no exact match */}
+                {formData.type === 'expense' && 
+                 productSearchTerm.trim() && 
+                 !isCreatingProduct && // Don't show if already creating
+                 !filteredProducts.some(p => p.name.toLowerCase() === productSearchTerm.trim().toLowerCase()) && (
+                   <div className="mt-2 text-center">
+                     <Button 
+                       type="button" 
+                       variant="outline"
+                       size="sm"
+                       onClick={() => {
+                         setIsCreatingProduct(true); // Show the new product form
+                         // Reset checkbox state when starting a new creation
+                         setIsIngredientChecked(false); 
+                         setNewProductFormData({ 
+                           // Initialize without isIngredient field
+                           name: productSearchTerm.trim(),
+                           sku: productSearchTerm.trim().toLowerCase().replace(/\s+/g, '-').substring(0, 30),
+                           category: 'Uncategorized', 
+                           price: 0, 
+                           lastPurchasePrice: 0, 
+                           stock: 0,
+                           active: true,
+                           baseProductName: productSearchTerm.trim(),
+                           variantName: 'Default',
+                           minimumStock: 0,
+                           averageCost: 0,
+                           costHistory: [],
+                           totalSpent: 0,
+                           totalPurchased: 0,
+                           platformMetadata: [],
+                           syncStatus: { lastSyncAttempt: '', lastSuccessfulSync: '', errors: [] },
+                           // Ensure other potentially required Partial<Product> fields have defaults
+                           description: '',
+                           barcode: '',
+                           supplier: '',
+                           isProxied: false,
+                         }); 
+                       }}
+                       className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                     >
+                       Create &quot;{productSearchTerm.trim()}&quot; as new product
+                     </Button>
+                   </div>
+                 )}
 
-                     {/* --- New Product Form --- */}
-                     {isCreatingProduct && (
-                       <div className="mt-4 p-4 border rounded bg-gray-50 space-y-3">
-                         <h4 className="text-md font-medium mb-2">Create New Product</h4>
-                         {/* Add Name Input */}
-                          <div>
-                           <label className="block text-sm font-medium text-gray-700">Product Name</label>
-                           <Input 
-                             type="text" 
-                             value={newProductFormData.name || ''}
-                             onChange={(e) => setNewProductFormData(prev => ({ ...prev, name: e.target.value }))}
-                             className="mt-1 block w-full"
-                             required // Make Name required
-                           />
-                         </div>
-                         {/* Existing fields: SKU, Cost, Ingredient Checkbox, Retail Price */}
-                          <div>
-                           <label className="block text-sm font-medium text-gray-700">SKU</label>
-                           <Input 
-                             type="text" 
-                             value={newProductFormData.sku || ''}
-                             onChange={(e) => setNewProductFormData(prev => ({ ...prev, sku: e.target.value }))}
-                             className="mt-1 block w-full"
-                             required // Make SKU required
-                           />
-                         </div>
-                         <div>
-                           <label className="block text-sm font-medium text-gray-700">Cost ($)</label>
-                           <Input 
-                             type="number" 
-                             step="0.01"
-                             min="0"
-                             value={newProductFormData.lastPurchasePrice || 0} // Map to lastPurchasePrice
-                             onChange={(e) => setNewProductFormData(prev => ({ ...prev, lastPurchasePrice: parseFloat(e.target.value) || 0 }))}
-                             className="mt-1 block w-full"
-                             required // Make Cost required
-                           />
-                         </div>
-                         <div className="flex items-center mt-2">
-                            <input
-                              id="is-ingredient-checkbox"
-                              type="checkbox"
-                              checked={isIngredientChecked} // Use separate state
-                              onChange={(e) => {
-                                setIsIngredientChecked(e.target.checked); // Update separate state
-                                // Optionally clear/set price in main form data if needed when box changes
-                                if (e.target.checked) {
-                                   setNewProductFormData(prev => ({ ...prev, price: 0 }));
-                                }
-                              }}
-                              className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                            />
-                            <label htmlFor="is-ingredient-checkbox" className="ml-2 block text-sm text-gray-900">
-                              Is Ingredient? (No Retail Price)
-                            </label>
-                          </div>
-
-                         {/* Conditionally Render Retail Price Input based on separate state */}
-                         {!isIngredientChecked && (
-                           <div>
-                             <label className="block text-sm font-medium text-gray-700">Retail Price ($)</label>
-                             <Input 
-                               type="number" 
-                               step="0.01"
-                               min="0"
-                               value={newProductFormData.price || 0}
-                               onChange={(e) => setNewProductFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
-                               className="mt-1 block w-full"
-                               inputMode="decimal"
-                             />
-                           </div>
-                         )}
-                         
-                         <div className="flex justify-end gap-2 pt-2">
-                           <Button 
-                             type="button" 
-                             variant="ghost" 
-                             onClick={() => {
-                                setIsCreatingProduct(false);
-                                setIsIngredientChecked(false); // Reset checkbox state on cancel
-                             }}
-                           >
-                             Cancel
-                           </Button>
-                           <Button 
-                             type="button" 
-                             onClick={handleSaveNewProduct}
-                             className="bg-blue-500 hover:bg-blue-600 text-white"
-                           >
-                             Save Product
-                           </Button>
-                         </div>
-                       </div>
-                     )}
-                     {/* --- End New Product Form --- */}
-
-                    {/* Selected Products List (Hide when creating new product) */}
-                    {!isCreatingProduct && (formData.type === 'sale' || formData.type === 'expense') && formData.products && formData.products.length > 0 && (
-                      <div ref={selectedProductsRef} className="space-y-2 sticky bottom-14 left-0 right-0 bg-white border-t pt-2 max-h-[40vh] overflow-y-auto">
-                        <h4 className="text-sm font-medium">Selected Products</h4>
-                        {formData.products.map((product, index) => (
-                          <div key={index} className="flex flex-col gap-1 p-1 border rounded">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium">{product.name}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveProduct(index)}
-                                className="text-red-500 hover:text-red-700 px-2"
-                              >
-                                ×
-                              </button>
-                            </div>
-
-                            {/* Controls row */}
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <input
-                                type="number"
-                                step="0.01"
-                                min="0.01"
-                                value={product.quantity}
-                                onChange={(e) => handleUpdateProductQuantity(index, parseFloat(e.target.value) || 0)}
-                                onFocus={(e) => (e.target as HTMLInputElement).select()}
-                                className="w-20 px-2 py-1 border rounded"
-                                inputMode="decimal"
-                              />
-                              {/* Unit Price (expense only) */}
-                              <span className="text-sm">@</span>
-                              <input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                value={product.unitPrice}
-                                onChange={(e) => handleUpdateProductUnitPrice(index, parseFloat(e.target.value) || 0)}
-                                onFocus={(e) => (e.target as HTMLInputElement).select()}
-                                className="w-20 px-2 py-1 border rounded text-sm text-right"
-                                aria-label={`Unit price for ${product.name}`}
-                                disabled={false}
-                                inputMode="decimal"
-                              />
-                              <span className="text-sm">= $</span>
-                              <input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                value={(product.totalPrice ?? (product.unitPrice * product.quantity)).toFixed(2)}
-                                onChange={(e) => handleUpdateProductTotalPrice(index, parseFloat(e.target.value) || 0)}
-                                onFocus={(e) => (e.target as HTMLInputElement).select()}
-                                className="w-24 px-2 py-1 border rounded text-sm font-medium text-right"
-                                aria-label={`Total price for ${product.name}`}
-                                disabled={false}
-                                inputMode="decimal"
-                              />
-                            </div>
-                          </div>
-                        ))}
+                 {/* --- New Product Form --- */}
+                 {isCreatingProduct && (
+                   <div className="mt-4 p-4 border rounded bg-gray-50 space-y-3">
+                     <h4 className="text-md font-medium mb-2">Create New Product</h4>
+                     {/* Add Name Input */}
+                      <div>
+                       <label className="block text-sm font-medium text-gray-700">Product Name</label>
+                       <Input 
+                         type="text" 
+                         value={newProductFormData.name || ''}
+                         onChange={(e) => setNewProductFormData(prev => ({ ...prev, name: e.target.value }))}
+                         className="mt-1 block w-full"
+                         required // Make Name required
+                       />
+                     </div>
+                     {/* Existing fields: SKU, Cost, Ingredient Checkbox, Retail Price */}
+                      <div>
+                       <label className="block text-sm font-medium text-gray-700">SKU</label>
+                       <Input 
+                         type="text" 
+                         value={newProductFormData.sku || ''}
+                         onChange={(e) => setNewProductFormData(prev => ({ ...prev, sku: e.target.value }))}
+                         className="mt-1 block w-full"
+                         required // Make SKU required
+                       />
+                     </div>
+                     <div>
+                       <label className="block text-sm font-medium text-gray-700">Cost ($)</label>
+                       <Input 
+                         type="number" 
+                         step="0.01"
+                         min="0"
+                         value={newProductFormData.lastPurchasePrice || 0} // Map to lastPurchasePrice
+                         onChange={(e) => setNewProductFormData(prev => ({ ...prev, lastPurchasePrice: parseFloat(e.target.value) || 0 }))}
+                         className="mt-1 block w-full"
+                         required // Make Cost required
+                       />
+                     </div>
+                     <div className="flex items-center mt-2">
+                        <input
+                          id="is-ingredient-checkbox"
+                          type="checkbox"
+                          checked={isIngredientChecked} // Use separate state
+                          onChange={(e) => {
+                            setIsIngredientChecked(e.target.checked); // Update separate state
+                            // Optionally clear/set price in main form data if needed when box changes
+                            if (e.target.checked) {
+                               setNewProductFormData(prev => ({ ...prev, price: 0 }));
+                            }
+                          }}
+                          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <label htmlFor="is-ingredient-checkbox" className="ml-2 block text-sm text-gray-900">
+                          Is Ingredient? (No Retail Price)
+                        </label>
                       </div>
-                    )}
-                  </>
+
+                     {/* Conditionally Render Retail Price Input based on separate state */}
+                     {!isIngredientChecked && (
+                       <div>
+                         <label className="block text-sm font-medium text-gray-700">Retail Price ($)</label>
+                         <Input 
+                           type="number" 
+                           step="0.01"
+                           min="0"
+                           value={newProductFormData.price || 0}
+                           onChange={(e) => setNewProductFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                           className="mt-1 block w-full"
+                           inputMode="decimal"
+                         />
+                       </div>
+                     )}
+                     
+                     <div className="flex justify-end gap-2 pt-2">
+                       <Button 
+                         type="button" 
+                         variant="ghost" 
+                         onClick={() => {
+                            setIsCreatingProduct(false);
+                            setIsIngredientChecked(false); // Reset checkbox state on cancel
+                         }}
+                       >
+                         Cancel
+                       </Button>
+                       <Button 
+                         type="button" 
+                         onClick={handleSaveNewProduct}
+                         className="bg-blue-500 hover:bg-blue-600 text-white"
+                       >
+                         Save Product
+                       </Button>
+                     </div>
+                   </div>
+                 )}
+                 {/* --- End New Product Form --- */}
+
+                {/* Selected Products List (Hide when creating new product) */}
+                {!isCreatingProduct && (formData.type === 'sale' || formData.type === 'expense') && formData.products && formData.products.length > 0 && (
+                  <div ref={selectedProductsRef} className="space-y-2 sticky bottom-14 left-0 right-0 bg-white border-t pt-2 max-h-[40vh] overflow-y-auto">
+                    <h4 className="text-sm font-medium">Selected Products</h4>
+                    {formData.products.map((product, index) => (
+                      <div key={index} className="flex flex-col gap-1 p-1 border rounded">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium">{product.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveProduct(index)}
+                            className="text-red-500 hover:text-red-700 px-2"
+                          >
+                            ×
+                          </button>
+                        </div>
+
+                        {/* Controls row */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            value={product.quantity}
+                            onChange={(e) => handleUpdateProductQuantity(index, parseFloat(e.target.value) || 0)}
+                            onFocus={(e) => (e.target as HTMLInputElement).select()}
+                            className="w-20 px-2 py-1 border rounded"
+                            inputMode="decimal"
+                          />
+                          {/* Unit Price (expense only) */}
+                          <span className="text-sm">@</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={product.unitPrice}
+                            onChange={(e) => handleUpdateProductUnitPrice(index, parseFloat(e.target.value) || 0)}
+                            onFocus={(e) => (e.target as HTMLInputElement).select()}
+                            className="w-20 px-2 py-1 border rounded text-sm text-right"
+                            aria-label={`Unit price for ${product.name}`}
+                            disabled={false}
+                            inputMode="decimal"
+                          />
+                          <span className="text-sm">= $</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={(product.totalPrice ?? (product.unitPrice * product.quantity)).toFixed(2)}
+                            onChange={(e) => handleUpdateProductTotalPrice(index, parseFloat(e.target.value) || 0)}
+                            onFocus={(e) => (e.target as HTMLInputElement).select()}
+                            className="w-24 px-2 py-1 border rounded text-sm font-medium text-right"
+                            aria-label={`Total price for ${product.name}`}
+                            disabled={false}
+                            inputMode="decimal"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                </>
                 )}
              </div>
           )}
@@ -1755,7 +1701,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess }: NewSaleModalProp
               type="submit"
               className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
-              Create Transaction
+              {transactionToEdit ? (transactionToEdit.draft ? 'Finalize Sale' : 'Update Transaction') : 'Create Transaction'}
             </button>
           </div>
         </form>

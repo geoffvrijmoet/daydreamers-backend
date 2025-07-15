@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { HomeSyncButton } from './home-sync-button'
 import { formatInEasternTime } from '@/lib/utils/dates'
+import { NewSaleModal } from './new-transaction-modal'
 
 // Add some custom styles for animations
 const fadeInAnimation = `
@@ -83,6 +84,8 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [calculatingProfitId, setCalculatingProfitId] = useState<string | null>(null);
   const [successMessageIds, setSuccessMessageIds] = useState<{[key: string]: boolean}>({});
+  const [finalizeTransactionId, setFinalizeTransactionId] = useState<string | null>(null);
+  const [markDraftTransactionId, setMarkDraftTransactionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -261,6 +264,14 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
     }
   };
 
+  // Find the transaction being finalized
+  const finalizeTransaction = finalizeTransactionId
+    ? transactions.find(t => t._id === finalizeTransactionId)
+    : null;
+  const markDraftTransaction = markDraftTransactionId
+    ? transactions.find(t => t._id === markDraftTransactionId)
+    : null;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <style dangerouslySetInnerHTML={{ __html: fadeInAnimation }} />
@@ -382,9 +393,17 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                             {transaction.type === 'sale' && transaction.draft && (
                               <button
                                 className="ml-2 px-2 py-0.5 text-xs rounded bg-yellow-200 text-yellow-900 border border-yellow-300 hover:bg-yellow-300 transition"
-                                onClick={() => {/* open finalize modal, to be implemented next */}}
+                                onClick={() => setFinalizeTransactionId(transaction._id)}
                               >
                                 Finalize
+                              </button>
+                            )}
+                            {transaction.type === 'sale' && !transaction.draft && (
+                              <button
+                                className="ml-2 px-2 py-0.5 text-xs rounded border border-yellow-400 text-yellow-700 bg-white hover:bg-yellow-100 transition"
+                                onClick={() => setMarkDraftTransactionId(transaction._id)}
+                              >
+                                Mark as Draft
                               </button>
                             )}
                           </div>
@@ -509,6 +528,28 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
           </div>
         )}
       </DialogContent>
+
+      {/* Finalize Modal using NewSaleModal */}
+      <NewSaleModal
+        open={!!finalizeTransactionId}
+        onOpenChange={open => { if (!open) setFinalizeTransactionId(null); }}
+        transactionToEdit={finalizeTransaction || undefined}
+        onSuccess={updatedTx => {
+          setTransactions(prev => prev.map(t => t._id === updatedTx._id ? updatedTx : t));
+          setFinalizeTransactionId(null);
+        }}
+      />
+      {/* Mark as Draft Modal using NewSaleModal */}
+      <NewSaleModal
+        open={!!markDraftTransactionId}
+        onOpenChange={open => { if (!open) setMarkDraftTransactionId(null); }}
+        transactionToEdit={markDraftTransaction ? { ...markDraftTransaction, draft: true } : undefined}
+        onSuccess={updatedTx => {
+          setTransactions(prev => prev.map(t => t._id === updatedTx._id ? updatedTx : t));
+          setMarkDraftTransactionId(null);
+        }}
+      />
+      {/* End Finalize Modal */}
     </Dialog>
   )
 } 
