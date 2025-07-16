@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ISyncState extends Document {
-  source: 'square' | 'shopify' | 'gmail';
+  source: 'square' | 'shopify' | 'gmail' | 'gmail-amex';
   lastSuccessfulSync: string;
   lastSyncStatus: 'success' | 'failed' | 'pending';
   lastSyncResults?: {
@@ -16,7 +16,7 @@ const SyncStateSchema = new Schema<ISyncState>({
   source: { 
     type: String, 
     required: true,
-    enum: ['square', 'shopify', 'gmail'],
+    enum: ['square', 'shopify', 'gmail', 'gmail-amex'],
     unique: true
   },
   lastSuccessfulSync: {

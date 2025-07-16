@@ -15,6 +15,7 @@ interface Transaction {
   emailId?: string
   purchaseCategory?: string
   invoiceEmailId?: string
+  draft?: boolean
   products?: Array<{
     productId?: string
     name: string
@@ -170,6 +171,16 @@ export function TransactionSuperCard({
                 <span className="px-3 py-1 text-sm font-semibold rounded-full bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-sm">
                   📧 Invoice Email
                 </span>
+                {transaction.draft && (
+                  <span className="px-3 py-1 text-sm font-semibold rounded-full bg-gradient-to-r from-yellow-500 to-orange-500 text-white shadow-sm">
+                    📝 Draft
+                  </span>
+                )}
+                {transaction.source === 'amex' && (
+                  <span className="px-3 py-1 text-sm font-semibold rounded-full bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-sm">
+                    💳 Amex
+                  </span>
+                )}
                 {transaction.products && transaction.products.length > 0 && (
                   <span className="px-3 py-1 text-sm font-semibold rounded-full bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-sm">
                     📦 {transaction.products.length} Products

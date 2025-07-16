@@ -17,6 +17,7 @@ interface Transaction {
   emailId?: string;
   purchaseCategory?: string;
   invoiceEmailId?: string; // Reference to linked invoice email
+  draft?: boolean; // Indicates if this is a draft transaction
 
   // Products for sales and expenses
   products?: Array<{
@@ -414,7 +415,7 @@ export default function TransactionsPage() {
         setShowAmexResults(false);
       }, 10000);
       
-    } catch (error) {
+    } catch (error) { // eslint-disable-line @typescript-eslint/no-unused-vars
       setAmexFetchResult({
         success: false,
         message: 'Network error while fetching Amex transactions'
@@ -1300,7 +1301,7 @@ export default function TransactionsPage() {
           throw new Error('Failed to update linked transaction');
         }
         
-        const result = await response.json();
+        const result = await response.json(); // eslint-disable-line @typescript-eslint/no-unused-vars
         
         // Update local transactions state
         setTransactions(prev => 
@@ -1769,11 +1770,11 @@ export default function TransactionsPage() {
       // Find potential matches based on date proximity and exact amount
       const emailDate = new Date(email.date);
       const emailAmount = parsingResults[email._id]?.total?.value 
-        ? parseFloat(parsingResults[email._id].total.value) 
+        ? parseFloat(parsingResults[email._id].total.value!) 
         : null;
       
       if (emailAmount) {
-        const potentialMatches = allExpenseTransactions.filter(transaction => {
+        const potentialMatches = allExpenseTransactions.filter((transaction: Transaction) => {
           const transactionDate = new Date(transaction.date);
           const dateDiff = Math.abs(emailDate.getTime() - transactionDate.getTime());
           const daysDiff = dateDiff / (1000 * 60 * 60 * 24);
@@ -2094,6 +2095,16 @@ export default function TransactionsPage() {
                           return transaction.merchant || transaction.supplier || transaction.customer || transaction.clientName || transaction.trainingAgency || 'Unknown';
                         })()}
                       </p>
+                      {transaction.draft && (
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200">
+                          📝 Draft
+                        </span>
+                      )}
+                      {transaction.source === 'amex' && (
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                          💳 Amex
+                        </span>
+                      )}
                       {transaction.invoiceEmailId && (
                         <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800 border border-blue-200">
                           📧 Has Invoice Email
@@ -3125,7 +3136,7 @@ export default function TransactionsPage() {
                     <span className="text-blue-700 font-medium">Amount:</span>
                     <span className="ml-2 text-blue-900">
                       {parsingResults[linkingEmail._id]?.total?.value 
-                        ? `$${parseFloat(parsingResults[linkingEmail._id].total.value).toFixed(2)}`
+                        ? `$${parseFloat(parsingResults[linkingEmail._id].total.value!).toFixed(2)}`
                         : 'Not parsed'
                       }
                     </span>
@@ -3153,7 +3164,7 @@ export default function TransactionsPage() {
                     const emailDate = new Date(linkingEmail.date).toLocaleDateString();
                     const transactionDate = new Date(transaction.date).toLocaleDateString();
                     const emailAmount = parsingResults[linkingEmail._id]?.total?.value 
-                      ? parseFloat(parsingResults[linkingEmail._id].total.value) 
+                      ? parseFloat(parsingResults[linkingEmail._id].total.value!) 
                       : null;
                     const emailSupplier = linkingEmail.supplier?.name || linkingEmail.from.split('<')[0].trim();
                     const transactionSupplier = transaction.supplier || 'Unknown Supplier';
@@ -3201,7 +3212,7 @@ export default function TransactionsPage() {
                           </div>
                           <button
                             className="mt-1 px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-                            disabled={linkingEmailId}
+                            disabled={!!linkingEmailId}
                           >
                             {linkingEmailId ? 'Linking...' : 'Link'}
                           </button>
@@ -3254,7 +3265,7 @@ export default function TransactionsPage() {
                         </div>
                         <button
                           className="mt-1 px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
-                          disabled={linkingEmailId}
+                          disabled={!!linkingEmailId}
                         >
                           {linkingEmailId ? 'Linking...' : 'Link'}
                         </button>

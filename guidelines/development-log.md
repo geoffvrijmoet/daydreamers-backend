@@ -385,6 +385,24 @@
 
 ## ✅ Recently Completed Tasks
 
+-   **Implemented Amex Email Checking in Cron Job**
+    -   Extended the check-emails cron job to automatically process Amex purchase notification emails
+    -   Added `'gmail-amex'` source type to SyncState model for tracking Amex email sync state separately
+    -   Implemented Amex email parsing that extracts purchase amount, merchant name, and card details
+    -   Creates draft expense transactions (`type: 'expense'`, `source: 'amex'`, `draft: true`) from parsed Amex emails
+    -   Maintains separate sync tracking for supplier invoices (`gmail`) and Amex emails (`gmail-amex`)
+    -   Prevents duplicate processing by checking for existing transactions with matching `emailId`
+    -   Enhanced cron job response to include separate counts for supplier emails and Amex transactions
+    -   Files changed: `lib/models/SyncState.ts`, `app/api/cron/check-emails/route.ts`
+
+-   **Enhanced Transaction Display for Draft Transactions**
+    -   Added `draft` field to Transaction interfaces in both main transactions page and TransactionSuperCard component
+    -   Added visual indicators for draft transactions with yellow "📝 Draft" badges
+    -   Added special purple "💳 Amex" badges for Amex-sourced transactions to distinguish them from other drafts
+    -   Draft transactions now display prominently with clear visual indicators in both regular transaction cards and super cards
+    -   Ensures users can easily identify which transactions are drafts (including Amex email imports) vs finalized transactions
+    -   Files changed: `app/transactions/page.tsx`, `components/transaction-super-card.tsx`
+
 -   **Enhanced Invoice Email Linking with Potential Matches**
     -   Added intelligent potential match detection when linking invoice emails to transactions
     -   System now finds expense transactions within ±3 days of invoice email date with exact amount match
