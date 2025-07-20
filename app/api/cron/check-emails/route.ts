@@ -118,9 +118,17 @@ export const maxDuration = 60
 export async function GET(request: Request) {
   try {
     console.log('Starting cron job execution...')
-    // Verify the request is coming from Vercel Cron
+    
+    // Get sinceDays parameter from URL
+    const url = new URL(request.url)
+    const sinceDays = url.searchParams.get('sinceDays')
+    
+    // Verify the request is coming from Vercel Cron OR allow manual triggers
     const authHeader = request.headers.get('authorization')
-    if (!authHeader || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    const isCronRequest = authHeader && authHeader === `Bearer ${process.env.CRON_SECRET}`
+    const isManualRequest = !authHeader // Allow manual requests without auth header
+    
+    if (!isCronRequest && !isManualRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
@@ -147,10 +155,10 @@ export async function GET(request: Request) {
     const gmail = google.gmail({ version: 'v1', auth: gmailService.getAuth() })
 
     // Process supplier invoice emails
-    const supplierResults = await processSupplierEmails(gmail)
+    const supplierResults = await processSupplierEmails(gmail, sinceDays)
     
     // Process Amex emails
-    const amexResults = await processAmexEmails(gmail)
+    const amexResults = await processAmexEmails(gmail, sinceDays)
 
     // Combine results
     const totalEmailsProcessed = supplierResults.emailsProcessed + amexResults.transactionsProcessed
@@ -176,7 +184,7 @@ export async function GET(request: Request) {
 }
 
 // Helper function to process supplier invoice emails
-async function processSupplierEmails(gmail: GmailService) {
+async function processSupplierEmails(gmail: GmailService, sinceDays: string | null) {
   console.log('Processing supplier invoice emails...')
   
   // Get suppliers with invoice email configuration
@@ -190,12 +198,25 @@ async function processSupplierEmails(gmail: GmailService) {
     return { emailsProcessed: 0, emails: [] }
   }
 
-  // Get last sync time for supplier emails
-  const syncState = await SyncStateModel.findOne({ source: 'gmail' })
-  const sevenDaysAgo = new Date()
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-  const lastSyncTime = syncState?.lastSuccessfulSync || sevenDaysAgo.toISOString()
-  const afterTimestamp = Math.floor(new Date(lastSyncTime).getTime() / 1000)
+  // Use sinceDays parameter to override sync state when provided
+  let afterTimestamp: number
+  if (sinceDays) {
+    // Manual timeframe selection - always look back exactly the specified number of days
+    const daysToLookBack = parseInt(sinceDays)
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - daysToLookBack)
+    afterTimestamp = Math.floor(startDate.getTime() / 1000)
+    console.log(`Manual timeframe: Looking back ${daysToLookBack} days from ${startDate.toISOString()}`)
+  } else {
+    // Automatic sync - use last sync time or default to 7 days
+    const syncState = await SyncStateModel.findOne({ source: 'gmail' })
+    const daysToLookBack = 7
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - daysToLookBack)
+    const lastSyncTime = syncState?.lastSuccessfulSync || startDate.toISOString()
+    afterTimestamp = Math.floor(new Date(lastSyncTime).getTime() / 1000)
+    console.log(`Automatic sync: Using last sync time or default ${daysToLookBack} days`)
+  }
   
   // Process each supplier's emails
   const allProcessedEmails = []
@@ -273,15 +294,28 @@ async function processSupplierEmails(gmail: GmailService) {
 }
 
 // Helper function to process Amex emails
-async function processAmexEmails(gmail: GmailService) {
+async function processAmexEmails(gmail: GmailService, sinceDays: string | null) {
   console.log('Processing Amex emails...')
   
-  // Get last sync time for Amex emails
-  const amexSyncState = await SyncStateModel.findOne({ source: 'gmail-amex' })
-  const sevenDaysAgo = new Date()
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-  const lastSyncTime = amexSyncState?.lastSuccessfulSync || sevenDaysAgo.toISOString()
-  const afterTimestamp = Math.floor(new Date(lastSyncTime).getTime() / 1000)
+  // Use sinceDays parameter to override sync state when provided
+  let afterTimestamp: number
+  if (sinceDays) {
+    // Manual timeframe selection - always look back exactly the specified number of days
+    const daysToLookBack = parseInt(sinceDays)
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - daysToLookBack)
+    afterTimestamp = Math.floor(startDate.getTime() / 1000)
+    console.log(`Manual timeframe: Looking back ${daysToLookBack} days from ${startDate.toISOString()}`)
+  } else {
+    // Automatic sync - use last sync time or default to 7 days
+    const amexSyncState = await SyncStateModel.findOne({ source: 'gmail-amex' })
+    const daysToLookBack = 7
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - daysToLookBack)
+    const lastSyncTime = amexSyncState?.lastSuccessfulSync || startDate.toISOString()
+    afterTimestamp = Math.floor(new Date(lastSyncTime).getTime() / 1000)
+    console.log(`Automatic sync: Using last sync time or default ${daysToLookBack} days`)
+  }
   
   // Build the Gmail search query for Amex emails
   const query = `from:AmericanExpress@welcome.americanexpress.com subject:"Large Purchase Approved" after:${afterTimestamp}`
@@ -310,8 +344,6 @@ async function processAmexEmails(gmail: GmailService) {
     // Check if we've already processed this email
     const existingTransaction = await TransactionModel.findOne({ 
       emailId: message.id,
-      source: 'amex',
-      draft: true
     })
 
     if (existingTransaction) {

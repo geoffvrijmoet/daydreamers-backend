@@ -361,6 +361,9 @@ export default function TransactionsPage() {
   } | null>(null);
   const [showAmexResults, setShowAmexResults] = useState(false);
 
+  const [updatingDraftId, setUpdatingDraftId] = useState<string | null>(null);
+  const [searchingTxnId, setSearchingTxnId] = useState<string | null>(null);
+
   // Helper function to scroll to a specific Amex transaction
   const scrollToAmexTransaction = (emailId: string) => {
     const element = document.querySelector(`[data-amex-email-id="${emailId}"]`);
@@ -377,36 +380,50 @@ export default function TransactionsPage() {
     }
   };
 
-  // Helper function to fetch Amex transactions
-  const fetchAmexTransactions = async (sinceDays: number) => {
+  // Helper function to check emails (both Amex and invoice emails)
+  const checkEmails = async (sinceDays: number) => {
     setAmexFetching(true);
     setAmexFetchResult(null);
     setShowAmexResults(false);
     
     try {
-      const res = await fetch(`/api/amex?sinceDays=${sinceDays}`);
+      const res = await fetch(`/api/cron/check-emails?sinceDays=${sinceDays}`);
       const json = await res.json();
       
       if (!res.ok || json.error) {
         setAmexFetchResult({
           success: false,
-          message: json.error || 'Failed to fetch Amex transactions'
+          message: json.error || 'Failed to check emails'
         });
         return;
       }
       
-      const fetched: AmexTransaction[] = json.transactions || [];
-      const existingIds = new Set<string>(transactions.map(t => t.emailId).filter(Boolean) as string[]);
-      const unique = fetched.filter(f => !existingIds.has(f.emailId));
+      // Handle Amex transactions
+      const fetchedAmex: AmexTransaction[] = json.amexTransactions || [];
+      const existingAmexIds = new Set<string>(transactions.map(t => t.emailId).filter(Boolean) as string[]);
+      const uniqueAmex = fetchedAmex.filter(f => !existingAmexIds.has(f.emailId));
       
-      setAmexTxns(unique);
+      setAmexTxns(uniqueAmex);
+      
+      // Handle invoice emails - refresh the invoice emails list
+      if (json.supplierEmails && json.supplierEmails.length > 0) {
+        // Refresh invoice emails by refetching them
+        const invoiceRes = await fetch('/api/invoiceemails');
+        if (invoiceRes.ok) {
+          const invoiceData = await invoiceRes.json();
+          setInvoiceEmails(invoiceData.invoiceEmails);
+        }
+      }
+      
       setActiveFilter('invoices');
+      
+      const totalNew = uniqueAmex.length + (json.supplierEmails?.length || 0);
       
       setAmexFetchResult({
         success: true,
-        message: `Found ${unique.length} new Amex transactions`,
-        count: unique.length,
-        transactions: unique
+        message: `Found ${totalNew} new items (${uniqueAmex.length} Amex, ${json.supplierEmails?.length || 0} invoice emails)`,
+        count: totalNew,
+        transactions: uniqueAmex
       });
       setShowAmexResults(true);
       
@@ -418,7 +435,7 @@ export default function TransactionsPage() {
     } catch (error) { // eslint-disable-line @typescript-eslint/no-unused-vars
       setAmexFetchResult({
         success: false,
-        message: 'Network error while fetching Amex transactions'
+        message: 'Network error while checking emails'
       });
     } finally {
       setAmexFetching(false);
@@ -1848,6 +1865,64 @@ export default function TransactionsPage() {
     }
   };
 
+  // Helper function to search for specific invoice email for a transaction
+  const searchSpecificInvoiceEmail = async (transaction: Transaction) => {
+    if (!transaction.supplier || !transaction.date) {
+      alert('Transaction must have supplier and date to search for invoice email');
+      return;
+    }
+
+    setSearchingTxnId(transaction._id);
+    try {
+      // Create a targeted search query for this specific transaction
+      const transactionDate = new Date(transaction.date);
+      const daysBefore = 7; // Search 7 days before transaction date
+      const daysAfter = 3;  // Search 3 days after transaction date
+      
+      const startDate = new Date(transactionDate);
+      startDate.setDate(startDate.getDate() - daysBefore);
+      
+      const endDate = new Date(transactionDate);
+      endDate.setDate(endDate.getDate() + daysAfter);
+      
+      // Build search parameters focusing on this transaction's details
+      const searchParams = new URLSearchParams({
+        supplier: transaction.supplier,
+        amount: transaction.amount.toString(),
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString()
+      });
+      
+      const response = await fetch(`/api/invoiceemails/search?${searchParams}`);
+      const result = await response.json();
+      
+      if (!response.ok || result.error) {
+        alert(result.error || 'Failed to search for invoice email');
+        return;
+      }
+      
+      if (result.invoiceEmails && result.invoiceEmails.length > 0) {
+        // Refresh invoice emails list to show newly found emails
+        const invoiceRes = await fetch('/api/invoiceemails');
+        if (invoiceRes.ok) {
+          const invoiceData = await invoiceRes.json();
+          setInvoiceEmails(invoiceData.invoiceEmails);
+        }
+        
+        alert(`Found ${result.invoiceEmails.length} potential invoice email(s) for this transaction. Check the invoice emails list.`);
+        setActiveFilter('invoices');
+      } else {
+        alert('No invoice emails found for this transaction in the specified date range.');
+      }
+      
+    } catch (error) {
+      console.error('Error searching for specific invoice email:', error);
+      alert('Failed to search for invoice email. Please try again.');
+    } finally {
+      setSearchingTxnId(null);
+    }
+  };
+
   return (
     <div className="p-4">
       <h1 className="text-2xl font-bold mb-4">Transactions & Invoices</h1>
@@ -1869,14 +1944,14 @@ export default function TransactionsPage() {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              Fetching...
+              Checking...
             </span>
           ) : (
-            'Find Amex Transactions'
+            'Check Emails'
           )}
         </button>
         
-        {/* Amex fetch result feedback */}
+        {/* Email check result feedback */}
         {amexFetchResult && (
           <div className={`mt-2 p-3 rounded-lg text-sm ${
             amexFetchResult.success 
@@ -1942,7 +2017,7 @@ export default function TransactionsPage() {
                 const currentYear = new Date().getUTCFullYear();
                 const yearStart = new Date(Date.UTC(currentYear, 0, 1));
                 const daysSinceYearStart = Math.floor((Date.now() - yearStart.getTime()) / (1000 * 60 * 60 * 24));
-                fetchAmexTransactions(daysSinceYearStart);
+                checkEmails(daysSinceYearStart);
               }}
               className="block w-full text-left px-4 py-2 text-sm hover:bg-blue-50 border-b border-gray-100"
             >This Year</button>
@@ -1951,7 +2026,7 @@ export default function TransactionsPage() {
                 key={days}
                 onClick={() => {
                   setShowAmexMenu(false);
-                  fetchAmexTransactions(days);
+                  checkEmails(days);
                 }}
                 className="block w-full text-left px-4 py-2 text-sm hover:bg-blue-50"
               >Last {days} days</button>
@@ -2095,10 +2170,65 @@ export default function TransactionsPage() {
                           return transaction.merchant || transaction.supplier || transaction.customer || transaction.clientName || transaction.trainingAgency || 'Unknown';
                         })()}
                       </p>
-                      {transaction.draft && (
-                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200">
-                          📝 Draft
-                        </span>
+                      {transaction.draft === true ? (
+                        <>
+                          <button
+                            className="ml-2 px-2 py-1 text-xs rounded bg-green-200 text-green-800 hover:bg-green-300 disabled:opacity-50"
+                            disabled={updatingDraftId === transaction._id}
+                            onClick={async () => {
+                              setUpdatingDraftId(transaction._id);
+                              try {
+                                const res = await fetch(`/api/transactions/${transaction._id}`, {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ draft: false }),
+                                });
+                                if (!res.ok) throw new Error('Failed to update');
+                                setTransactions(prev =>
+                                  prev.map(t =>
+                                    t._id === transaction._id ? { ...t, draft: false } : t
+                                  )
+                                );
+                              } catch {
+                                alert('Failed to update draft status');
+                              } finally {
+                                setUpdatingDraftId(null);
+                              }
+                            }}
+                          >
+                            {updatingDraftId === transaction._id ? 'Updating…' : 'Mark as Final'}
+                          </button>
+                          <span className="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200">
+                            📝 Draft
+                          </span>
+                        </>
+                      ) : (
+                        <button
+                          className="ml-2 px-2 py-1 text-xs rounded bg-yellow-200 text-yellow-800 hover:bg-yellow-300 disabled:opacity-50"
+                          disabled={updatingDraftId === transaction._id}
+                          onClick={async () => {
+                            setUpdatingDraftId(transaction._id);
+                            try {
+                              const res = await fetch(`/api/transactions/${transaction._id}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ draft: true }),
+                              });
+                              if (!res.ok) throw new Error('Failed to update');
+                              setTransactions(prev =>
+                                prev.map(t =>
+                                  t._id === transaction._id ? { ...t, draft: true } : t
+                                )
+                              );
+                            } catch {
+                              alert('Failed to update draft status');
+                            } finally {
+                              setUpdatingDraftId(null);
+                            }
+                          }}
+                        >
+                          {updatingDraftId === transaction._id ? 'Updating…' : 'Mark as Draft'}
+                        </button>
                       )}
                       {transaction.source === 'amex' && (
                         <span className="px-2 py-1 text-xs font-medium rounded-full bg-purple-100 text-purple-800 border border-purple-200">
@@ -2114,6 +2244,15 @@ export default function TransactionsPage() {
                         <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800 border border-green-200">
                           📦 {transaction.products.length} Products
                         </span>
+                      )}
+                      {transaction.type === 'expense' && !transaction.invoiceEmailId && transaction.supplier && (
+                        <button
+                          className="ml-2 px-2 py-1 text-xs rounded bg-orange-200 text-orange-800 hover:bg-orange-300 disabled:opacity-50"
+                          disabled={searchingTxnId === transaction._id}
+                          onClick={() => searchSpecificInvoiceEmail(transaction)}
+                        >
+                          {searchingTxnId === transaction._id ? 'Searching...' : '🔍 Find Invoice Email'}
+                        </button>
                       )}
                     </div>
                     <p className="text-sm text-gray-600">
@@ -3280,4 +3419,4 @@ export default function TransactionsPage() {
       )}
     </div>
   );
-} 
+}

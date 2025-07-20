@@ -12,6 +12,14 @@ export async function PUT(
     const updateData = await request.json()
     delete updateData._id
 
+    // Convert date fields to Date objects if they're strings (same logic as POST route)
+    if (updateData.date && typeof updateData.date === 'string') {
+      updateData.date = new Date(updateData.date)
+    }
+    if (updateData.createdAt && typeof updateData.createdAt === 'string') {
+      updateData.createdAt = new Date(updateData.createdAt)
+    }
+
     const result = await mongoose.connection.db!.collection('transactions').updateOne(
       { _id: new mongoose.Types.ObjectId(params.id) },
       { 

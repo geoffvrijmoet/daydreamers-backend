@@ -379,11 +379,50 @@
 ## 🎯 Current To-Do Items / Questions for AI
 
 -   **Fix Linter Errors in Email Context Feature**
+-   **Fix syntax errors in transactions page** - There are persistent TypeScript syntax errors in the email checking functionality that need to be resolved
     -   There are TypeScript linter errors in the `extractProductsFromEmail` function after adding email context capture
     -   Need to resolve syntax issues around lines 1124-1137 in `app/transactions/page.tsx`
     -   The email context feature is implemented but needs syntax fixes to compile properly
 
 ## ✅ Recently Completed Tasks
+
+-   **Completely Redesigned Product List with Card-Based Layout**
+    -   Replaced the old dropdown-based product list with a modern card-based grid layout
+    -   Products are now grouped by `baseProductName` with one card per product group
+    -   Each card shows the product name, variant count, total stock, total value, and average price
+    -   Cards are clickable to expand/collapse and show individual variants
+    -   Added visual indicators for low stock (amber triangle) and hidden products (gray badge)
+    -   Variants are displayed in a clean, organized layout when expanded
+    -   Quick edit functionality for stock and price directly on variant cards
+    -   Cost and profit analysis shown for each variant
+    -   Responsive grid layout (1 column on mobile, 2 on tablet, 3 on desktop)
+    -   Enhanced empty state with icon and helpful messaging
+    -   Files changed: `components/product-list.tsx`
+
+-   **Enabled Draft Transaction Display on Transactions Page**
+    -   Removed the draft transaction filter from the `/api/transactions` GET route
+    -   Draft transactions now appear on the transactions page with a clear "📝 Draft" badge
+    -   The transactions page already had the UI components to display draft status properly
+    -   This allows users to see and manage draft transactions alongside finalized ones
+    -   Files changed: `app/api/transactions/route.ts`
+
+-   **Enhanced Email Checking System with Manual Timeframe Override**
+    -   Modified the cron job endpoint to completely override sync state when `sinceDays` parameter is provided
+    -   When manual timeframe is selected (e.g., "Last 7 days"), the system now looks back exactly that number of days regardless of last sync time
+    -   When no manual timeframe is provided, the system falls back to automatic sync behavior using last sync time or default 7-day lookback
+    -   Added detailed logging to distinguish between manual timeframe and automatic sync modes
+    -   This ensures that manual timeframe selections always provide the expected date range coverage
+    -   Files changed: `app/api/cron/check-emails/route.ts`
+
+-   **Unified Email Checking System**
+    -   Modified the cron job endpoint (`/api/cron/check-emails`) to accept a `sinceDays` parameter for manual triggering
+    -   Updated the endpoint to allow both cron requests (with auth header) and manual requests (without auth header)
+    -   Modified both `processSupplierEmails` and `processAmexEmails` functions to use the `sinceDays` parameter instead of hardcoded 7-day lookback
+    -   Replaced the "Find Amex Transactions" button with a "Check Emails" button that triggers the unified cron job
+    -   Updated the frontend to call the cron job endpoint instead of the separate Amex endpoint
+    -   Enhanced the response handling to process both Amex transactions and invoice emails from a single API call
+    -   Updated feedback messages to show counts for both Amex transactions and invoice emails
+    -   Files changed: `app/api/cron/check-emails/route.ts`, `app/transactions/page.tsx`
 
 -   **Implemented Amex Email Checking in Cron Job**
     -   Extended the check-emails cron job to automatically process Amex purchase notification emails
