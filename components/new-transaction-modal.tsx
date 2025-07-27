@@ -1,6 +1,10 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
 import { Product } from '@/types'
 import {
   Dialog,
@@ -10,6 +14,9 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 type TransactionType = 'sale' | 'expense' | 'training'
 
@@ -510,33 +517,61 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
     e.preventDefault()
     try {
       // Create a date object from the form date and set it to 9 AM UTC
-      const date = new Date(formData.date);
-      date.setUTCHours(9, 0, 0, 0);
+      // const date = new Date(formData.date);
+      // date.setUTCHours(9, 0, 0, 0);
+      const timeZone = 'America/New_York';
+
+      // Create Day.js objects for comparison
+      const today = dayjs().tz(timeZone);
+      const selectedDate = dayjs.tz(formData.date, timeZone);
+
+      let finalMoment; // This will hold our final calculated date/time
+
+      // Check if the selected date is the same as today's date
+      if (selectedDate.isSame(today, 'day')) {
+        // SCENARIO 1: The date IS today.
+        // Use the current time of day.
+        finalMoment = selectedDate
+          .hour(today.hour())
+          .minute(today.minute())
+          .second(today.second());
+
+      } else {
+        // SCENARIO 2: The date IS NOT today (past or future).
+        // Set the time to a fixed 12:00 PM (noon).
+        finalMoment = selectedDate
+          .hour(12) // 12 PM
+          .minute(0)
+          .second(0);
+      }
+
+      // Convert the final, calculated moment to a standard UTC Date object
+      const dateInUtc = finalMoment.utc().toDate();
 
       // Prepare payload, mapping fields for expense type
-      let payload: TransactionPayload;
+    let finalPayload: TransactionPayload;
 
       if (formData.type === 'expense') {
         const { category, ...restExpenseData } = formData as ExpenseFormData;
-        payload = {
+        finalPayload = {
           ...restExpenseData,
-          date: date.toISOString(),
+          date: dateInUtc.toISOString(), // date: date.toISOString(),
           purchaseCategory: category,
           products: (formData as ExpenseFormData).products
         } as ExpensePayload;
       } else {
         // For sale or training, the structure matches TransactionPayload directly
-        payload = {
+        finalPayload = {
           ...formData,
-          date: date.toISOString(),
+          date: dateInUtc.toISOString(), // date: date.toISOString(),
         };
       }
 
       if (formData.type === 'sale' && isDraft) {
-        (payload as SalePayload).draft = true;
+        (finalPayload as SalePayload).draft = true;
       }
 
-      console.log('Client: handleSubmit: payload before API call:', payload);
+      console.log('Client: handleSubmit: payload before API call:', finalPayload);
       console.log('Client: handleSubmit: preTaxAmount:', formData.type === 'sale' ? ((formData as SaleFormData).preTaxAmount).toFixed(2) : 'N/A');
       console.log('Client: handleSubmit: taxAmount:', formData.type === 'sale' ? ((formData as SaleFormData).taxAmount).toFixed(2) : 'N/A');
 
@@ -544,10 +579,11 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
       let updatedTransaction: Transaction;
       if (transactionToEdit) {
         // Edit/finalize mode: PUT to /api/transactions/[id]
+        finalPayload.draft = false;
         response = await fetch(`/api/transactions/${transactionToEdit._id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...formData, draft: false }),
+          body: JSON.stringify(finalPayload),
         });
         if (!response.ok) throw new Error('Failed to update transaction');
         updatedTransaction = await response.json();
@@ -556,7 +592,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
         response = await fetch('/api/transactions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...formData, draft: isDraft }),
+          body: JSON.stringify(finalPayload),
         });
         if (!response.ok) throw new Error('Failed to create transaction');
         updatedTransaction = await response.json();

@@ -3,94 +3,11 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 
-interface Transaction {
-  _id: string
-  date: string
-  amount: number
-  type: 'sale' | 'expense' | 'training'
-  source: 'manual' | 'shopify' | 'square' | 'amex'
-  merchant?: string
-  supplier?: string
-  customer?: string
-  emailId?: string
-  purchaseCategory?: string
-  invoiceEmailId?: string
-  draft?: boolean
-  products?: Array<{
-    productId?: string
-    name: string
-    quantity: number
-    unitPrice: number
-    totalPrice: number
-    costDiscount?: number
-  }>
-  clientName?: string
-  dogName?: string
-  trainer?: string
-  revenue?: number
-  taxAmount?: number
-  trainingAgency?: string
-  description?: string
-  paymentMethod?: string
-  isTaxable?: boolean
-  preTaxAmount?: number
-  tip?: number
-  discount?: number
-  shipping?: number
-}
+import type {
+  Transaction,
+  InvoiceEmail,
+} from '@/lib/types';
 
-interface EmailParsingPattern {
-  pattern: string
-  flags?: string
-  groupIndex: number
-  transform?: string
-}
-
-interface EmailParsingConfig {
-  orderNumber?: EmailParsingPattern
-  total?: EmailParsingPattern
-  subtotal?: EmailParsingPattern
-  shipping?: EmailParsingPattern
-  tax?: EmailParsingPattern
-  discount?: EmailParsingPattern
-  products?: {
-    items: {
-      name: EmailParsingPattern
-      quantity: EmailParsingPattern
-      total: EmailParsingPattern
-    }
-    costDiscount?: number
-    wholesaleDiscount?: number
-    quantityMultiple?: number
-  }
-  contentBounds?: {
-    startPattern?: EmailParsingPattern
-    endPattern?: EmailParsingPattern
-  }
-}
-
-interface Supplier {
-  id: string
-  name: string
-  invoiceEmail?: string
-  invoiceSubjectPattern?: string
-  emailParsing?: EmailParsingConfig
-}
-
-interface InvoiceEmail {
-  _id: string
-  emailId: string
-  date: string
-  subject: string
-  from: string
-  body: string
-  status: string
-  supplierId?: string
-  supplier?: Supplier
-  transactionId?: string
-  createdAt: string
-  updatedAt: Date
-}
 
 interface ParsingResult {
   value: string | null

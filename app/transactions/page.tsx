@@ -5,114 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { TransactionSuperCard } from '@/components/transaction-super-card';
 
-interface Transaction {
-  _id: string;
-  date: string;
-  amount: number;
-  type: 'sale' | 'expense' | 'training';
-  source: 'manual' | 'shopify' | 'square' | 'amex';
-  merchant?: string;
-  supplier?: string;
-  customer?: string;
-  emailId?: string;
-  purchaseCategory?: string;
-  invoiceEmailId?: string; // Reference to linked invoice email
-  draft?: boolean; // Indicates if this is a draft transaction
-
-  // Products for sales and expenses
-  products?: Array<{
-    productId?: string;
-    name: string;
-    quantity: number;
-    unitPrice: number;
-    totalPrice: number;
-    costDiscount?: number;
-  }>;
-
-  // Training-specific
-  clientName?: string;
-  dogName?: string;
-  trainer?: string;
-  revenue?: number;
-  taxAmount?: number;
-  trainingAgency?: string;
-}
-
-interface Supplier {
-  id: string;
-  name: string;
-  invoiceEmail?: string;
-  invoiceSubjectPattern?: string;
-  emailParsing?: EmailParsingConfig;
-}
-
-interface EmailParsingPattern {
-  pattern: string;
-  flags?: string;
-  groupIndex: number;
-  transform?: string;
-}
-
-interface EmailParsingConfig {
-  orderNumber?: EmailParsingPattern;
-  total?: EmailParsingPattern;
-  subtotal?: EmailParsingPattern;
-  shipping?: EmailParsingPattern;
-  tax?: EmailParsingPattern;
-  discount?: EmailParsingPattern;
-  products?: {
-    items: {
-      name: EmailParsingPattern;
-      quantity: EmailParsingPattern;
-      total: EmailParsingPattern;
-    },
-    /**
-     * Percentage discount that should be applied to the cost of every product 
-     * line on an invoice (e.g. 0.2 for a 20 % discount). This replaces the
-     * older `wholesaleDiscount` field but the latter is still respected for
-     * backwards-compatibility.
-     */
-    costDiscount?: number;
-    /** @deprecated – use costDiscount */
-    wholesaleDiscount?: number;
-    quantityMultiple?: number;
-  };
-  contentBounds?: {
-    startPattern?: EmailParsingPattern;
-    endPattern?: EmailParsingPattern;
-  };
-}
-
-interface InvoiceEmail {
-  _id: string;
-  emailId: string;
-  date: string;
-  subject: string;
-  from: string;
-  body: string;
-  status: string;
-  supplierId?: string;
-  supplier?: Supplier;
-  transactionId?: string;
-  createdAt: string;
-  updatedAt: Date;
-}
-
-// Amex alert email parsed txn
-interface AmexTransaction {
-  emailId: string;
-  date: string;
-  amount: number;
-  merchant: string;
-  cardLast4: string;
-}
-
-// Combined type for list items
-type ListItem = {
-  type: 'transaction' | 'invoice' | 'amex';
-  date: string;
-  data: Transaction | InvoiceEmail | AmexTransaction;
-};
+import type {
+  Transaction,
+  InvoiceEmail,
+  AmexTransaction,
+  ListItem,
+  EmailParsingConfig,
+} from '@/lib/types';
 
   // Add this interface to track expanded state for each email
   interface ExpandedState {
@@ -366,8 +265,6 @@ export default function TransactionsPage() {
 
   // Finalization modal state
   const [showFinalizationModal, setShowFinalizationModal] = useState(false); 
-  // eslint-disable-next-line no-unused-vars
-  const [finalizingTransaction, setFinalizingTransaction] = useState<Transaction | null>(null);
   const [editableTransaction, setEditableTransaction] = useState<Transaction | null>(null);
   const [savingFinalization, setSavingFinalization] = useState(false);
 
@@ -1932,7 +1829,6 @@ export default function TransactionsPage() {
 
   // Function to open finalization modal
   const handleOpenFinalizationModal = (transaction: Transaction) => {
-    setFinalizingTransaction(transaction);
     setEditableTransaction({ ...transaction }); // Create a copy for editing
     setShowFinalizationModal(true);
   };
@@ -1944,6 +1840,7 @@ export default function TransactionsPage() {
     setSavingFinalization(true);
     try {
       // Create update payload excluding _id and other MongoDB-specific fields
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { _id, createdAt, updatedAt, __v, ...updateData } = editableTransaction; // eslint-disable-line no-unused-vars
       
       const response = await fetch(`/api/transactions/${editableTransaction._id}`, {
@@ -1968,7 +1865,6 @@ export default function TransactionsPage() {
       
       // Close modal
       setShowFinalizationModal(false);
-      setFinalizingTransaction(null);
       setEditableTransaction(null);
       
     } catch (error) {
@@ -3478,7 +3374,7 @@ export default function TransactionsPage() {
                      <input
                        type="date"
                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-                       value={editableTransaction.date?.split('T')[0] || ''}
+                       value={editableTransaction.date?.toString().split('T')[0] || ''}
                        onChange={(e) => {
                          const dateValue = e.target.value ? new Date(e.target.value + 'T00:00:00.000Z') : '';
                          setEditableTransaction(prev => prev ? { ...prev, date: dateValue } : null);
