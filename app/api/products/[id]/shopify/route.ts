@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { shopifyClient } from '@/lib/shopify'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { ObjectId, Db } from 'mongodb'
+import { ObjectId } from 'mongodb'
 
 // Add these interfaces before the GET function
 interface ShopifyVariantNode {
@@ -142,7 +142,11 @@ export async function GET(
 
     // Get product from MongoDB to verify Shopify ID
     await connectToDatabase()
-    const product = await (mongoose.connection.db as Db).collection('products').findOne({
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const product = await db.collection('products').findOne({
       _id: new ObjectId(params.id)
     })
 
@@ -293,7 +297,11 @@ export async function POST(
 
     // Get product from MongoDB
     await connectToDatabase()
-    const product = await (mongoose.connection.db as Db).collection('products').findOne({
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const product = await db.collection('products').findOne({
       _id: new ObjectId(params.id)
     })
 
@@ -346,7 +354,7 @@ export async function POST(
     const shopifyProduct = response as unknown as { id: string; variants: Array<{ id: string }> }
 
     // Update MongoDB product with Shopify IDs
-    await (mongoose.connection.db as Db).collection('products').updateOne(
+    await db.collection('products').updateOne(
       { _id: new ObjectId(params.id) },
       {
         $set: {
@@ -397,7 +405,11 @@ export async function PATCH(
 
     // Get product from MongoDB
     await connectToDatabase()
-    const product = await (mongoose.connection.db as Db).collection('products').findOne({
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const product = await db.collection('products').findOne({
       _id: new ObjectId(params.id)
     })
 

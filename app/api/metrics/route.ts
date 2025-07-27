@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { Db } from 'mongodb'
 
 interface MetricsResponse {
   mtd: {
@@ -85,7 +84,11 @@ export async function GET(): Promise<NextResponse<MetricsResponse | { error: str
     const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0)
 
     // Fetch transactions for different periods
-    const mtdTransactions = await (mongoose.connection.db as Db).collection('transactions')
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const mtdTransactions = await db.collection('transactions')
       .find({
         date: {
           $gte: startOfMonth.toISOString(),
@@ -94,7 +97,7 @@ export async function GET(): Promise<NextResponse<MetricsResponse | { error: str
       })
       .toArray()
 
-    const ytdTransactions = await (mongoose.connection.db as Db).collection('transactions')
+    const ytdTransactions = await db.collection('transactions')
       .find({
         date: {
           $gte: startOfYear.toISOString(),
@@ -103,11 +106,11 @@ export async function GET(): Promise<NextResponse<MetricsResponse | { error: str
       })
       .toArray()
 
-    const allTransactions = await (mongoose.connection.db as Db).collection('transactions')
+    const allTransactions = await db.collection('transactions')
       .find({})
       .toArray()
 
-    const lastMonthTransactions = await (mongoose.connection.db as Db).collection('transactions')
+    const lastMonthTransactions = await db.collection('transactions')
       .find({
         date: {
           $gte: startOfLastMonth.toISOString(),

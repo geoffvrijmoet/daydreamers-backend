@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongoose';
 import mongoose from 'mongoose';
-import { Db, Document, ObjectId, WithId } from 'mongodb';
+import { Document, ObjectId, WithId } from 'mongodb';
 
 interface EmailParsingField {
   pattern: string;
@@ -129,7 +129,11 @@ export async function GET() {
     await connectToDatabase();
     
     // Get invoice emails directly from MongoDB to preserve all fields
-    const rawEmails = await (mongoose.connection.db as Db)
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const rawEmails = await db
       .collection('invoiceemails')
       .find({})
       .sort({ date: -1 })
@@ -172,7 +176,7 @@ export async function GET() {
     }).filter((id): id is ObjectId => id !== null);
     
     // Query suppliers
-    const suppliers = await (mongoose.connection.db as Db)
+    const suppliers = await db
       .collection('suppliers')
       .find<Supplier>({ 
         _id: { $in: supplierObjectIds }
