@@ -365,10 +365,9 @@ export default function TransactionsPage() {
   const [searchingTxnId, setSearchingTxnId] = useState<string | null>(null);
 
   // Finalization modal state
-  const [showFinalizationModal, setShowFinalizationModal] = useState(false);
+  const [showFinalizationModal, setShowFinalizationModal] = useState(false); 
   // eslint-disable-next-line no-unused-vars
   const [finalizingTransaction, setFinalizingTransaction] = useState<Transaction | null>(null);
-  // eslint-disable-next-line no-unused-vars
   const [editableTransaction, setEditableTransaction] = useState<Transaction | null>(null);
   const [savingFinalization, setSavingFinalization] = useState(false);
 
