@@ -8,45 +8,70 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url)
     const term = url.searchParams.get('term')
+    const supplier = url.searchParams.get('supplier')
     
-    if (!term) {
-      return NextResponse.json({ error: 'Search term is required' }, { status: 400 })
+    if (!term && !supplier) {
+      return NextResponse.json({ error: 'Search term or supplier is required' }, { status: 400 })
     }
     
     await connectToDatabase()
     const products = (mongoose.connection.db as Db).collection('products')
     
-    // First, check for smart mapping suggestions
-    const suggestions = await SmartMappingService.suggestProductsForName(term)
+    let suggestions: { productId: string; confidence: number }[] = []
+    let suggestedProductIds: ObjectId[] = []
     
-    // Convert string IDs to ObjectIds
-    const suggestedProductIds = suggestions
-      .filter(s => s.confidence >= 60)
-      .map(s => {
-        try {
-          return new ObjectId(s.productId)
-        } catch {
-          return null
-        }
-      })
-      .filter((id): id is ObjectId => id !== null)
-    
-    // Build search query
-    const searchQuery = {
-      $or: [
-        // Include products from smart mapping suggestions
-        ...(suggestedProductIds.length > 0 ? [{ _id: { $in: suggestedProductIds } }] : []),
-        // Include products matching the search term
-        { name: { $regex: term, $options: 'i' } },
-        { sku: { $regex: term, $options: 'i' } }
-      ]
+    // If searching by term, get smart mapping suggestions
+    if (term) {
+      suggestions = await SmartMappingService.suggestProductsForName(term)
+      
+      // Convert string IDs to ObjectIds
+      suggestedProductIds = suggestions
+        .filter(s => s.confidence >= 60)
+        .map(s => {
+          try {
+            return new ObjectId(s.productId)
+          } catch {
+            return null
+          }
+        })
+        .filter((id): id is ObjectId => id !== null)
     }
     
+    // Build search query
+    const searchCriteria: object[] = []
+    
+    // Add smart mapping suggestions if available
+    if (suggestedProductIds.length > 0) {
+      searchCriteria.push({ _id: { $in: suggestedProductIds } })
+    }
+    
+    // Add term-based search if term provided
+    if (term) {
+      searchCriteria.push(
+        { name: { $regex: term, $options: 'i' } },
+        { sku: { $regex: term, $options: 'i' } }
+      )
+    }
+    
+    // Add supplier filter if provided
+    if (supplier) {
+      searchCriteria.push({ supplier: { $regex: supplier, $options: 'i' } })
+    }
+    
+    const searchQuery = searchCriteria.length > 0 ? { $or: searchCriteria } : {}
+    
     // Get matching products
-    const matchingProducts = await products
-      .find(searchQuery)
-      .limit(20)
-      .toArray()
+    // When searching by supplier only, get all products; otherwise limit for performance
+    const query = products.find(searchQuery)
+    let matchingProducts
+    if (!term && supplier) {
+      // Supplier-only search: get all products
+      matchingProducts = await query.toArray()
+    } else {
+      // Term-based search: limit for performance
+      matchingProducts = await query.limit(20).toArray()
+    }
+    console.log(matchingProducts)
     
     // Sort products: smart mapping suggestions first, then by name
     const sortedProducts = matchingProducts.sort((a, b) => {

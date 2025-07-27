@@ -26,6 +26,7 @@ interface BaseTransactionDocument {
   merchant?: string;
   description?: string;
   draft?: boolean;
+  purchaseCategory?: string;
 }
 
 // Sale transaction specific fields

@@ -364,6 +364,12 @@ export default function TransactionsPage() {
   const [updatingDraftId, setUpdatingDraftId] = useState<string | null>(null);
   const [searchingTxnId, setSearchingTxnId] = useState<string | null>(null);
 
+  // Finalization modal state
+  const [showFinalizationModal, setShowFinalizationModal] = useState(false);
+  const [finalizingTransaction, setFinalizingTransaction] = useState<Transaction | null>(null);
+  const [editableTransaction, setEditableTransaction] = useState<Transaction | null>(null);
+  const [savingFinalization, setSavingFinalization] = useState(false);
+
   // Helper function to scroll to a specific Amex transaction
   const scrollToAmexTransaction = (emailId: string) => {
     const element = document.querySelector(`[data-amex-email-id="${emailId}"]`);
@@ -1923,6 +1929,55 @@ export default function TransactionsPage() {
     }
   };
 
+  // Function to open finalization modal
+  const handleOpenFinalizationModal = (transaction: Transaction) => {
+    setFinalizingTransaction(transaction);
+    setEditableTransaction({ ...transaction }); // Create a copy for editing
+    setShowFinalizationModal(true);
+  };
+
+  // Function to finalize transaction with edited data
+  const finalizeTransaction = async () => {
+    if (!editableTransaction) return;
+    
+    setSavingFinalization(true);
+    try {
+      // Create update payload excluding _id and other MongoDB-specific fields
+      const { _id, createdAt, updatedAt, __v, ...updateData } = editableTransaction;
+      
+      const response = await fetch(`/api/transactions/${editableTransaction._id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...updateData,
+          draft: false // Mark as final
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to finalize transaction');
+      }
+      
+      // Update local state
+      setTransactions(prev =>
+        prev.map(t =>
+          t._id === editableTransaction._id ? { ...editableTransaction, draft: false } : t
+        )
+      );
+      
+      // Close modal
+      setShowFinalizationModal(false);
+      setFinalizingTransaction(null);
+      setEditableTransaction(null);
+      
+    } catch (error) {
+      console.error('Error finalizing transaction:', error);
+      alert('Failed to finalize transaction');
+    } finally {
+      setSavingFinalization(false);
+    }
+  };
+
   return (
     <div className="p-4">
       <h1 className="text-2xl font-bold mb-4">Transactions & Invoices</h1>
@@ -2174,29 +2229,9 @@ export default function TransactionsPage() {
                         <>
                           <button
                             className="ml-2 px-2 py-1 text-xs rounded bg-green-200 text-green-800 hover:bg-green-300 disabled:opacity-50"
-                            disabled={updatingDraftId === transaction._id}
-                            onClick={async () => {
-                              setUpdatingDraftId(transaction._id);
-                              try {
-                                const res = await fetch(`/api/transactions/${transaction._id}`, {
-                                  method: 'PATCH',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ draft: false }),
-                                });
-                                if (!res.ok) throw new Error('Failed to update');
-                                setTransactions(prev =>
-                                  prev.map(t =>
-                                    t._id === transaction._id ? { ...t, draft: false } : t
-                                  )
-                                );
-                              } catch {
-                                alert('Failed to update draft status');
-                              } finally {
-                                setUpdatingDraftId(null);
-                              }
-                            }}
+                            onClick={() => handleOpenFinalizationModal(transaction)}
                           >
-                            {updatingDraftId === transaction._id ? 'Updating…' : 'Mark as Final'}
+                            Mark as Final
                           </button>
                           <span className="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200">
                             📝 Draft
@@ -3413,6 +3448,230 @@ export default function TransactionsPage() {
                   ))}
                 </div>
               )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Transaction Finalization Modal */}
+      {showFinalizationModal && editableTransaction && (
+        <Dialog open={showFinalizationModal} onOpenChange={setShowFinalizationModal}>
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Finalize Transaction</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="bg-yellow-50 border border-yellow-200 rounded p-3">
+                <p className="text-sm text-yellow-800">
+                  Review and edit transaction details before marking as final. Once finalized, the transaction will no longer be marked as a draft.
+                </p>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Basic Info */}
+                <div className="space-y-3">
+                  <h3 className="font-medium text-gray-900">Basic Information</h3>
+                  
+                                     <div>
+                     <label className="block text-sm font-medium text-gray-700">Date</label>
+                     <input
+                       type="date"
+                       className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                       value={editableTransaction.date?.split('T')[0] || ''}
+                       onChange={(e) => {
+                         const dateValue = e.target.value ? new Date(e.target.value + 'T00:00:00.000Z') : '';
+                         setEditableTransaction(prev => prev ? { ...prev, date: dateValue } : null);
+                       }}
+                     />
+                   </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Amount</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                      value={editableTransaction.amount || ''}
+                      onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, amount: parseFloat(e.target.value) || 0 } : null)}
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Type</label>
+                    <select
+                      className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                      value={editableTransaction.type || ''}
+                      onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, type: e.target.value as 'sale' | 'expense' | 'training' } : null)}
+                    >
+                      <option value="sale">Sale</option>
+                      <option value="expense">Expense</option>
+                      <option value="training">Training</option>
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Source</label>
+                    <select
+                      className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                      value={editableTransaction.source || ''}
+                      onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, source: e.target.value as 'manual' | 'shopify' | 'square' | 'amex' } : null)}
+                    >
+                      <option value="manual">Manual</option>
+                      <option value="shopify">Shopify</option>
+                      <option value="square">Square</option>
+                      <option value="amex">Amex</option>
+                    </select>
+                  </div>
+                </div>
+                
+                {/* Specific Fields */}
+                <div className="space-y-3">
+                  <h3 className="font-medium text-gray-900">Details</h3>
+                  
+                  {editableTransaction.type === 'expense' && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Supplier</label>
+                        <input
+                          type="text"
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          value={editableTransaction.supplier || ''}
+                          onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, supplier: e.target.value } : null)}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Purchase Category</label>
+                        <input
+                          type="text"
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          value={editableTransaction.purchaseCategory || ''}
+                          onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, purchaseCategory: e.target.value } : null)}
+                          placeholder="e.g., inventory, office supplies, marketing"
+                        />
+                      </div>
+                    </>
+                  )}
+                  
+                  {editableTransaction.type === 'sale' && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Customer</label>
+                        <input
+                          type="text"
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          value={editableTransaction.customer || ''}
+                          onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, customer: e.target.value } : null)}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Merchant</label>
+                        <input
+                          type="text"
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          value={editableTransaction.merchant || ''}
+                          onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, merchant: e.target.value } : null)}
+                        />
+                      </div>
+                    </>
+                  )}
+                  
+                  {editableTransaction.type === 'training' && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Client Name</label>
+                        <input
+                          type="text"
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          value={editableTransaction.clientName || ''}
+                          onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, clientName: e.target.value } : null)}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Dog Name</label>
+                        <input
+                          type="text"
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          value={editableTransaction.dogName || ''}
+                          onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, dogName: e.target.value } : null)}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Trainer</label>
+                        <input
+                          type="text"
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          value={editableTransaction.trainer || ''}
+                          onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, trainer: e.target.value } : null)}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Training Agency</label>
+                        <input
+                          type="text"
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          value={editableTransaction.trainingAgency || ''}
+                          onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, trainingAgency: e.target.value } : null)}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Revenue</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          value={editableTransaction.revenue || ''}
+                          onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, revenue: parseFloat(e.target.value) || 0 } : null)}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Tax Amount</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          value={editableTransaction.taxAmount || ''}
+                          onChange={(e) => setEditableTransaction(prev => prev ? { ...prev, taxAmount: parseFloat(e.target.value) || 0 } : null)}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+              
+              {/* JSON Preview */}
+              <div className="mt-6">
+                <h3 className="font-medium text-gray-900 mb-3">Transaction Data Preview</h3>
+                <div className="bg-gray-50 border rounded p-4 max-h-60 overflow-y-auto">
+                  <pre className="text-xs text-gray-700 whitespace-pre-wrap">
+                    {JSON.stringify(editableTransaction, null, 2)}
+                  </pre>
+                </div>
+              </div>
+              
+              {/* Action Buttons */}
+              <div className="flex justify-end space-x-3 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowFinalizationModal(false)}
+                  disabled={savingFinalization}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={finalizeTransaction}
+                  disabled={savingFinalization}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  {savingFinalization ? 'Finalizing...' : 'Finalize Transaction'}
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
