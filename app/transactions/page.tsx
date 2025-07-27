@@ -366,7 +366,9 @@ export default function TransactionsPage() {
 
   // Finalization modal state
   const [showFinalizationModal, setShowFinalizationModal] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [finalizingTransaction, setFinalizingTransaction] = useState<Transaction | null>(null);
+  // eslint-disable-next-line no-unused-vars
   const [editableTransaction, setEditableTransaction] = useState<Transaction | null>(null);
   const [savingFinalization, setSavingFinalization] = useState(false);
 
@@ -1943,7 +1945,7 @@ export default function TransactionsPage() {
     setSavingFinalization(true);
     try {
       // Create update payload excluding _id and other MongoDB-specific fields
-      const { _id, createdAt, updatedAt, __v, ...updateData } = editableTransaction;
+      const { _id, createdAt, updatedAt, __v, ...updateData } = editableTransaction; // eslint-disable-line no-unused-vars
       
       const response = await fetch(`/api/transactions/${editableTransaction._id}`, {
         method: 'PATCH',
