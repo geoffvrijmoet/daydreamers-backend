@@ -14,6 +14,7 @@ export interface ISmartMapping extends Document {
   metadata?: Record<string, unknown>;
   createdAt: Date; // These will be managed by Mongoose timestamps
   updatedAt: Date; //
+  insertedId: ObjectId;
 
   // Declare our custom instance method
   incrementUsage(): Promise<this>;
