@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import { shopifyClient } from '@/lib/shopify'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { Db } from 'mongodb'
 
 type ShopifyProduct = {
   id: string
@@ -49,7 +48,11 @@ export async function GET() {
     console.log('Fetching Shopify products for preview...')
 
     // Get ALL active products from MongoDB, including those already matched
-    const existingProducts = await (mongoose.connection.db as Db).collection('products')
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const existingProducts = await db.collection('products')
       .find({ 
         active: { $ne: false }
       })

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { squareClient } from '@/lib/square'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { ObjectId, Db } from 'mongodb'
+import { ObjectId } from 'mongodb'
 
 interface PlatformMetadata {
   platform: 'shopify' | 'square';
@@ -19,7 +19,11 @@ export async function POST(request: Request) {
     const { productId } = await request.json()
 
     // Get product from our database
-    const product = await (mongoose.connection.db as Db).collection('products').findOne({ _id: new ObjectId(productId) })
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const product = await db.collection('products').findOne({ _id: new ObjectId(productId) })
     if (!product) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 })
     }
@@ -70,7 +74,11 @@ export async function POST(request: Request) {
       platformMetadata.push(newSquareMetadata)
 
       // Save Square ID back to our database
-      await (mongoose.connection.db as Db).collection('products').updateOne(
+      const db = mongoose.connection.db;
+      if (!db) {
+        return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+      }
+      await db.collection('products').updateOne(
         { _id: new ObjectId(productId) },
         { 
           $set: { 
@@ -128,7 +136,7 @@ export async function POST(request: Request) {
     }
 
     // Update product with latest sync info
-    await (mongoose.connection.db as Db).collection('products').updateOne(
+    await db.collection('products').updateOne(
       { _id: new ObjectId(productId) },
       { 
         $set: { 

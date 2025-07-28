@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { ObjectId, Db } from 'mongodb'
+import { ObjectId } from 'mongodb'
 
 export async function PATCH(
   request: Request,
@@ -25,7 +25,11 @@ export async function PATCH(
     
     // Update the transaction with the new fee
     console.log('[API] Updating transaction in MongoDB...');
-    const result = await (mongoose.connection.db as Db).collection('transactions').findOneAndUpdate(
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const result = await db.collection('transactions').findOneAndUpdate(
       { _id: new ObjectId(params.id) },
       { 
         $set: { 

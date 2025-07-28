@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { Db } from 'mongodb'
 
 export async function GET() {
   try {
     await connectToDatabase()
     
-    const suppliers = await (mongoose.connection.db as Db)
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const suppliers = await db
       .collection('suppliers')
       .find({})
       .sort({ name: 1 })
@@ -45,7 +48,11 @@ export async function POST(request: Request) {
     await connectToDatabase()
 
     // Check if supplier with same name already exists
-    const existing = await (mongoose.connection.db as Db)
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const existing = await db
       .collection('suppliers')
       .findOne({ name })
       
@@ -58,7 +65,7 @@ export async function POST(request: Request) {
 
     // Create new supplier
     const now = new Date()
-    const result = await (mongoose.connection.db as Db)
+    const result = await db
       .collection('suppliers')
       .insertOne({
         name,

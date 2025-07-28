@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongoose';
 import mongoose from 'mongoose';
-import { Db } from 'mongodb';
 import { DogTrainingClientSchema, DogSchema, createDogTrainingClientId } from '@/lib/models/dog-training-client';
 
 /**
@@ -23,7 +22,11 @@ export async function GET(request: Request) {
   try {
     await connectToDatabase();
     
-    const clients = await (mongoose.connection.db as Db).collection('dogTrainingClients')
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const clients = await db.collection('dogTrainingClients')
       .find(query)
       .limit(limit)
       .sort({ name: 1 })
@@ -81,7 +84,11 @@ export async function POST(request: Request) {
       updatedAt: now
     };
     
-    const result = await (mongoose.connection.db as Db).collection('dogTrainingClients').insertOne(newClient);
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const result = await db.collection('dogTrainingClients').insertOne(newClient);
     
     return NextResponse.json({ 
       success: true, 

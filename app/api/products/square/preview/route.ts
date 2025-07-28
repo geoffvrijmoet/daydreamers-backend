@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import { squareClient } from '@/lib/square'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { Db } from 'mongodb'
 
 type SquareProduct = {
   id: string
@@ -19,7 +18,11 @@ export async function GET() {
     console.log('Fetching Square catalog for preview...')
 
     // First, get existing product IDs from MongoDB using the new platformMetadata structure
-    const existingProducts = await (mongoose.connection.db as Db).collection('products')
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const existingProducts = await db.collection('products')
       .find({ 
         'platformMetadata': { 
           $elemMatch: { 

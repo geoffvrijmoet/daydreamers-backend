@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
-import mongoose from 'mongoose'
-import { ObjectId, Db } from 'mongodb'
+import { ObjectId } from 'mongodb'
+import ProductModel from '@/lib/models/Product'
 
 type ProductMatch = {
   shopifyId: string
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     const updates = await Promise.all(matchesArray.map(async (match) => {
       try {
         // Update MongoDB product with Shopify IDs
-        const result = await (mongoose.connection.db as Db).collection('products').updateOne(
+        const result = await ProductModel.updateOne(
           { _id: new ObjectId(match.mongoId) },
           { 
             $set: { 

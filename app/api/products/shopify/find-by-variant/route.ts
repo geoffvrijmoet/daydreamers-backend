@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { Db } from 'mongodb'
 
 export async function GET(request: Request) {
   try {
@@ -23,7 +22,11 @@ export async function GET(request: Request) {
     
     // Find product with matching Shopify variant ID
     console.log('[API] Searching for product with shopifyVariantId:', shopifyVariantId)
-    const product = await (mongoose.connection.db as Db).collection('products')
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const product = await db.collection('products')
       .findOne({ 
         shopifyVariantId,
         active: { $ne: false }

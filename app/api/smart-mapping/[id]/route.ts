@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongoose';
 import mongoose from 'mongoose';
-import { ObjectId, Db } from 'mongodb';
+import { ObjectId } from 'mongodb';
 
 export async function DELETE(
   request: Request,
@@ -18,7 +18,7 @@ export async function DELETE(
     }
     
     await connectToDatabase();
-    const collection = (mongoose.connection.db as Db).collection('smart_mappings');
+    const collection = mongoose.connection.db?.collection('smart_mappings');
     
     // Convert string ID to ObjectId
     let objectId: ObjectId;
@@ -32,7 +32,7 @@ export async function DELETE(
     }
     
     // Check if the mapping exists
-    const mapping = await collection.findOne({ _id: objectId });
+    const mapping = await collection?.findOne({ _id: objectId });
     
     if (!mapping) {
       return NextResponse.json(
@@ -42,9 +42,9 @@ export async function DELETE(
     }
     
     // Delete the mapping
-    const result = await collection.deleteOne({ _id: objectId });
+    const result = await collection?.deleteOne({ _id: objectId });
     
-    if (result.deletedCount === 0) {
+    if (result?.deletedCount === 0) {
       return NextResponse.json(
         { success: false, message: 'Failed to delete mapping' },
         { status: 500 }

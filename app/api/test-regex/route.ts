@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongoose';
 import mongoose from 'mongoose';
-import { Db, ObjectId } from 'mongodb';
+import { ObjectId } from 'mongodb';
 
 export async function GET() {
   try {
@@ -10,7 +10,11 @@ export async function GET() {
     // Get Viva Raw emails directly from MongoDB
     const vivaRawId = '678d6fc95f1c4351ab1f022f'; // ID from logs
     
-    const vivaEmails = await (mongoose.connection.db as Db)
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const vivaEmails = await db
       .collection('invoiceemails')
       .find({ 
         supplierId: new ObjectId(vivaRawId)

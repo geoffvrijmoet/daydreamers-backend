@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { squareClient } from '@/lib/square'
 import { connectToDatabase } from '@/lib/mongoose'
-import mongoose from 'mongoose'
-import { Db } from 'mongodb'
+import ProductModel from '@/lib/models/Product'
+
+
 
 type ReviewedProduct = {
   id: string
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
     // Process each reviewed product
     const updates = await Promise.all(products.map(async (reviewedProduct) => {
       // Look for existing product by Square ID in platformMetadata
-      const existingProduct = await (mongoose.connection.db as Db).collection('products').findOne({
+      const existingProduct = await ProductModel.findOne({
         'platformMetadata': {
           $elemMatch: {
             'platform': 'square',
@@ -115,7 +116,7 @@ export async function POST(request: Request) {
         }
 
         // Update existing product
-        await (mongoose.connection.db as Db).collection('products').updateOne(
+        await ProductModel.updateOne(
           { _id: existingProduct._id },
           { 
             $set: {
@@ -132,7 +133,7 @@ export async function POST(request: Request) {
         return { action: 'updated', id: existingProduct._id, name: reviewedProduct.name }
       } else {
         // Create new product with platformMetadata
-        const result = await (mongoose.connection.db as Db).collection('products').insertOne({
+        const result = await ProductModel.insertOne({
           ...productData,
           platformMetadata: [squareMetadata],
           createdAt: new Date().toISOString()
@@ -154,7 +155,7 @@ export async function POST(request: Request) {
         if (!count.catalogObjectId || !count.quantity) return
 
         // Update stock for products where the Square ID matches in platformMetadata
-        await (mongoose.connection.db as Db).collection('products').updateOne(
+        await ProductModel.updateOne(
           {
             'platformMetadata': {
               $elemMatch: {

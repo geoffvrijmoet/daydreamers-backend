@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongoose';
 import mongoose from 'mongoose';
-import { Db, ObjectId } from 'mongodb';
+import { ObjectId } from 'mongodb';
 
 export async function GET() {
   try {
@@ -40,7 +40,11 @@ export async function GET() {
     };
     
     // Get current supplier data
-    const supplier = await (mongoose.connection.db as Db)
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const supplier = await db
       .collection('suppliers')
       .findOne({ _id: new ObjectId(vivaRawId) });
       
@@ -51,7 +55,7 @@ export async function GET() {
     console.log('Current email parsing:', supplier.emailParsing);
     
     // Update the supplier
-    const updateResult = await (mongoose.connection.db as Db)
+    const updateResult = await db
       .collection('suppliers')
       .updateOne(
         { _id: new ObjectId(vivaRawId) },
@@ -59,7 +63,7 @@ export async function GET() {
       );
     
     // Test if the update worked by getting a Viva Raw email and trying the pattern
-    const vivaEmails = await (mongoose.connection.db as Db)
+    const vivaEmails = await db
       .collection('invoiceemails')
       .find({ 
         supplierId: new ObjectId(vivaRawId)

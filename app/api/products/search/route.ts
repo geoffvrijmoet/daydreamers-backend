@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { ObjectId, Db } from 'mongodb'
+import { ObjectId } from 'mongodb'
 import { SmartMappingService } from '@/lib/services/smart-mapping-service'
 
 export async function GET(request: Request) {
@@ -15,7 +15,11 @@ export async function GET(request: Request) {
     }
     
     await connectToDatabase()
-    const products = (mongoose.connection.db as Db).collection('products')
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const products = db.collection('products')
     
     let suggestions: { productId: string; confidence: number }[] = []
     let suggestedProductIds: ObjectId[] = []

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongoose';
 import mongoose from 'mongoose';
-import { ObjectId, Db } from 'mongodb';
+import { ObjectId } from 'mongodb';
 
 /**
  * GET /api/dog-training-clients/[id]
@@ -25,7 +25,11 @@ export async function GET(
       query = { id };
     }
     
-    const client = await (mongoose.connection.db as Db).collection('dogTrainingClients').findOne(query);
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const client = await db.collection('dogTrainingClients').findOne(query);
     
     if (!client) {
       return NextResponse.json(
@@ -71,7 +75,11 @@ export async function PUT(
     }
     
     // Get the current client data to handle revenue calculations
-    const currentClient = await (mongoose.connection.db as Db).collection('dogTrainingClients').findOne(query);
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const currentClient = await db.collection('dogTrainingClients').findOne(query);
     if (!currentClient) {
       return NextResponse.json(
         { success: false, error: 'Dog training client not found' },
@@ -127,7 +135,7 @@ export async function PUT(
     delete updateData.createdAt;
     
     // Update client document
-    const result = await (mongoose.connection.db as Db).collection('dogTrainingClients').updateOne(
+    const result = await db.collection('dogTrainingClients').updateOne(
       query,
       { $set: updateData }
     );
@@ -140,7 +148,7 @@ export async function PUT(
     }
     
     // Fetch the updated client
-    const updatedClient = await (mongoose.connection.db as Db).collection('dogTrainingClients').findOne(query);
+    const updatedClient = await db.collection('dogTrainingClients').findOne(query);
     
     return NextResponse.json({ 
       success: true, 
@@ -178,7 +186,11 @@ export async function DELETE(
     }
     
     // Delete client document
-    const result = await (mongoose.connection.db as Db).collection('dogTrainingClients').deleteOne(query);
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const result = await db.collection('dogTrainingClients').deleteOne(query);
     
     if (result.deletedCount === 0) {
       return NextResponse.json(

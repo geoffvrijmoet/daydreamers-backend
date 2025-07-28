@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { Db } from 'mongodb'
 
 export async function GET() {
   try {
     await connectToDatabase()
-    const theme = await (mongoose.connection.db as Db).collection('settings').findOne({ type: 'theme' })
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const theme = await db.collection('settings').findOne({ type: 'theme' })
     return NextResponse.json(theme?.colors || null)
   } catch (error) {
     console.error('Error fetching theme:', error)
@@ -22,7 +25,11 @@ export async function POST(request: Request) {
     const colors = await request.json()
     await connectToDatabase()
     
-    await (mongoose.connection.db as Db).collection('settings').updateOne(
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    await db.collection('settings').updateOne(
       { type: 'theme' },
       { 
         $set: { 

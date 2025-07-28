@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { ObjectId, Db } from 'mongodb'
+import { ObjectId } from 'mongodb'
+
+type MongooseDb = NonNullable<typeof mongoose.connection.db>;
+
 
 type CostHistoryEntry = {
   invoiceId: string
@@ -14,7 +17,7 @@ type CostHistoryEntry = {
 }
 
 // Helper function to clean up duplicate entries
-async function cleanupDuplicateEntries(db: Db, productId: string) {
+async function cleanupDuplicateEntries(db: MongooseDb, productId: string) {
   const product = await db.collection('products').findOne({ 
     _id: new ObjectId(productId) 
   })
@@ -155,7 +158,11 @@ export async function POST(request: Request) {
     }
 
     // Get the current product to access its cost history
-    const product = await (mongoose.connection.db as Db).collection('products').findOne({
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const product = await db.collection('products').findOne({
       _id: new ObjectId(productId)
     })
 
@@ -193,7 +200,7 @@ export async function POST(request: Request) {
     const averageCost = totalPurchased > 0 ? totalSpent / totalPurchased : 0
 
     // Update the product with new cost history and calculated fields
-    const result = await (mongoose.connection.db as Db).collection('products').updateOne(
+    const result = await db.collection('products').updateOne(
       { _id: new ObjectId(productId) },
       {
         $set: {
@@ -218,7 +225,7 @@ export async function POST(request: Request) {
     })
 
     // Clean up any duplicate entries that might exist
-    await cleanupDuplicateEntries(mongoose.connection.db as Db, productId)
+    await cleanupDuplicateEntries(db, productId)
 
     return NextResponse.json({ success: true })
   } catch (error) {

@@ -1,128 +1,77 @@
+import mongoose, { Schema, Document, Model } from 'mongoose';
 import { ObjectId } from 'mongodb';
 
-/**
- * Smart Mapping Schema
- * 
- * A lightweight schema for storing learned mappings between different data formats.
- * Used to improve UX by remembering past matches and suggesting them in the future.
- */
-export interface SmartMappingSchema {
-  /**
-   * MongoDB document ID
-   */
-  _id: ObjectId;
-  
-  /**
-   * The type of mapping this represents
-   * e.g., "product_names", "email_supplier", etc.
-   */
+export interface ISmartMapping extends Document {
+  _id: ObjectId; 
   mappingType: string;
-  
-  /**
-   * The original source value
-   * e.g., "Viva Raw Turkey for Cats" from Excel
-   */
   source: string;
-  
-  /**
-   * The target value this maps to
-   * e.g., "Viva Raw Turkey for Cats 1 lb - Regular" in MongoDB
-   */
   target: string;
-  
-  /**
-   * Unique identifier for the target object in our system
-   * e.g., MongoDB Product ID
-   */
   targetId?: string;
-  
-  /**
-   * Confidence score (0-100)
-   * Higher values indicate more confidence in this mapping
-   */
   confidence: number;
-  
-  /**
-   * Number of times this mapping has been used
-   */
   usageCount: number;
-  
-  /**
-   * Optional custom score for sorting/prioritizing mappings
-   * Can be calculated based on usageCount, recency, etc.
-   */
   score?: number;
-  
-  /**
-   * When this mapping was last used
-   */
-  lastUsed: string;
-  
-  /**
-   * Optional object for storing any additional
-   * context-specific data about this mapping
-   */
+  lastUsed: Date; // Use native Date type for Mongoose
   metadata?: Record<string, unknown>;
-  
-  /**
-   * When this mapping was first created
-   */
-  createdAt: string;
-  
-  /**
-   * When this mapping was last updated
-   */
-  updatedAt: string;
+  createdAt: Date; // These will be managed by Mongoose timestamps
+  updatedAt: Date; //
+
+  // Declare our custom instance method
+  incrementUsage(): Promise<this>;
 }
 
-/**
- * Creates a new smart mapping
- */
-export function createSmartMapping(
-  mappingType: string,
-  source: string,
-  target: string,
-  targetId?: string,
-  metadata?: Record<string, unknown>
-): Omit<SmartMappingSchema, '_id'> {
-  const now = new Date().toISOString();
-  
-  return {
-    mappingType,
-    source,
-    target,
-    targetId,
-    confidence: 80, // Start with a reasonable confidence
-    usageCount: 1,
-    score: 80, // Initial score same as confidence
-    lastUsed: now,
-    metadata,
-    createdAt: now,
-    updatedAt: now
-  };
-}
+// 2. Define the Mongoose Schema that corresponds to the interface.
+const SmartMappingSchema: Schema<ISmartMapping> = new Schema(
+  {
+    mappingType: { type: String, required: true },
+    source: { type: String, required: true, index: true }, // Added index for faster queries
+    target: { type: String, required: true },
+    targetId: { type: String },
+    confidence: { type: Number, default: 80 },
+    usageCount: { type: Number, default: 0 },
+    score: { type: Number, default: 80 },
+    lastUsed: { type: Date, default: Date.now },
+    metadata: { type: Schema.Types.Mixed },
+  },
+  {
+    // Mongoose's timestamp option automatically adds and manages
+    // `createdAt` and `updatedAt` fields of type Date.
+    timestamps: true,
+  }
+);
 
-/**
- * Increments usage for a mapping and updates its score
- */
-export function incrementMappingUsage(mapping: SmartMappingSchema): SmartMappingSchema {
-  const now = new Date().toISOString();
-  
+// 3. Add your business logic as a custom method on the schema.
+// This is the Mongoose version of your `incrementMappingUsage` helper function.
+// It will be available on every document instance (e.g., `mapping.incrementUsage()`).
+SmartMappingSchema.methods.incrementUsage = async function (this: ISmartMapping): Promise<ISmartMapping> {
+  this.usageCount += 1;
+  this.lastUsed = new Date();
+
   // Simple score calculation that increases with usage but caps at 100
-  const newScore = Math.min(100, mapping.confidence + Math.min(20, mapping.usageCount / 5));
-  
+  this.score = Math.min(100, this.confidence + Math.min(20, this.usageCount / 5));
+
   // Boost confidence to 85 if usage count is high enough
-  const newConfidence = mapping.usageCount >= 2 ? 85 : mapping.confidence;
+  if (this.usageCount >= 2) {
+    this.confidence = 85;
+  }
   
-  return {
-    ...mapping,
-    usageCount: mapping.usageCount + 1,
-    lastUsed: now,
-    score: newScore,
-    confidence: newConfidence,
-    updatedAt: now
-  };
-}
+  // Save the changes to the database
+  return this.save();
+};
+
+// 4. Create and export the Mongoose Model.
+// The `mongoose.models.SmartMapping` check prevents Mongoose from compiling
+// the model more than once, which is a common issue in Next.js.
+const SmartMapping: Model<ISmartMapping> =
+  mongoose.models.SmartMapping || mongoose.model<ISmartMapping>('SmartMapping', SmartMappingSchema, 'smart_mappings');
+  // The third argument 'smart_mappings' explicitly tells Mongoose the collection name.
+
+export default SmartMapping;
+
+
+// Note: Your `createSmartMapping` helper is no longer necessary.
+// The new way to create a document is simply:
+// const newMapping = new SmartMapping({ mappingType, source, target, ... });
+// await newMapping.save();
 
 /**
  * Mapping types used in the application

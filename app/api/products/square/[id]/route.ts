@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
-import { Db } from 'mongodb'
 
 export async function GET(
   request: Request,
@@ -13,7 +12,11 @@ export async function GET(
     console.log('[API] Looking up product by Square ID:', params.id);
     
     // Try to find the product by squareId inside platformMetadata 
-    const product = await (mongoose.connection.db as Db).collection('products').findOne({
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const product = await db.collection('products').findOne({
       'platformMetadata': {
         $elemMatch: {
           'platform': 'square',

@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongoose';
 import mongoose from 'mongoose';
-import { Db } from 'mongodb';
 
 /**
  * GET /api/dog-training-clients/search
@@ -37,7 +36,11 @@ export async function GET(request: Request) {
       : baseQuery;
     
     // Fetch clients matching the query
-    const clients = await (mongoose.connection.db as Db).collection('dogTrainingClients')
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
+    const clients = await db.collection('dogTrainingClients')
       .find(clientsQuery)
       .project({ 
         _id: 1, 

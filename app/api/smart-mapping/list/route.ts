@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongoose';
 import mongoose from 'mongoose';
-import { MappingTypes } from '@/lib/models/smart-mapping';
-import { Db, Document, WithId, Collection } from 'mongodb';
+import { ISmartMapping, MappingTypes } from '@/lib/models/smart-mapping';
+import { Document } from 'mongodb';
+import SmartMapping from '@/lib/models/smart-mapping';
 
 interface TypeCount extends Document {
   _id: string;
@@ -52,28 +53,29 @@ export async function GET(request: Request) {
       query.source = { $regex: source, $options: 'i' };
     }
     
-    const db = mongoose.connection.db as Db;
-    const smartMappingsCollection = db.collection('smart_mappings') as Collection<SmartMapping>;
+    const db = mongoose.connection.db;
+    if (!db) {
+      return NextResponse.json({ error: 'Database connection not found' }, { status: 500 });
+    }
     
     // Get mappings
-    const mappings = await smartMappingsCollection
+    const mappings = await SmartMapping
       .find(query)
       .sort({ score: -1, usageCount: -1 })
       .limit(limit)
-      .toArray();
     
     // Count total mappings
-    const totalMappings = await smartMappingsCollection.countDocuments({});
-    const typeCounts = await smartMappingsCollection.aggregate<TypeCount>([
+    const totalMappings = await SmartMapping.countDocuments({});
+    const typeCounts = await SmartMapping.aggregate<TypeCount>([
       { $group: { _id: '$mappingType', count: { $sum: 1 } } }
-    ]).toArray();
+    ]);
     
     return NextResponse.json({
       success: true,
       totalMappings,
       typeCounts: typeCounts.map((t: TypeCount) => ({ type: t._id, count: t.count })),
-      mappings: mappings.map((m: WithId<SmartMapping>) => ({
-        id: m._id,
+      mappings: mappings.map((m: ISmartMapping) => ({
+        id: m._id.toString(),
         mappingType: m.mappingType,
         source: m.source,
         target: m.target,
