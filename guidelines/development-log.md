@@ -386,6 +386,17 @@
 
 ## ✅ Recently Completed Tasks
 
+-   **Added Customer Assignment Feature to Transactions Modal**
+    -   Implemented customer assignment functionality in the transactions modal component
+    -   Added "Add Customer" button for sales transactions without customers
+    -   Added "Change Customer" button for sales transactions with existing customers
+    -   Created customer search modal with real-time search functionality
+    -   Integrated with existing customer search API endpoint
+    -   Added proper loading states and success/error feedback
+    -   Customer assignment updates both local state and database via PATCH API
+    -   Maintains existing transaction modal functionality while adding customer management
+    -   Files changed: `components/transactions-modal.tsx`
+
 -   **Fixed Product Model Import in Square Sync Route**
     -   Resolved "MissingSchemaError: Schema hasn't been registered for model 'Product'" error in Square sync
     -   Added missing `ProductModel` import to `/api/transactions/sync/square/route.ts`

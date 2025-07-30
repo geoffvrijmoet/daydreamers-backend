@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { HomeSyncButton } from './home-sync-button'
 import { formatInEasternTime } from '@/lib/utils/dates'
 import { NewSaleModal } from './new-transaction-modal'
@@ -72,6 +73,10 @@ interface Transaction {
   draft?: boolean // <-- add this
 }
 
+interface Customer {
+  name: string
+}
+
 type TransactionsModalProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -86,6 +91,13 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
   const [successMessageIds, setSuccessMessageIds] = useState<{[key: string]: boolean}>({});
   const [finalizeTransactionId, setFinalizeTransactionId] = useState<string | null>(null);
   const [markDraftTransactionId, setMarkDraftTransactionId] = useState<string | null>(null);
+  
+  // Customer assignment state
+  const [assigningCustomerId, setAssigningCustomerId] = useState<string | null>(null);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [customerSearchResults, setCustomerSearchResults] = useState<Customer[]>([]);
+  const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
+  const [assigningCustomerLoading, setAssigningCustomerLoading] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -106,6 +118,15 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
     }
   }, [successMessageIds]);
 
+  // Customer search effect
+  useEffect(() => {
+    if (customerSearchQuery.length >= 2) {
+      searchCustomers();
+    } else {
+      setCustomerSearchResults([]);
+    }
+  }, [customerSearchQuery]);
+
   const fetchTransactions = async () => {
     try {
       setLoading(true)
@@ -119,6 +140,61 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
       setLoading(false)
     }
   }
+
+  const searchCustomers = async () => {
+    try {
+      setCustomerSearchLoading(true);
+      const response = await fetch(`/api/customers/search?query=${encodeURIComponent(customerSearchQuery)}`);
+      if (response.ok) {
+        const data = await response.json();
+        setCustomerSearchResults(data.customers || []);
+      }
+    } catch (error) {
+      console.error('Error searching customers:', error);
+    } finally {
+      setCustomerSearchLoading(false);
+    }
+  };
+
+  const assignCustomerToTransaction = async (transactionId: string, customerName: string) => {
+    try {
+      setAssigningCustomerLoading(true);
+      const response = await fetch(`/api/transactions/${transactionId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ customer: customerName }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to assign customer');
+      }
+
+      // Update local state
+      setTransactions(prev => prev.map(t => 
+        t._id === transactionId ? { ...t, customer: customerName } : t
+      ));
+
+      // Show success message
+      const updatedSuccessIds = { ...successMessageIds };
+      updatedSuccessIds[transactionId] = true;
+      setSuccessMessageIds(updatedSuccessIds);
+
+      // Close the customer assignment modal
+      setAssigningCustomerId(null);
+      setCustomerSearchQuery('');
+      setCustomerSearchResults([]);
+    } catch (error) {
+      console.error('Error assigning customer:', error);
+      // Show error message
+      const updatedSuccessIds = { ...successMessageIds };
+      updatedSuccessIds[transactionId] = false;
+      setSuccessMessageIds(updatedSuccessIds);
+    } finally {
+      setAssigningCustomerLoading(false);
+    }
+  };
 
   // Group transactions by date
   const groupedTransactions = transactions.reduce((groups, transaction) => {
@@ -271,6 +347,9 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
   const markDraftTransaction = markDraftTransactionId
     ? transactions.find(t => t._id === markDraftTransactionId)
     : null;
+  const assigningCustomerTransaction = assigningCustomerId
+    ? transactions.find(t => t._id === assigningCustomerId)
+    : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -406,6 +485,24 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                                 Mark as Draft
                               </button>
                             )}
+                            {/* Add customer button for sales without customers */}
+                            {transaction.type === 'sale' && !transaction.customer && (
+                              <button
+                                className="ml-2 px-2 py-0.5 text-xs rounded bg-green-100 text-green-800 border border-green-200 hover:bg-green-200 transition"
+                                onClick={() => setAssigningCustomerId(transaction._id)}
+                              >
+                                Add Customer
+                              </button>
+                            )}
+                            {/* Change customer button for sales with customers */}
+                            {transaction.type === 'sale' && transaction.customer && (
+                              <button
+                                className="ml-2 px-2 py-0.5 text-xs rounded bg-blue-100 text-blue-800 border border-blue-200 hover:bg-blue-200 transition"
+                                onClick={() => setAssigningCustomerId(transaction._id)}
+                              >
+                                Change Customer
+                              </button>
+                            )}
                           </div>
                           {transaction.description && (
                             <p className="text-sm text-gray-600 break-words">{transaction.description}</p>
@@ -452,12 +549,12 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
                           {/* Success/error messages for the transaction */}
                           {successMessageIds[transaction._id] === true && (
                             <div className="mt-1 text-sm text-green-600 font-medium animate-fade-in">
-                              ✓ Profit calculation updated
+                              ✓ {assigningCustomerId === transaction._id ? 'Customer assigned successfully' : 'Profit calculation updated'}
                             </div>
                           )}
                           {successMessageIds[transaction._id] === false && (
                             <div className="mt-1 text-sm text-red-600 font-medium animate-fade-in">
-                              ✗ Failed to update profit calculation
+                              ✗ {assigningCustomerId === transaction._id ? 'Failed to assign customer' : 'Failed to update profit calculation'}
                             </div>
                           )}
                         </div>
@@ -528,6 +625,69 @@ export function TransactionsModal({ open, onOpenChange }: TransactionsModalProps
           </div>
         )}
       </DialogContent>
+
+      {/* Customer Assignment Modal */}
+      <Dialog open={!!assigningCustomerId} onOpenChange={open => { if (!open) setAssigningCustomerId(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {assigningCustomerTransaction?.customer ? 'Change Customer' : 'Assign Customer'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Search Customers</label>
+              <Input
+                type="text"
+                placeholder="Start typing customer name..."
+                value={customerSearchQuery}
+                onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            
+            {customerSearchLoading && (
+              <div className="flex justify-center py-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
+              </div>
+            )}
+            
+            {customerSearchResults.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Select Customer:</label>
+                <div className="max-h-48 overflow-y-auto border rounded-md">
+                  {customerSearchResults.map((customer, index) => (
+                    <button
+                      key={index}
+                      onClick={() => assignCustomerToTransaction(assigningCustomerId!, customer.name)}
+                      disabled={assigningCustomerLoading}
+                      className="w-full text-left px-3 py-2 hover:bg-gray-100 border-b last:border-b-0 disabled:opacity-50"
+                    >
+                      {customer.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {customerSearchQuery.length >= 2 && customerSearchResults.length === 0 && !customerSearchLoading && (
+              <div className="text-sm text-gray-500 text-center py-4">
+                No customers found. Try a different search term.
+              </div>
+            )}
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setAssigningCustomerId(null)}
+                disabled={assigningCustomerLoading}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Finalize Modal using NewSaleModal */}
       <NewSaleModal
