@@ -386,6 +386,13 @@
 
 ## ✅ Recently Completed Tasks
 
+-   **Fixed Product Model Import in Square Sync Route**
+    -   Resolved "MissingSchemaError: Schema hasn't been registered for model 'Product'" error in Square sync
+    -   Added missing `ProductModel` import to `/api/transactions/sync/square/route.ts`
+    -   Replaced `mongoose.model('Product')` calls with proper `ProductModel` import
+    -   Ensures Product model is properly registered with Mongoose before use
+    -   Files changed: `app/api/transactions/sync/square/route.ts`
+
 -   **Completely Redesigned Product List with Card-Based Layout**
     -   Replaced the old dropdown-based product list with a modern card-based grid layout
     -   Products are now grouped by `baseProductName` with one card per product group

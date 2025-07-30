@@ -4,6 +4,7 @@ import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
 import type { Order } from 'square'
 import SyncStateModel from '@/lib/models/SyncState'
+import ProductModel from '@/lib/models/Product'
 
 export async function POST(request: Request) {
   try {
@@ -162,12 +163,12 @@ export async function POST(request: Request) {
           }
         },
         products: await Promise.all(order.lineItems?.map(async item => {
-          // Try to find the MongoDB product using Square's catalog ID
-          const product = item.catalogObjectId ? 
-            await mongoose.model('Product').findOne({
-              'platformMetadata.platform': 'square',
-              'platformMetadata.productId': item.catalogObjectId
-            }) : null;
+                // Try to find the MongoDB product using Square's catalog ID
+      const product = item.catalogObjectId ?
+        await ProductModel.findOne({
+          'platformMetadata.platform': 'square',
+          'platformMetadata.productId': item.catalogObjectId
+        }) : null;
 
           // Determine the product name with fallback logic
           let productName = item.name;
