@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
 import { ObjectId } from 'mongodb'
+import { updateInventoryForExistingTransaction, convertModalLineItemsToInventoryFormat, restoreInventoryForDeletedTransaction, type InventoryUpdateResult } from '@/lib/utils/inventory-management'
 
 export async function PUT(
   request: NextRequest,
@@ -18,6 +19,18 @@ export async function PUT(
     }
     if (updateData.createdAt && typeof updateData.createdAt === 'string') {
       updateData.createdAt = new Date(updateData.createdAt)
+    }
+
+    // Update inventory for Viva Raw products if this is a sale transaction with products being updated
+    let inventoryResults: InventoryUpdateResult[] = []
+    if (updateData.type === 'sale' && updateData.products && Array.isArray(updateData.products) && updateData.products.length > 0) {
+      try {
+        const inventoryProducts = convertModalLineItemsToInventoryFormat(updateData.products)
+        inventoryResults = await updateInventoryForExistingTransaction(params.id, inventoryProducts)
+        console.log(`[API] Inventory update results for transaction ${params.id}:`, inventoryResults)
+      } catch (error) {
+        console.error(`[API] Error updating inventory for transaction ${params.id}:`, error)
+      }
     }
 
     const result = await mongoose.connection.db!.collection('transactions').updateOne(
@@ -37,7 +50,10 @@ export async function PUT(
       )
     }
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ 
+      success: true,
+      inventoryResults: inventoryResults.length > 0 ? inventoryResults : undefined
+    })
   } catch (error) {
     console.error('Error updating transaction:', error)
     return NextResponse.json(
@@ -128,6 +144,18 @@ export async function PATCH(
       }
     }
 
+    // Update inventory for Viva Raw products if products are being updated
+    let inventoryResults: InventoryUpdateResult[] = []
+    if (updates.products && Array.isArray(updates.products) && updates.products.length > 0) {
+      try {
+        const inventoryProducts = convertModalLineItemsToInventoryFormat(updates.products)
+        inventoryResults = await updateInventoryForExistingTransaction(params.id, inventoryProducts)
+        console.log(`[API] Inventory update results for transaction ${params.id}:`, inventoryResults)
+      } catch (error) {
+        console.error(`[API] Error updating inventory for transaction ${params.id}:`, error)
+      }
+    }
+
     const result = await mongoose.connection.db!.collection('transactions').updateOne(
       { _id: new mongoose.Types.ObjectId(params.id) },
       { 
@@ -160,7 +188,8 @@ export async function PATCH(
 
     return NextResponse.json({ 
       success: true,
-      modified: result.modifiedCount > 0
+      modified: result.modifiedCount > 0,
+      inventoryResults: inventoryResults.length > 0 ? inventoryResults : undefined
     });
   } catch (error) {
     console.error('Error updating transaction:', error);
@@ -186,6 +215,15 @@ export async function DELETE(
       );
     }
 
+    // Restore inventory for Viva Raw products before deleting the transaction
+    let inventoryResults: InventoryUpdateResult[] = []
+    try {
+      inventoryResults = await restoreInventoryForDeletedTransaction(id)
+      console.log(`[API] Inventory restoration results for deleted transaction ${id}:`, inventoryResults)
+    } catch (error) {
+      console.error(`[API] Error restoring inventory for deleted transaction ${id}:`, error)
+    }
+
     const result = await mongoose.connection.db!.collection('transactions').deleteOne({ 
       _id: new ObjectId(id)
     });
@@ -199,7 +237,11 @@ export async function DELETE(
     }
 
     console.log(`[API] Successfully deleted transaction: ${id}`);
-    return NextResponse.json({ success: true, message: 'Transaction deleted successfully' });
+    return NextResponse.json({ 
+      success: true, 
+      message: 'Transaction deleted successfully',
+      inventoryResults: inventoryResults.length > 0 ? inventoryResults : undefined
+    });
   } catch (error) {
     console.error('[API] Error deleting transaction:', error);
     return NextResponse.json(

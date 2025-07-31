@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import TransactionModel from '@/lib/models/transaction'
 import mongoose from 'mongoose'
+import { updateInventoryForNewTransaction, convertModalLineItemsToInventoryFormat } from '@/lib/utils/inventory-management'
 
 interface TransactionQuery {
   date?: {
@@ -249,6 +250,18 @@ export async function POST(request: Request) {
         
     console.log('Server: /api/transactions POST: Transaction object before saving:', transactionToSave);
     const result = await mongoose.connection.db!.collection('transactions').insertOne(transactionToSave)
+    
+    // Update inventory for Viva Raw products if this is a sale transaction with products
+    let inventoryResults = []
+    if (type === 'sale' && products && Array.isArray(products) && products.length > 0) {
+      try {
+        const inventoryProducts = convertModalLineItemsToInventoryFormat(products)
+        inventoryResults = await updateInventoryForNewTransaction(inventoryProducts)
+        console.log('Server: /api/transactions POST: Inventory update results:', inventoryResults)
+      } catch (error) {
+        console.error('Server: /api/transactions POST: Error updating inventory:', error)
+      }
+    }
     
     // If this is from an email, mark the email as processed
     if (emailId) {

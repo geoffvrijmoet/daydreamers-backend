@@ -1,7 +1,22 @@
 
-### Invoice Email to Transaction Linking
+### Viva Raw Inventory Management System
 
--   **Implemented Invoice Email to Transaction Linking Feature**
+-   **Implemented Automatic Inventory Management for Viva Raw Products**
+    -   Created inventory management utility functions to automatically adjust stock levels when transactions are created, updated, or deleted.
+    -   For new transactions: reduces stock by the quantity sold for Viva Raw products.
+    -   For existing transactions: calculates quantity differences and adjusts stock accordingly (handles increases, decreases, and product removals).
+    -   For deleted transactions: restores stock by adding back the quantities that were sold.
+    -   Integrated inventory management into all transaction routes: `/api/transactions` (POST), `/api/transactions/[id]` (PUT/PATCH/DELETE).
+    -   Added inventory management to Square and Shopify sync routes to handle platform-synced transactions.
+    -   Prevents negative stock levels by using Math.max(0, stock - quantity).
+    -   Provides detailed logging and error handling for inventory updates.
+    -   Returns inventory update results in API responses for tracking purposes.
+    -   Added type safety and validation: filters out invalid products (missing names, productIds, or zero quantities).
+    -   Created compatibility layer for modal LineItem interface with optional productId field.
+    -   Fixed Square sync to ensure product names are always valid strings.
+    -   Files changed: `lib/utils/inventory-management.ts`, `app/api/transactions/route.ts`, `app/api/transactions/[id]/route.ts`, `app/api/transactions/sync/square/route.ts`, `app/api/transactions/sync/shopify/route.ts`.
+
+### Invoice Email to Transaction Linking
     -   Added functionality to link invoice emails to existing expense transactions for better data organization.
     -   Created bi-directional relationship between invoice emails and transactions using `transactionId` and `invoiceEmailId` fields.
     -   Added "Link to Transaction" button to invoice email cards in the transactions page.

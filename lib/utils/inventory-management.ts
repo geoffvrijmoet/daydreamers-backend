@@ -1,0 +1,430 @@
+import mongoose from 'mongoose'
+
+interface ProductInTransaction {
+  productId: mongoose.Types.ObjectId | string
+  name: string
+  quantity: number
+  unitPrice: number
+  totalPrice: number
+  isTaxable?: boolean
+  costDiscount?: number
+}
+
+export interface InventoryUpdateResult {
+  productId: string
+  productName: string
+  oldStock: number
+  newStock: number
+  quantityChange: number
+  success: boolean
+  error?: string
+}
+
+// Type for products from the modal (with optional productId)
+interface ModalLineItem {
+  productId?: string
+  name: string
+  quantity: number
+  unitPrice: number
+  totalPrice: number
+  isTaxable?: boolean
+}
+
+// Helper function to convert modal line items to inventory-compatible format
+export function convertModalLineItemsToInventoryFormat(products: ModalLineItem[]): ProductInTransaction[] {
+  return products
+    .filter(product => product.productId && product.name && product.quantity > 0)
+    .map(product => ({
+      productId: product.productId!,
+      name: product.name,
+      quantity: product.quantity,
+      unitPrice: product.unitPrice,
+      totalPrice: product.totalPrice,
+      isTaxable: product.isTaxable || false
+    }));
+}
+
+/**
+ * Updates inventory for Viva Raw products when a transaction is created
+ * @param products Array of products in the transaction
+ * @returns Array of inventory update results
+ */
+export async function updateInventoryForNewTransaction(
+  products: ProductInTransaction[]
+): Promise<InventoryUpdateResult[]> {
+  // Filter out products with invalid names or missing productIds
+  const validProducts = products.filter(product => 
+    product.name && 
+    product.name.trim() !== '' && 
+    product.productId && 
+    product.quantity > 0
+  );
+
+  if (validProducts.length !== products.length) {
+    console.warn('[Inventory] Filtered out invalid products:', {
+      total: products.length,
+      valid: validProducts.length,
+      invalid: products.filter(p => !p.name || !p.name.trim() || !p.productId || p.quantity <= 0)
+    });
+  }
+  const results: InventoryUpdateResult[] = []
+
+  for (const product of validProducts) {
+    try {
+      // Convert productId to ObjectId if it's a string
+      const productId = typeof product.productId === 'string' 
+        ? new mongoose.Types.ObjectId(product.productId)
+        : product.productId
+
+      // Find the product in the database
+      const productDoc = await mongoose.connection.db!.collection('products').findOne({
+        _id: productId,
+        supplier: 'Viva Raw'
+      })
+
+      if (!productDoc) {
+        results.push({
+          productId: productId.toString(),
+          productName: product.name,
+          oldStock: 0,
+          newStock: 0,
+          quantityChange: product.quantity,
+          success: false,
+          error: 'Product not found or not a Viva Raw product'
+        })
+        continue
+      }
+
+      const oldStock = productDoc.stock || 0
+      const newStock = Math.max(0, oldStock - product.quantity) // Prevent negative stock
+
+      // Update the product's stock
+      await mongoose.connection.db!.collection('products').updateOne(
+        { _id: productId },
+        { $set: { stock: newStock, updatedAt: new Date() } }
+      )
+
+      results.push({
+        productId: productId.toString(),
+        productName: product.name,
+        oldStock,
+        newStock,
+        quantityChange: -product.quantity, // Negative because we're reducing stock
+        success: true
+      })
+
+      console.log(`[Inventory] Updated Viva Raw product ${product.name}: ${oldStock} → ${newStock} (-${product.quantity})`)
+    } catch (error) {
+      results.push({
+        productId: (typeof product.productId === 'string' ? product.productId : product.productId.toString()),
+        productName: product.name,
+        oldStock: 0,
+        newStock: 0,
+        quantityChange: product.quantity,
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+      console.error(`[Inventory] Error updating inventory for product ${product.name}:`, error)
+    }
+  }
+
+  return results
+}
+
+/**
+ * Updates inventory for Viva Raw products when a transaction is updated
+ * @param transactionId The ID of the transaction being updated
+ * @param newProducts Array of products in the updated transaction
+ * @returns Array of inventory update results
+ */
+export async function updateInventoryForExistingTransaction(
+  transactionId: string,
+  newProducts: ProductInTransaction[]
+): Promise<InventoryUpdateResult[]> {
+  // Filter out products with invalid names or missing productIds
+  const validNewProducts = newProducts.filter(product => 
+    product.name && 
+    product.name.trim() !== '' && 
+    product.productId && 
+    product.quantity > 0
+  );
+
+  if (validNewProducts.length !== newProducts.length) {
+    console.warn('[Inventory] Filtered out invalid products in update:', {
+      total: newProducts.length,
+      valid: validNewProducts.length,
+      invalid: newProducts.filter(p => !p.name || !p.name.trim() || !p.productId || p.quantity <= 0)
+    });
+  }
+  const results: InventoryUpdateResult[] = []
+
+  try {
+    // Get the existing transaction to compare quantities
+    const existingTransaction = await mongoose.connection.db!.collection('transactions').findOne({
+      _id: new mongoose.Types.ObjectId(transactionId)
+    })
+
+    if (!existingTransaction) {
+      throw new Error('Transaction not found')
+    }
+
+    const existingProducts = existingTransaction.products || []
+    
+    // Create a map of existing products by productId for easy lookup
+    const existingProductMap = new Map<string, ProductInTransaction>()
+    for (const product of existingProducts) {
+      const productId = (typeof product.productId === 'string' ? product.productId : product.productId.toString())
+      existingProductMap.set(productId, product)
+    }
+
+    // Create a map of new products by productId for easy lookup
+    const newProductMap = new Map<string, ProductInTransaction>()
+    for (const product of validNewProducts) {
+      const productId = (typeof product.productId === 'string' ? product.productId : product.productId.toString())
+      newProductMap.set(productId, product)
+    }
+
+    // Process each new product
+    for (const newProduct of validNewProducts) {
+      try {
+        const newProductId = (typeof newProduct.productId === 'string' ? newProduct.productId : newProduct.productId.toString())
+        const existingProduct = existingProductMap.get(newProductId)
+
+        // If product didn't exist before, treat it as a new addition
+        if (!existingProduct) {
+          const result = await updateInventoryForNewTransaction([newProduct])
+          results.push(...result)
+          continue
+        }
+
+        // Calculate the difference in quantity
+        const quantityDifference = newProduct.quantity - existingProduct.quantity
+
+        // If quantities are the same, no inventory change needed
+        if (quantityDifference === 0) {
+          results.push({
+            productId: newProductId,
+            productName: newProduct.name,
+            oldStock: 0,
+            newStock: 0,
+            quantityChange: 0,
+            success: true
+          })
+          continue
+        }
+
+        // Convert productId to ObjectId
+        const productId = typeof newProduct.productId === 'string' 
+          ? new mongoose.Types.ObjectId(newProduct.productId)
+          : newProduct.productId
+
+        // Find the product in the database
+        const productDoc = await mongoose.connection.db!.collection('products').findOne({
+          _id: productId,
+          supplier: 'Viva Raw'
+        })
+
+        if (!productDoc) {
+          results.push({
+            productId: newProductId,
+            productName: newProduct.name,
+            oldStock: 0,
+            newStock: 0,
+            quantityChange: quantityDifference,
+            success: false,
+            error: 'Product not found or not a Viva Raw product'
+          })
+          continue
+        }
+
+        const oldStock = productDoc.stock || 0
+        // If quantityDifference is positive, we're adding more items (reducing stock)
+        // If quantityDifference is negative, we're removing items (increasing stock)
+        const newStock = Math.max(0, oldStock - quantityDifference)
+
+        // Update the product's stock
+        await mongoose.connection.db!.collection('products').updateOne(
+          { _id: productId },
+          { $set: { stock: newStock, updatedAt: new Date() } }
+        )
+
+        results.push({
+          productId: newProductId,
+          productName: newProduct.name,
+          oldStock,
+          newStock,
+          quantityChange: -quantityDifference, // Negative because we're reducing stock
+          success: true
+        })
+
+        console.log(`[Inventory] Updated Viva Raw product ${newProduct.name}: ${oldStock} → ${newStock} (${quantityDifference > 0 ? '-' : '+'}${Math.abs(quantityDifference)})`)
+      } catch (error) {
+        results.push({
+          productId: (typeof newProduct.productId === 'string' ? newProduct.productId : newProduct.productId.toString()),
+          productName: newProduct.name,
+          oldStock: 0,
+          newStock: 0,
+          quantityChange: 0,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        })
+        console.error(`[Inventory] Error updating inventory for product ${newProduct.name}:`, error)
+      }
+    }
+
+    // Handle products that were removed from the transaction
+    for (const existingProduct of existingProducts) {
+      const existingProductId = (typeof existingProduct.productId === 'string' ? existingProduct.productId : existingProduct.productId.toString())
+      
+      if (!newProductMap.has(existingProductId)) {
+        // Product was removed from transaction, so we need to add back to inventory
+        try {
+          const productId = typeof existingProduct.productId === 'string' 
+            ? new mongoose.Types.ObjectId(existingProduct.productId)
+            : existingProduct.productId
+
+          const productDoc = await mongoose.connection.db!.collection('products').findOne({
+            _id: productId,
+            supplier: 'Viva Raw'
+          })
+
+          if (productDoc) {
+            const oldStock = productDoc.stock || 0
+            const newStock = oldStock + existingProduct.quantity
+
+            await mongoose.connection.db!.collection('products').updateOne(
+              { _id: productId },
+              { $set: { stock: newStock, updatedAt: new Date() } }
+            )
+
+            results.push({
+              productId: existingProductId,
+              productName: existingProduct.name,
+              oldStock,
+              newStock,
+              quantityChange: existingProduct.quantity, // Positive because we're adding back to stock
+              success: true
+            })
+
+            console.log(`[Inventory] Restored Viva Raw product ${existingProduct.name}: ${oldStock} → ${newStock} (+${existingProduct.quantity})`)
+          }
+        } catch (error) {
+          results.push({
+            productId: existingProductId,
+            productName: existingProduct.name,
+            oldStock: 0,
+            newStock: 0,
+            quantityChange: existingProduct.quantity,
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          })
+          console.error(`[Inventory] Error restoring inventory for removed product ${existingProduct.name}:`, error)
+        }
+      }
+    }
+
+  } catch (error) {
+    console.error('[Inventory] Error in updateInventoryForExistingTransaction:', error)
+    throw error
+  }
+
+  return results
+}
+
+/**
+ * Restores inventory for Viva Raw products when a transaction is deleted
+ * @param transactionId The ID of the transaction being deleted
+ * @returns Array of inventory update results
+ */
+export async function restoreInventoryForDeletedTransaction(
+  transactionId: string
+): Promise<InventoryUpdateResult[]> {
+  const results: InventoryUpdateResult[] = []
+
+  try {
+    // Get the transaction before it's deleted to extract product information
+    const transaction = await mongoose.connection.db!.collection('transactions').findOne({
+      _id: new mongoose.Types.ObjectId(transactionId)
+    })
+
+    if (!transaction) {
+      console.warn(`[Inventory] Transaction ${transactionId} not found for inventory restoration`)
+      return results
+    }
+
+    const products = transaction.products || []
+    
+    // Only process sale transactions with products
+    if (transaction.type !== 'sale' || products.length === 0) {
+      console.log(`[Inventory] Transaction ${transactionId} is not a sale transaction or has no products, skipping inventory restoration`)
+      return results
+    }
+
+    console.log(`[Inventory] Restoring inventory for deleted transaction ${transactionId} with ${products.length} products`)
+
+    for (const product of products) {
+      try {
+        // Convert productId to ObjectId if it's a string
+        const productId = typeof product.productId === 'string' 
+          ? new mongoose.Types.ObjectId(product.productId)
+          : product.productId
+
+        // Find the product in the database
+        const productDoc = await mongoose.connection.db!.collection('products').findOne({
+          _id: productId,
+          supplier: 'Viva Raw'
+        })
+
+        if (!productDoc) {
+          results.push({
+            productId: productId.toString(),
+            productName: product.name || 'Unknown',
+            oldStock: 0,
+            newStock: 0,
+            quantityChange: product.quantity,
+            success: false,
+            error: 'Product not found or not a Viva Raw product'
+          })
+          continue
+        }
+
+        const oldStock = productDoc.stock || 0
+        const newStock = oldStock + product.quantity // Add back the quantity that was sold
+
+        // Update the product's stock
+        await mongoose.connection.db!.collection('products').updateOne(
+          { _id: productId },
+          { $set: { stock: newStock, updatedAt: new Date() } }
+        )
+
+        results.push({
+          productId: productId.toString(),
+          productName: product.name || 'Unknown',
+          oldStock,
+          newStock,
+          quantityChange: product.quantity, // Positive because we're adding back to stock
+          success: true
+        })
+
+        console.log(`[Inventory] Restored Viva Raw product ${product.name}: ${oldStock} → ${newStock} (+${product.quantity})`)
+      } catch (error) {
+        results.push({
+          productId: (typeof product.productId === 'string' ? product.productId : product.productId.toString()),
+          productName: product.name || 'Unknown',
+          oldStock: 0,
+          newStock: 0,
+          quantityChange: product.quantity,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        })
+        console.error(`[Inventory] Error restoring inventory for product ${product.name}:`, error)
+      }
+    }
+
+  } catch (error) {
+    console.error('[Inventory] Error in restoreInventoryForDeletedTransaction:', error)
+    throw error
+  }
+
+  return results
+} 

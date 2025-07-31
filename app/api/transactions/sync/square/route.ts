@@ -5,6 +5,7 @@ import mongoose from 'mongoose'
 import type { Order } from 'square'
 import SyncStateModel from '@/lib/models/SyncState'
 import ProductModel from '@/lib/models/Product'
+import { updateInventoryForNewTransaction } from '@/lib/utils/inventory-management'
 
 export async function POST(request: Request) {
   try {
@@ -200,15 +201,18 @@ export async function POST(request: Request) {
                          `Square Item ${item.catalogObjectId || 'Unknown'}`;
           }
 
+          // Ensure productName is always a string
+          const finalProductName = productName || 'Unknown Product';
+
           console.log(`[Square Sync] Product name resolution:`, {
             originalName: item.name,
             catalogObjectId: item.catalogObjectId,
-            finalName: productName,
+            finalName: finalProductName,
             foundProduct: !!product
           });
 
           return {
-            name: productName,
+            name: finalProductName,
             quantity: Number(item.quantity),
             unitPrice: Number(item.basePriceMoney?.amount || 0) / 100,
             totalPrice: Number(item.totalMoney?.amount || 0) / 100,
@@ -245,6 +249,16 @@ export async function POST(request: Request) {
         ...transaction,
         createdAt: new Date().toISOString()
       })
+
+      // Update inventory for Viva Raw products
+      if (transaction.products && transaction.products.length > 0) {
+        try {
+          const inventoryResults = await updateInventoryForNewTransaction(transaction.products)
+          console.log(`[Square Sync] Inventory update results for order ${order.id}:`, inventoryResults)
+        } catch (error) {
+          console.error(`[Square Sync] Error updating inventory for order ${order.id}:`, error)
+        }
+      }
 
       console.log('Created transaction with platformMetadata:', {
         transactionId: newTransaction._id,

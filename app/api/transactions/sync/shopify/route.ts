@@ -3,6 +3,7 @@ import { shopifyClient } from '@/lib/shopify'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
 import SyncStateModel from '@/lib/models/SyncState'
+import { updateInventoryForNewTransaction } from '@/lib/utils/inventory-management'
 
 export async function POST(request: Request) {
   try {
@@ -124,6 +125,16 @@ export async function POST(request: Request) {
         ...transaction,
         createdAt: new Date().toISOString()
       })
+
+      // Update inventory for Viva Raw products
+      if (transaction.products && transaction.products.length > 0) {
+        try {
+          const inventoryResults = await updateInventoryForNewTransaction(transaction.products)
+          console.log(`[Shopify Sync] Inventory update results for order ${order.id}:`, inventoryResults)
+        } catch (error) {
+          console.error(`[Shopify Sync] Error updating inventory for order ${order.id}:`, error)
+        }
+      }
 
       console.log('Created transaction with platformMetadata:', {
         transactionId: newTransaction._id,
