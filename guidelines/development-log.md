@@ -508,3 +508,12 @@
         -   `date` and `source`: same as the training transaction
     -   The response includes `contractorExpenseId` when created.
     -   Files changed: `app/api/transactions/route.ts`.
+
+-   **Copyable In-Stock Blurbs for Viva Raw Sections**
+    -   Added compact “Copy blurb” buttons to Cats, Dogs, and Pure sections on the Viva Raw page.
+    -   Generates customer-friendly text like: `Turkey 3 lb, Chicken 6 lb, Duck 4 lb, Rabbit 7 lb, Beef 10 lb`.
+    -   Uses simplified recipe names (Turkey/Chicken/Beef/Rabbit/Duck) and sums total pounds across in-stock items.
+    -   Robust parsing for names like `Viva Raw <Recipe> for <Cats|Dogs> 1 lb - Regular` and `Viva Raw Pure <Recipe> 1 lb - Regular`.
+    -   Handles oz→lb conversion; rounds to whole or 0.5 lb where applicable.
+    -   One-tap copy with “Copied” feedback; mobile-optimized UI.
+    -   Files changed: `app/viva-raw/page.tsx`.

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { ShoppingCart, Receipt, GraduationCap, LineChart, Package } from "lucide-react"
+import { ShoppingCart, Receipt, GraduationCap, LineChart, Package, PawPrint } from "lucide-react"
 import { NewSaleModal } from '@/components/new-transaction-modal'
 import { TransactionsModal } from '@/components/transactions-modal'
 import { useRouter } from 'next/navigation'
@@ -94,13 +94,13 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Bottom Cards Section (Profit/Loss and Products) */}
+          {/* Bottom Cards Section (Profit/Loss, Products, Viva Raw) */}
           <div 
             className={`transition-opacity duration-1000 ${
               showProfitLoss ? 'opacity-100' : 'opacity-0'
             }`}
           >
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-6 sm:mt-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 mt-6 sm:mt-8">
               {/* Profit/Loss Card */}
               <Card 
                 className="p-4 sm:p-6 hover:shadow-lg transition-shadow cursor-pointer"
@@ -120,6 +120,17 @@ export default function Home() {
                 <Button variant="ghost" className="w-full h-full flex flex-col gap-3 sm:gap-4">
                   <Package className="h-6 w-6 sm:h-8 sm:w-8" />
                   <span className="text-sm sm:text-base">Products</span>
+                </Button>
+              </Card>
+
+              {/* Viva Raw Card */}
+              <Card 
+                className="p-4 sm:p-6 hover:shadow-lg transition-shadow cursor-pointer"
+                onClick={() => router.push('/viva-raw')}
+              >
+                <Button variant="ghost" className="w-full h-full flex flex-col gap-3 sm:gap-4">
+                  <PawPrint className="h-6 w-6 sm:h-8 sm:w-8" />
+                  <span className="text-sm sm:text-base">Viva Raw</span>
                 </Button>
               </Card>
             </div>
