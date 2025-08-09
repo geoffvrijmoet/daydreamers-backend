@@ -16,6 +16,19 @@
     -   Fixed Square sync to ensure product names are always valid strings.
     -   Files changed: `lib/utils/inventory-management.ts`, `app/api/transactions/route.ts`, `app/api/transactions/[id]/route.ts`, `app/api/transactions/sync/square/route.ts`, `app/api/transactions/sync/shopify/route.ts`.
 
+-   **Mobile Optimization for Viva Raw Products Page**
+    -   Enhanced responsive design with improved mobile-first approach using Tailwind's responsive prefixes.
+    -   Optimized grid layout: 1 column on mobile, 2 on small screens, 3 on large, 4 on extra large.
+    -   Improved touch interactions with larger touch targets and better visual feedback.
+    -   Enhanced stock editing interface with save/cancel buttons and visual indicators.
+    -   Added low stock warnings with color-coded indicators (red for out of stock, orange for low stock).
+    -   Improved typography scaling with responsive text sizes (sm:text-base, etc.).
+    -   Added visual category indicators with colored dots and product counts.
+    -   Enhanced card design with better spacing, borders, and hover states.
+    -   Improved loading and error states with responsive sizing.
+    -   Added proper padding and margins for mobile screens.
+    -   Files changed: `app/viva-raw/page.tsx`.
+
 ### Invoice Email to Transaction Linking
     -   Added functionality to link invoice emails to existing expense transactions for better data organization.
     -   Created bi-directional relationship between invoice emails and transactions using `transactionId` and `invoiceEmailId` fields.
@@ -484,3 +497,14 @@
     -   Enhanced potential matches with visual indicators for exact matches (date, amount, supplier) using green highlighting and checkmarks
     -   Maintains all existing functionality while providing smart suggestions for faster linking
     -   Files changed: `app/transactions/page.tsx`
+
+-   **Automatic Contractor Expense for Training Transactions**
+    -   When a `training` transaction is created via `/api/transactions` (POST), the API automatically creates a corresponding `expense` transaction for the trainer payout.
+    -   Payout amount is calculated as the non-sales-tax portion: `revenue - taxAmount` (pre-tax revenue).
+    -   The created expense uses:
+        -   `supplier`: the `trainer` name from the training transaction
+        -   `purchaseCategory`: `Independent Contractor Payment`
+        -   `notes`: includes client/dog/agency (if present) and references the related training transaction ID
+        -   `date` and `source`: same as the training transaction
+    -   The response includes `contractorExpenseId` when created.
+    -   Files changed: `app/api/transactions/route.ts`.

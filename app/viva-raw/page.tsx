@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent } from "@/components/ui/card"
-import { Loader2, Package } from "lucide-react"
+import { Loader2, Package, Edit3, Check, X } from "lucide-react"
 
 interface Product {
   _id: string
@@ -79,8 +79,6 @@ export default function VivaRawPage() {
     }).format(amount)
   }
 
-
-
   const handleStockEdit = (productId: string, currentStock: number | null) => {
     setEditingStock(productId)
     setTempStockValue((currentStock || 0).toString())
@@ -118,12 +116,16 @@ export default function VivaRawPage() {
     }
   }
 
+  const handleStockCancel = () => {
+    setEditingStock(null)
+    setTempStockValue('')
+  }
+
   const handleStockKeyPress = (e: React.KeyboardEvent, productId: string) => {
     if (e.key === 'Enter') {
       handleStockSave(productId)
     } else if (e.key === 'Escape') {
-      setEditingStock(null)
-      setTempStockValue('')
+      handleStockCancel()
     }
   }
 
@@ -133,50 +135,98 @@ export default function VivaRawPage() {
   const pure = products.filter(p => p.baseProductName.toLowerCase().includes('pure'))
 
   const renderProductGrid = (group: Product[]) => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 mb-8 sm:mb-10">
       {group.map((product) => {
         const currentStock = product.stock || 0
         const isEditingThisStock = editingStock === product._id
         const isUpdatingThisStock = updatingStock === product._id
+        const isLowStock = currentStock <= product.minimumStock
+        
         return (
-          <Card key={product._id} className="hover:shadow-md transition-shadow">
-            <CardContent className="p-4">
+          <Card key={product._id} className="hover:shadow-md transition-shadow border-gray-200">
+            <CardContent className="p-3 sm:p-4">
               <div className="mb-3">
-                <h3 className="font-medium text-gray-900 leading-tight">{product.baseProductName}</h3>
+                <h3 className="font-medium text-gray-900 leading-tight text-sm sm:text-base line-clamp-2">
+                  {product.baseProductName}
+                </h3>
                 {product.variantName !== 'Default' && (
-                  <p className="text-sm text-blue-600">{product.variantName}</p>
+                  <p className="text-xs sm:text-sm text-blue-600 mt-1">{product.variantName}</p>
                 )}
               </div>
-              <div className="mb-3 flex flex-row items-center gap-4">
-                <span className="text-lg font-semibold text-green-600">
-                  {formatCurrency(product.price)}
-                </span>
-                <span className="text-sm text-gray-600">In Stock: </span>
+              
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-base sm:text-lg font-semibold text-green-600">
+                    {formatCurrency(product.price)}
+                  </span>
+                  <span className="text-xs sm:text-sm text-gray-500">Stock</span>
+                </div>
+                
                 {isEditingThisStock ? (
-                  <input
-                    ref={inputRef}
-                    type="number"
-                    value={tempStockValue}
-                    onChange={(e) => setTempStockValue(e.target.value)}
-                    onBlur={() => handleStockSave(product._id)}
-                    onKeyDown={(e) => handleStockKeyPress(e, product._id)}
-                    className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    autoFocus
-                    disabled={isUpdatingThisStock}
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={inputRef}
+                      type="number"
+                      value={tempStockValue}
+                      onChange={(e) => setTempStockValue(e.target.value)}
+                      onKeyDown={(e) => handleStockKeyPress(e, product._id)}
+                      className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      autoFocus
+                      disabled={isUpdatingThisStock}
+                      min="0"
+                    />
+                    <button
+                      onClick={() => handleStockSave(product._id)}
+                      disabled={isUpdatingThisStock}
+                      className="p-1 text-green-600 hover:bg-green-50 rounded transition-colors"
+                    >
+                      {isUpdatingThisStock ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Check className="h-4 w-4" />
+                      )}
+                    </button>
+                    <button
+                      onClick={handleStockCancel}
+                      disabled={isUpdatingThisStock}
+                      className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
                 ) : (
-                  <span 
-                    className={`font-medium cursor-pointer hover:bg-gray-100 px-2 py-1 rounded ${
-                      currentStock === 0 ? 'text-red-600' : 'text-gray-900'
+                  <div 
+                    className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
+                      isLowStock 
+                        ? 'bg-red-50 border border-red-200 hover:bg-red-100' 
+                        : 'bg-gray-50 border border-gray-200 hover:bg-gray-100'
                     }`}
                     onClick={() => handleStockEdit(product._id, product.stock)}
                   >
-                    {isUpdatingThisStock ? (
-                      <Loader2 className="h-4 w-4 animate-spin inline" />
-                    ) : (
-                      currentStock
-                    )}
-                  </span>
+                    <span 
+                      className={`font-medium text-sm sm:text-base ${
+                        currentStock === 0 
+                          ? 'text-red-600' 
+                          : isLowStock 
+                            ? 'text-orange-600' 
+                            : 'text-gray-900'
+                      }`}
+                    >
+                      {isUpdatingThisStock ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        currentStock
+                      )}
+                    </span>
+                    <Edit3 className="h-3 w-3 text-gray-400" />
+                  </div>
+                )}
+                
+                {isLowStock && currentStock > 0 && (
+                  <p className="text-xs text-orange-600 mt-1">Low stock</p>
+                )}
+                {currentStock === 0 && (
+                  <p className="text-xs text-red-600 mt-1">Out of stock</p>
                 )}
               </div>
             </CardContent>
@@ -188,10 +238,10 @@ export default function VivaRawPage() {
 
   if (loading) {
     return (
-      <div className="container mx-auto py-8">
+      <div className="container mx-auto px-4 py-6 sm:py-8">
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin mr-2" />
-          <span>Loading Viva Raw products...</span>
+          <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin mr-2" />
+          <span className="text-sm sm:text-base">Loading Viva Raw products...</span>
         </div>
       </div>
     )
@@ -199,13 +249,13 @@ export default function VivaRawPage() {
 
   if (error) {
     return (
-      <div className="container mx-auto py-8">
+      <div className="container mx-auto px-4 py-6 sm:py-8">
         <div className="text-center py-12">
-          <div className="text-red-600 text-lg font-medium mb-2">Error Loading Products</div>
-          <div className="text-gray-600 mb-4">{error}</div>
+          <div className="text-red-600 text-base sm:text-lg font-medium mb-2">Error Loading Products</div>
+          <div className="text-gray-600 mb-4 text-sm sm:text-base">{error}</div>
           <button
             onClick={fetchVivaRawProducts}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
           >
             Try Again
           </button>
@@ -215,10 +265,10 @@ export default function VivaRawPage() {
   }
 
   return (
-    <div className="container mx-auto py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Viva Raw Products</h1>
-        <p className="text-gray-600">
+    <div className="container mx-auto px-4 py-6 sm:py-8">
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Viva Raw Products</h1>
+        <p className="text-gray-600 text-sm sm:text-base">
           {products.length} products found from Viva Raw supplier
         </p>
       </div>
@@ -226,30 +276,41 @@ export default function VivaRawPage() {
       {products.length === 0 ? (
         <div className="text-center py-12">
           <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <div className="text-lg font-medium text-gray-900 mb-2">No Products Found</div>
-          <div className="text-gray-600">No products from Viva Raw supplier were found in the database.</div>
+          <div className="text-base sm:text-lg font-medium text-gray-900 mb-2">No Products Found</div>
+          <div className="text-gray-600 text-sm sm:text-base">No products from Viva Raw supplier were found in the database.</div>
         </div>
       ) : (
-        <>
+        <div className="space-y-6 sm:space-y-8">
           {cats.length > 0 && (
-            <>
-              <h2 className="text-xl font-bold mb-2 text-pink-700">For Cats</h2>
+            <div>
+              <h2 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-pink-700 flex items-center">
+                <span className="w-3 h-3 bg-pink-500 rounded-full mr-2"></span>
+                For Cats ({cats.length})
+              </h2>
               {renderProductGrid(cats)}
-            </>
+            </div>
           )}
+          
           {dogs.length > 0 && (
-            <>
-              <h2 className="text-xl font-bold mb-2 text-blue-700">For Dogs</h2>
+            <div>
+              <h2 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-blue-700 flex items-center">
+                <span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>
+                For Dogs ({dogs.length})
+              </h2>
               {renderProductGrid(dogs)}
-            </>
+            </div>
           )}
+          
           {pure.length > 0 && (
-            <>
-              <h2 className="text-xl font-bold mb-2 text-green-700">Pure</h2>
+            <div>
+              <h2 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-green-700 flex items-center">
+                <span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
+                Pure ({pure.length})
+              </h2>
               {renderProductGrid(pure)}
-            </>
+            </div>
           )}
-        </>
+        </div>
       )}
     </div>
   )

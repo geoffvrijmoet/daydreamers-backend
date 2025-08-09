@@ -262,6 +262,45 @@ export async function POST(request: Request) {
         console.error('Server: /api/transactions POST: Error updating inventory:', error)
       }
     }
+
+    // If training, automatically create an expense for contractor payout (pre-tax portion)
+    let contractorExpenseId: mongoose.ObjectId | undefined
+    if (type === 'training') {
+      try {
+        const grossRevenue = Number(parseFloat(revenue) || parseFloat(amount) || 0)
+        const salesTax = Number(parseFloat(taxAmount) || 0)
+        const contractorPayout = Math.max(0, Number((grossRevenue - salesTax).toFixed(2)))
+
+        if (contractorPayout > 0) {
+          const contractorExpense: ExpenseTransactionDocument = {
+            date: new Date(date),
+            amount: contractorPayout,
+            type: 'expense',
+            source,
+            notes: `Independent contractor payout for training session${clientName ? ` - Client: ${clientName}` : ''}${dogName ? `, Dog: ${dogName}` : ''}${trainingAgency ? `, Agency: ${trainingAgency}` : ''}. Related training txn: ${result.insertedId}`,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            supplier: trainer || 'Independent Contractor',
+            purchaseCategory: 'Independent Contractor Payment',
+            supplierOrderNumber: ''
+          }
+
+          const contractorInsert = await mongoose.connection.db!.collection('transactions').insertOne(contractorExpense)
+          contractorExpenseId = contractorInsert.insertedId as unknown as mongoose.ObjectId
+          console.log('Server: /api/transactions POST: Created contractor expense for training payout:', {
+            contractorExpenseId,
+            contractorPayout
+          })
+        } else {
+          console.log('Server: /api/transactions POST: Skipping contractor expense, payout calculated as 0', {
+            grossRevenue,
+            salesTax
+          })
+        }
+      } catch (err) {
+        console.error('Server: /api/transactions POST: Failed creating contractor payout expense:', err)
+      }
+    }
     
     // If this is from an email, mark the email as processed
     if (emailId) {
@@ -282,7 +321,8 @@ export async function POST(request: Request) {
       transaction: {
         ...transactionToSave,
         id: result.insertedId
-      }
+      },
+      contractorExpenseId
     })
   } catch (error) {
     console.error('Error creating transaction:', error)
