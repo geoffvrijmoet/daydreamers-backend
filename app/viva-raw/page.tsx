@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent } from "@/components/ui/card"
-import { Loader2, Package, Edit3, Check, X } from "lucide-react"
+import { Loader2, Package, Edit3, Check, X, Copy } from "lucide-react"
 
 interface Product {
   _id: string
@@ -34,6 +34,7 @@ export default function VivaRawPage() {
   const [editingStock, setEditingStock] = useState<string | null>(null)
   const [tempStockValue, setTempStockValue] = useState('')
   const [updatingStock, setUpdatingStock] = useState<string | null>(null)
+  const [copiedSection, setCopiedSection] = useState<'cats' | 'dogs' | 'pure' | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   // Auto-select stock input when editing
@@ -133,6 +134,80 @@ export default function VivaRawPage() {
   const cats = products.filter(p => p.baseProductName.toLowerCase().includes('for cats'))
   const dogs = products.filter(p => p.baseProductName.toLowerCase().includes('for dogs'))
   const pure = products.filter(p => p.baseProductName.toLowerCase().includes('pure'))
+
+  // Helpers: extract recipe and unit weight in lbs
+  const extractRecipe = (baseName: string) => {
+    // Examples:
+    // "Viva Raw Turkey for Cats 1 lb - Regular" => Turkey
+    // "Viva Raw Pure Rabbit 1 lb - Regular" => Rabbit
+    const pureMatch = baseName.match(/^\s*Viva\s+Raw\s+Pure\s+([^\d-]+)/i)
+    if (pureMatch && pureMatch[1]) return pureMatch[1].trim()
+    const forMatch = baseName.match(/^\s*Viva\s+Raw\s+(.+?)\s+for\s+(Cats|Dogs)/i)
+    if (forMatch && forMatch[1]) return forMatch[1].trim()
+    // Fallback: remove prefixes and qualifiers
+    return baseName
+      .replace(/^\s*Viva\s+Raw\s*/i, '')
+      .replace(/\s+for\s+(Cats|Dogs).*/i, '')
+      .replace(/\s+Pure\s+/i, ' ')
+      .replace(/\s*\d+\s*(lb|oz).*/i, '')
+      .trim()
+  }
+
+  const getUnitWeightLbs = (product: Product) => {
+    const search = `${product.variantName || ''} ${product.baseProductName || ''}`
+    const weightMatch = search.match(/(\d+(?:\.\d+)?)\s*(lb|oz)/i)
+    if (!weightMatch) return 1 // default to 1 lb
+    const value = parseFloat(weightMatch[1])
+    const unit = weightMatch[2].toLowerCase()
+    if (unit === 'oz') return value / 16
+    return value
+  }
+
+  const roundLbs = (lbs: number) => {
+    // keep .5 where applicable, otherwise round to integer; limit to 2 decimals otherwise
+    const roundedToQuarter = Math.round(lbs * 4) / 4
+    if (Math.abs(roundedToQuarter - Math.round(roundedToQuarter)) < 1e-6) {
+      return `${Math.round(roundedToQuarter)} lb`
+    }
+    if (Math.abs(roundedToQuarter * 2 - Math.round(roundedToQuarter * 2)) < 1e-6) {
+      return `${(Math.round(roundedToQuarter * 2) / 2).toFixed(1)} lb`
+    }
+    return `${roundedToQuarter.toFixed(2)} lb`
+  }
+
+  // Build concise in-stock blurb for copy using recipe + total lbs
+  const buildBlurb = (label: string, group: Product[]) => {
+    const totalsByRecipe = new Map<string, number>()
+
+    group
+      .filter(p => (p.stock || 0) > 0)
+      .forEach(p => {
+        const recipe = extractRecipe(p.baseProductName)
+        const unitLbs = getUnitWeightLbs(p)
+        const qty = p.stock || 0
+        const prev = totalsByRecipe.get(recipe) || 0
+        totalsByRecipe.set(recipe, prev + qty * unitLbs)
+      })
+
+    const entries = Array.from(totalsByRecipe.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([recipe, lbs]) => `${recipe} ${roundLbs(lbs)}`)
+
+    if (entries.length === 0) return `Viva Raw — ${label}: currently out of stock.`
+    return entries.join(', ')
+  }
+
+  const handleCopyBlurb = async (section: 'cats' | 'dogs' | 'pure', group: Product[]) => {
+    try {
+      const label = section === 'cats' ? 'For Cats' : section === 'dogs' ? 'For Dogs' : 'Pure'
+      const text = buildBlurb(label, group)
+      await navigator.clipboard.writeText(text)
+      setCopiedSection(section)
+      setTimeout(() => setCopiedSection(null), 1500)
+    } catch {
+      console.error('Failed to copy blurb')
+    }
+  }
 
   const renderProductGrid = (group: Product[]) => (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 mb-8 sm:mb-10">
@@ -283,30 +358,57 @@ export default function VivaRawPage() {
         <div className="space-y-6 sm:space-y-8">
           {cats.length > 0 && (
             <div>
-              <h2 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-pink-700 flex items-center">
-                <span className="w-3 h-3 bg-pink-500 rounded-full mr-2"></span>
-                For Cats ({cats.length})
-              </h2>
+              <div className="flex items-center justify-between mb-2 sm:mb-3">
+                <h2 className="text-lg sm:text-xl font-bold text-pink-700 flex items-center">
+                  <span className="w-3 h-3 bg-pink-500 rounded-full mr-2"></span>
+                  For Cats ({cats.length})
+                </h2>
+                <button
+                  onClick={() => handleCopyBlurb('cats', cats)}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs sm:text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                >
+                  {copiedSection === 'cats' ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedSection === 'cats' ? 'Copied' : 'Copy blurb'}
+                </button>
+              </div>
               {renderProductGrid(cats)}
             </div>
           )}
           
           {dogs.length > 0 && (
             <div>
-              <h2 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-blue-700 flex items-center">
-                <span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>
-                For Dogs ({dogs.length})
-              </h2>
+              <div className="flex items-center justify-between mb-2 sm:mb-3">
+                <h2 className="text-lg sm:text-xl font-bold text-blue-700 flex items-center">
+                  <span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>
+                  For Dogs ({dogs.length})
+                </h2>
+                <button
+                  onClick={() => handleCopyBlurb('dogs', dogs)}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs sm:text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                >
+                  {copiedSection === 'dogs' ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedSection === 'dogs' ? 'Copied' : 'Copy blurb'}
+                </button>
+              </div>
               {renderProductGrid(dogs)}
             </div>
           )}
           
           {pure.length > 0 && (
             <div>
-              <h2 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-green-700 flex items-center">
-                <span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
-                Pure ({pure.length})
-              </h2>
+              <div className="flex items-center justify-between mb-2 sm:mb-3">
+                <h2 className="text-lg sm:text-xl font-bold text-green-700 flex items-center">
+                  <span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
+                  Pure ({pure.length})
+                </h2>
+                <button
+                  onClick={() => handleCopyBlurb('pure', pure)}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs sm:text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                >
+                  {copiedSection === 'pure' ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedSection === 'pure' ? 'Copied' : 'Copy blurb'}
+                </button>
+              </div>
               {renderProductGrid(pure)}
             </div>
           )}
