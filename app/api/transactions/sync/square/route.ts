@@ -6,6 +6,7 @@ import type { Order } from 'square'
 import SyncStateModel from '@/lib/models/SyncState'
 import ProductModel from '@/lib/models/Product'
 import { updateInventoryForNewTransaction } from '@/lib/utils/inventory-management'
+import { mergeDuplicateTransactions } from '@/lib/utils/transaction-merge'
 
 export async function POST(request: Request) {
   try {
@@ -91,8 +92,11 @@ export async function POST(request: Request) {
       .filter((order): order is Order => !!order.id && !!order.totalMoney?.amount)
       .map(async (order) => {
 
+      // First, check for and merge any existing duplicates
+      const mergedTransaction = order.id ? await mergeDuplicateTransactions(order.id, 'square') : null
+
       // Check if transaction already exists
-      const existing = await mongoose.model('Transaction').findOne({
+      const existing = mergedTransaction || await mongoose.model('Transaction').findOne({
         'platformMetadata.platform': 'square',
         'platformMetadata.orderId': order.id
       })
@@ -224,7 +228,7 @@ export async function POST(request: Request) {
 
       if (existing) {
         // If transaction exists but status has changed, update it
-        if (existing.status !== status) {
+        if ((existing as { status?: string }).status !== status) {
           await mongoose.model('Transaction').findOneAndUpdate(
             { _id: existing._id },
             { 

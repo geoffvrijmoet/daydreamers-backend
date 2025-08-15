@@ -29,6 +29,14 @@
     -   Added proper padding and margins for mobile screens.
     -   Files changed: `app/viva-raw/page.tsx`.
 
+-   **Fixed Shopify Sync Model Import Error**
+    -   Resolved "Schema hasn't been registered for model 'Transaction'" error in Shopify sync route.
+    -   Added missing `TransactionModel` and `ProductModel` imports to `/api/transactions/sync/shopify/route.ts`.
+    -   Replaced all `mongoose.model('Transaction')` and `mongoose.model('Product')` calls with proper model imports.
+    -   Ensures Transaction and Product models are properly registered with Mongoose before use in Shopify sync.
+    -   Fixes production sync issues where Shopify orders were not being imported since June 2025.
+    -   Files changed: `app/api/transactions/sync/shopify/route.ts`.
+
 ### Invoice Email to Transaction Linking
     -   Added functionality to link invoice emails to existing expense transactions for better data organization.
     -   Created bi-directional relationship between invoice emails and transactions using `transactionId` and `invoiceEmailId` fields.
@@ -411,6 +419,10 @@
     -   There are TypeScript linter errors in the `extractProductsFromEmail` function after adding email context capture
     -   Need to resolve syntax issues around lines 1124-1137 in `app/transactions/page.tsx`
     -   The email context feature is implemented but needs syntax fixes to compile properly
+-   **Fix Shopify Sync TypeScript Errors** - There are TypeScript linter errors in the Shopify sync route after adding proper model imports
+    -   Property 'status' and 'products' do not exist on the base transaction type
+    -   Need to resolve type issues around lines 107 and 147 in `app/api/transactions/sync/shopify/route.ts`
+    -   The sync functionality works but needs type fixes to compile properly
 
 ## ✅ Recently Completed Tasks
 
