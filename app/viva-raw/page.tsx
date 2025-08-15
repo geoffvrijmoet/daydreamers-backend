@@ -35,6 +35,7 @@ export default function VivaRawPage() {
   const [tempStockValue, setTempStockValue] = useState('')
   const [updatingStock, setUpdatingStock] = useState<string | null>(null)
   const [copiedSection, setCopiedSection] = useState<'cats' | 'dogs' | 'pure' | null>(null)
+  const [copiedBlurbType, setCopiedBlurbType] = useState<'stock' | 'price' | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   // Auto-select stock input when editing
@@ -175,6 +176,25 @@ export default function VivaRawPage() {
     return `${roundedToQuarter.toFixed(2)} lb`
   }
 
+  // Custom sorting function to prioritize main recipes
+  const sortRecipes = (a: [string, number], b: [string, number]) => {
+    const priorityRecipes = ['Beef', 'Chicken', 'Duck', 'Rabbit', 'Turkey']
+    const aIndex = priorityRecipes.indexOf(a[0])
+    const bIndex = priorityRecipes.indexOf(b[0])
+    
+    // If both are priority recipes, sort by priority order
+    if (aIndex !== -1 && bIndex !== -1) {
+      return aIndex - bIndex
+    }
+    
+    // If only one is priority, prioritize it
+    if (aIndex !== -1) return -1
+    if (bIndex !== -1) return 1
+    
+    // If neither is priority, sort alphabetically
+    return a[0].localeCompare(b[0])
+  }
+
   // Build concise in-stock blurb for copy using recipe + total lbs
   const buildBlurb = (label: string, group: Product[]) => {
     const totalsByRecipe = new Map<string, number>()
@@ -190,126 +210,258 @@ export default function VivaRawPage() {
       })
 
     const entries = Array.from(totalsByRecipe.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
+      .sort(sortRecipes)
       .map(([recipe, lbs]) => `${recipe} ${roundLbs(lbs)}`)
 
     if (entries.length === 0) return `Viva Raw — ${label}: currently out of stock.`
     return entries.join(', ')
   }
 
-  const handleCopyBlurb = async (section: 'cats' | 'dogs' | 'pure', group: Product[]) => {
+  // Build price blurb showing recipe names with their prices
+  const buildPriceBlurb = (label: string, group: Product[]) => {
+    const pricesByRecipe = new Map<string, number>()
+
+    group.forEach((p, index) => {
+      try {
+        const recipe = extractRecipe(p.baseProductName)
+        // Only add products with valid prices
+        if (p.price !== null && p.price !== undefined && !pricesByRecipe.has(recipe)) {
+          pricesByRecipe.set(recipe, p.price)
+        }
+      } catch (error) {
+        console.error(`Error processing product ${index}:`, error, p)
+      }
+    })
+
+    const entries = Array.from(pricesByRecipe.entries())
+      .sort(sortRecipes)
+      .map(([recipe, price]) => `${recipe} $${price.toFixed(2)}`)
+
+    return entries.length === 0 ? `Viva Raw — ${label}: no products found.` : entries.join(', ')
+  }
+
+  const handleCopyBlurb = async (section: 'cats' | 'dogs' | 'pure', blurbType: 'stock' | 'price', group: Product[]) => {
     try {
       const label = section === 'cats' ? 'For Cats' : section === 'dogs' ? 'For Dogs' : 'Pure'
-      const text = buildBlurb(label, group)
+      const text = blurbType === 'stock' ? buildBlurb(label, group) : buildPriceBlurb(label, group)
+      
       await navigator.clipboard.writeText(text)
       setCopiedSection(section)
-      setTimeout(() => setCopiedSection(null), 1500)
-    } catch {
-      console.error('Failed to copy blurb')
+      setCopiedBlurbType(blurbType)
+      setTimeout(() => {
+        setCopiedSection(null)
+        setCopiedBlurbType(null)
+      }, 1500)
+    } catch (error) {
+      console.error('Failed to copy blurb:', error)
     }
   }
 
-  const renderProductGrid = (group: Product[]) => (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 mb-8 sm:mb-10">
-      {group.map((product) => {
-        const currentStock = product.stock || 0
-        const isEditingThisStock = editingStock === product._id
-        const isUpdatingThisStock = updatingStock === product._id
-        const isLowStock = currentStock <= product.minimumStock
-        
-        return (
-          <Card key={product._id} className="hover:shadow-md transition-shadow border-gray-200">
-            <CardContent className="p-3 sm:p-4">
-              <div className="mb-3">
-                <h3 className="font-medium text-gray-900 leading-tight text-sm sm:text-base line-clamp-2">
-                  {product.baseProductName}
-                </h3>
-                {product.variantName !== 'Default' && (
-                  <p className="text-xs sm:text-sm text-blue-600 mt-1">{product.variantName}</p>
-                )}
-              </div>
-              
-              <div className="mb-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-base sm:text-lg font-semibold text-green-600">
-                    {formatCurrency(product.price)}
-                  </span>
-                  <span className="text-xs sm:text-sm text-gray-500">Stock</span>
+  const renderProductGrid = (group: Product[]) => {
+    // Sort products by recipe priority
+    const sortedGroup = [...group].sort((a, b) => {
+      const aRecipe = extractRecipe(a.baseProductName)
+      const bRecipe = extractRecipe(b.baseProductName)
+      return sortRecipes([aRecipe, 0], [bRecipe, 0])
+    })
+
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-4 mb-8 sm:mb-10">
+        {sortedGroup.map((product) => {
+          const currentStock = product.stock || 0
+          const isEditingThisStock = editingStock === product._id
+          const isUpdatingThisStock = updatingStock === product._id
+          const isLowStock = currentStock <= product.minimumStock
+          const recipeName = extractRecipe(product.baseProductName)
+          
+          return (
+            <Card key={product._id} className="hover:shadow-md transition-shadow border-gray-200">
+              <CardContent className="p-2 sm:p-4">
+                {/* Desktop view - recipe name */}
+                <div className="mb-3 hidden sm:block">
+                  <h3 className="font-medium text-gray-900 leading-tight text-sm sm:text-base line-clamp-2">
+                    {recipeName}
+                  </h3>
+                  {product.variantName !== 'Default' && (
+                    <p className="text-xs sm:text-sm text-blue-600 mt-1">{product.variantName}</p>
+                  )}
                 </div>
                 
-                {isEditingThisStock ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      ref={inputRef}
-                      type="number"
-                      value={tempStockValue}
-                      onChange={(e) => setTempStockValue(e.target.value)}
-                      onKeyDown={(e) => handleStockKeyPress(e, product._id)}
-                      className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      autoFocus
-                      disabled={isUpdatingThisStock}
-                      min="0"
-                    />
-                    <button
-                      onClick={() => handleStockSave(product._id)}
-                      disabled={isUpdatingThisStock}
-                      className="p-1 text-green-600 hover:bg-green-50 rounded transition-colors"
-                    >
-                      {isUpdatingThisStock ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                {/* Mobile view - horizontal layout */}
+                <div className="sm:hidden">
+                  <div className="flex items-center justify-between gap-2">
+                    {/* Recipe name */}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-medium text-gray-900 text-sm truncate">
+                        {recipeName}
+                      </h3>
+                    </div>
+                    
+                    {/* Price */}
+                    <div className="flex-shrink-0">
+                      <span className="text-sm font-semibold text-green-600">
+                        {formatCurrency(product.price)}
+                      </span>
+                    </div>
+                    
+                    {/* Stock section */}
+                    <div className="flex-shrink-0">
+                      {isEditingThisStock ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            ref={inputRef}
+                            type="number"
+                            value={tempStockValue}
+                            onChange={(e) => setTempStockValue(e.target.value)}
+                            onKeyDown={(e) => handleStockKeyPress(e, product._id)}
+                            className="w-12 px-1 py-0.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+                            autoFocus
+                            disabled={isUpdatingThisStock}
+                            min="0"
+                          />
+                          <button
+                            onClick={() => handleStockSave(product._id)}
+                            disabled={isUpdatingThisStock}
+                            className="p-0.5 text-green-600 hover:bg-green-50 rounded transition-colors"
+                          >
+                            {isUpdatingThisStock ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Check className="h-3 w-3" />
+                            )}
+                          </button>
+                          <button
+                            onClick={handleStockCancel}
+                            disabled={isUpdatingThisStock}
+                            className="p-0.5 text-red-600 hover:bg-red-50 rounded transition-colors"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
                       ) : (
-                        <Check className="h-4 w-4" />
+                        <div 
+                          className={`flex items-center gap-1 px-2 py-1 rounded cursor-pointer transition-colors ${
+                            isLowStock 
+                              ? 'bg-red-50 border border-red-200 hover:bg-red-100' 
+                              : 'bg-gray-50 border border-gray-200 hover:bg-gray-100'
+                          }`}
+                          onClick={() => handleStockEdit(product._id, product.stock)}
+                        >
+                          <span 
+                            className={`font-medium text-xs ${
+                              currentStock === 0 
+                                ? 'text-red-600' 
+                                : isLowStock 
+                                  ? 'text-orange-600' 
+                                  : 'text-gray-900'
+                            }`}
+                          >
+                            {isUpdatingThisStock ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              currentStock
+                            )}
+                          </span>
+                          <Edit3 className="h-2.5 w-2.5 text-gray-400" />
+                        </div>
                       )}
-                    </button>
-                    <button
-                      onClick={handleStockCancel}
-                      disabled={isUpdatingThisStock}
-                      className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
+                    </div>
                   </div>
-                ) : (
-                  <div 
-                    className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
-                      isLowStock 
-                        ? 'bg-red-50 border border-red-200 hover:bg-red-100' 
-                        : 'bg-gray-50 border border-gray-200 hover:bg-gray-100'
-                    }`}
-                    onClick={() => handleStockEdit(product._id, product.stock)}
-                  >
-                    <span 
-                      className={`font-medium text-sm sm:text-base ${
-                        currentStock === 0 
-                          ? 'text-red-600' 
-                          : isLowStock 
-                            ? 'text-orange-600' 
-                            : 'text-gray-900'
-                      }`}
-                    >
-                      {isUpdatingThisStock ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        currentStock
-                      )}
-                    </span>
-                    <Edit3 className="h-3 w-3 text-gray-400" />
-                  </div>
-                )}
+                  
+                  {/* Low stock/out of stock warnings - only show if needed */}
+                  {(isLowStock && currentStock > 0) && (
+                    <p className="text-xs text-orange-600 mt-1">Low stock</p>
+                  )}
+                  {currentStock === 0 && (
+                    <p className="text-xs text-red-600 mt-1">Out of stock</p>
+                  )}
+                </div>
                 
-                {isLowStock && currentStock > 0 && (
-                  <p className="text-xs text-orange-600 mt-1">Low stock</p>
-                )}
-                {currentStock === 0 && (
-                  <p className="text-xs text-red-600 mt-1">Out of stock</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        )
-      })}
-    </div>
-  )
+                {/* Desktop view - original vertical layout */}
+                <div className="hidden sm:block">
+                  <div className="mb-2">
+                    <div className="flex items-center justify-between mb-1 sm:mb-2">
+                      <span className="text-sm sm:text-lg font-semibold text-green-600">
+                        {formatCurrency(product.price)}
+                      </span>
+                      <span className="text-xs sm:text-sm text-gray-500">Stock</span>
+                    </div>
+                    
+                    {isEditingThisStock ? (
+                      <div className="flex items-center gap-1 sm:gap-2">
+                        <input
+                          ref={inputRef}
+                          type="number"
+                          value={tempStockValue}
+                          onChange={(e) => setTempStockValue(e.target.value)}
+                          onKeyDown={(e) => handleStockKeyPress(e, product._id)}
+                          className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          autoFocus
+                          disabled={isUpdatingThisStock}
+                          min="0"
+                        />
+                        <button
+                          onClick={() => handleStockSave(product._id)}
+                          disabled={isUpdatingThisStock}
+                          className="p-1 text-green-600 hover:bg-green-50 rounded transition-colors"
+                        >
+                          {isUpdatingThisStock ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Check className="h-4 w-4" />
+                          )}
+                        </button>
+                        <button
+                          onClick={handleStockCancel}
+                          disabled={isUpdatingThisStock}
+                          className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div 
+                        className={`flex items-center justify-between p-1.5 sm:p-2 rounded-lg cursor-pointer transition-colors ${
+                          isLowStock 
+                            ? 'bg-red-50 border border-red-200 hover:bg-red-100' 
+                            : 'bg-gray-50 border border-gray-200 hover:bg-gray-100'
+                        }`}
+                        onClick={() => handleStockEdit(product._id, product.stock)}
+                      >
+                        <span 
+                          className={`font-medium text-sm sm:text-base ${
+                            currentStock === 0 
+                              ? 'text-red-600' 
+                              : isLowStock 
+                                ? 'text-orange-600' 
+                                : 'text-gray-900'
+                          }`}
+                        >
+                          {isUpdatingThisStock ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            currentStock
+                          )}
+                        </span>
+                        <Edit3 className="h-3 w-3 text-gray-400" />
+                      </div>
+                    )}
+                    
+                    {isLowStock && currentStock > 0 && (
+                      <p className="text-xs text-orange-600 mt-1">Low stock</p>
+                    )}
+                    {currentStock === 0 && (
+                      <p className="text-xs text-red-600 mt-1">Out of stock</p>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+    )
+  }
 
   if (loading) {
     return (
@@ -363,13 +515,22 @@ export default function VivaRawPage() {
                   <span className="w-3 h-3 bg-pink-500 rounded-full mr-2"></span>
                   For Cats ({cats.length})
                 </h2>
-                <button
-                  onClick={() => handleCopyBlurb('cats', cats)}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs sm:text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100"
-                >
-                  {copiedSection === 'cats' ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copiedSection === 'cats' ? 'Copied' : 'Copy blurb'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleCopyBlurb('cats', 'stock', cats)}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs sm:text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                  >
+                    {copiedSection === 'cats' && copiedBlurbType === 'stock' ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedSection === 'cats' && copiedBlurbType === 'stock' ? 'Copied' : 'Stock blurb'}
+                  </button>
+                  <button
+                    onClick={() => handleCopyBlurb('cats', 'price', cats)}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs sm:text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                  >
+                    {copiedSection === 'cats' && copiedBlurbType === 'price' ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedSection === 'cats' && copiedBlurbType === 'price' ? 'Copied' : 'Price blurb'}
+                  </button>
+                </div>
               </div>
               {renderProductGrid(cats)}
             </div>
@@ -382,13 +543,22 @@ export default function VivaRawPage() {
                   <span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>
                   For Dogs ({dogs.length})
                 </h2>
-                <button
-                  onClick={() => handleCopyBlurb('dogs', dogs)}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs sm:text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100"
-                >
-                  {copiedSection === 'dogs' ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copiedSection === 'dogs' ? 'Copied' : 'Copy blurb'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleCopyBlurb('dogs', 'stock', dogs)}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs sm:text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                  >
+                    {copiedSection === 'dogs' && copiedBlurbType === 'stock' ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedSection === 'dogs' && copiedBlurbType === 'stock' ? 'Copied' : 'Stock blurb'}
+                  </button>
+                  <button
+                    onClick={() => handleCopyBlurb('dogs', 'price', dogs)}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs sm:text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                  >
+                    {copiedSection === 'dogs' && copiedBlurbType === 'price' ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedSection === 'dogs' && copiedBlurbType === 'price' ? 'Copied' : 'Price blurb'}
+                  </button>
+                </div>
               </div>
               {renderProductGrid(dogs)}
             </div>
@@ -401,13 +571,22 @@ export default function VivaRawPage() {
                   <span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
                   Pure ({pure.length})
                 </h2>
-                <button
-                  onClick={() => handleCopyBlurb('pure', pure)}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs sm:text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100"
-                >
-                  {copiedSection === 'pure' ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copiedSection === 'pure' ? 'Copied' : 'Copy blurb'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleCopyBlurb('pure', 'stock', pure)}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs sm:text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                  >
+                    {copiedSection === 'pure' && copiedBlurbType === 'stock' ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedSection === 'pure' && copiedBlurbType === 'stock' ? 'Copied' : 'Stock blurb'}
+                  </button>
+                  <button
+                    onClick={() => handleCopyBlurb('pure', 'price', pure)}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs sm:text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                  >
+                    {copiedSection === 'pure' && copiedBlurbType === 'price' ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedSection === 'pure' && copiedBlurbType === 'price' ? 'Copied' : 'Price blurb'}
+                  </button>
+                </div>
               </div>
               {renderProductGrid(pure)}
             </div>
