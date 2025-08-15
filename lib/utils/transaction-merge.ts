@@ -49,7 +49,7 @@ export async function mergeDuplicateTransactions(orderId: string, platform: 'sho
   
   // Merge data from secondary transactions into primary
   let hasUpdates = false
-  const updates: any = {}
+  const updates: Record<string, unknown> = {}
   
   for (const secondary of secondaryTransactions) {
     // Merge platformMetadata if primary doesn't have it
@@ -60,55 +60,55 @@ export async function mergeDuplicateTransactions(orderId: string, platform: 'sho
     }
     
     // Merge products if primary doesn't have them
-    if ((!primaryTransaction as any).products && (secondary as any).products) {
-      updates.products = (secondary as any).products
+    if (!(primaryTransaction as { products?: unknown[] }).products && (secondary as { products?: unknown[] }).products) {
+      updates.products = (secondary as { products?: unknown[] }).products
       hasUpdates = true
       console.log(`Merged products from ${secondary._id}`)
     }
     
     // Merge lineItems if primary doesn't have them (for old format)
-    if ((!primaryTransaction as any).lineItems && (secondary as any).lineItems) {
-      updates.lineItems = (secondary as any).lineItems
+    if (!(primaryTransaction as { lineItems?: unknown[] }).lineItems && (secondary as { lineItems?: unknown[] }).lineItems) {
+      updates.lineItems = (secondary as { lineItems?: unknown[] }).lineItems
       hasUpdates = true
       console.log(`Merged lineItems from ${secondary._id}`)
     }
     
     // Merge other fields if primary is missing them
-    if (!primaryTransaction.preTaxAmount && (secondary as any).preTaxAmount) {
-      updates.preTaxAmount = (secondary as any).preTaxAmount
+    if (!(primaryTransaction as { preTaxAmount?: number }).preTaxAmount && (secondary as { preTaxAmount?: number }).preTaxAmount) {
+      updates.preTaxAmount = (secondary as { preTaxAmount?: number }).preTaxAmount
       hasUpdates = true
     }
     
-    if (!primaryTransaction.isTaxable && (secondary as any).isTaxable) {
-      updates.isTaxable = (secondary as any).isTaxable
+    if (!(primaryTransaction as { isTaxable?: boolean }).isTaxable && (secondary as { isTaxable?: boolean }).isTaxable) {
+      updates.isTaxable = (secondary as { isTaxable?: boolean }).isTaxable
       hasUpdates = true
     }
     
-    if (!primaryTransaction.draft && (secondary as any).draft !== undefined) {
-      updates.draft = (secondary as any).draft
+    if (!(primaryTransaction as { draft?: boolean }).draft && (secondary as { draft?: boolean }).draft !== undefined) {
+      updates.draft = (secondary as { draft?: boolean }).draft
       hasUpdates = true
     }
     
     // Merge customer info if primary doesn't have it
-    if (!primaryTransaction.customer && (secondary as any).customer) {
-      updates.customer = (secondary as any).customer
+    if (!(primaryTransaction as { customer?: string }).customer && (secondary as { customer?: string }).customer) {
+      updates.customer = (secondary as { customer?: string }).customer
       hasUpdates = true
     }
     
-    if (!primaryTransaction.email && (secondary as any).email) {
-      updates.email = (secondary as any).email
+    if (!(primaryTransaction as { email?: string }).email && (secondary as { email?: string }).email) {
+      updates.email = (secondary as { email?: string }).email
       hasUpdates = true
     }
     
     // Merge payment method if primary doesn't have it
-    if (!primaryTransaction.paymentMethod && (secondary as any).paymentMethod) {
-      updates.paymentMethod = (secondary as any).paymentMethod
+    if (!(primaryTransaction as { paymentMethod?: string }).paymentMethod && (secondary as { paymentMethod?: string }).paymentMethod) {
+      updates.paymentMethod = (secondary as { paymentMethod?: string }).paymentMethod
       hasUpdates = true
     }
     
     // Merge tip if primary doesn't have it
-    if (!primaryTransaction.tip && (secondary as any).tip) {
-      updates.tip = (secondary as any).tip
+    if (!(primaryTransaction as { tip?: number }).tip && (secondary as { tip?: number }).tip) {
+      updates.tip = (secondary as { tip?: number }).tip
       hasUpdates = true
     }
   }
