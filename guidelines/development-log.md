@@ -235,7 +235,7 @@
 
 -   **Added Transaction Filtering to Transactions Page**
     -   Implemented filtering functionality for the transactions page.
-    -   Filter options: All, Sales, Expenses, Invoice Emails.
+    -   Filter options: All, Sales, Expenses, Training. The previous "Invoice Emails" filter has been merged into the "Expenses" filter.
     -   `activeFilter` state controls which items are displayed.
     -   Filter buttons show real-time counts for each category.
     -   UI highlights the active filter.
@@ -414,6 +414,19 @@
 
 ## ✅ Recently Completed Tasks
 
+-   **Optional Inventory Update on AI-Parsed Expense Save**
+    -   Added inventory increase support when saving AI-parsed products to expense transactions.
+    -   Backend: new utilities `increaseInventoryForNewExpense` and `increaseInventoryForExistingExpense`; POST and PATCH
+        transaction routes now accept `affectStock` to opt-in inventory changes for expenses.
+    -   Frontend: added default-checked "Affect stock" checkbox under "Save Products to Transaction" in the parsed
+        products UI; value is sent with the save request.
+    -   Files changed: `lib/utils/inventory-management.ts`, `app/api/transactions/route.ts`,
+        `app/api/transactions/[id]/route.ts`, `app/transactions/page.tsx`.
+-   **Merged Invoice Emails Filter into Expenses**
+    -   Removed the separate "Amex / Invoice Emails" filter and merged its functionality into the "Expenses" filter.
+    -   Selecting "Expenses" now shows expense transactions, invoice emails, and Amex items (including amex-sourced transactions).
+    -   Updated filter state type and filteredItems logic accordingly.
+    -   Files changed: `app/transactions/page.tsx`.
 -   **Added Customer Assignment Feature to Transactions Modal**
     -   Implemented customer assignment functionality in the transactions modal component
     -   Added "Add Customer" button for sales transactions without customers

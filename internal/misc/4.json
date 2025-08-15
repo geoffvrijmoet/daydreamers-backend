@@ -1,0 +1,36 @@
+{
+    "_id": {
+      "$oid": "6897651eb1a587a8f2832b45"
+    },
+    "date": {
+      "$date": "2025-08-09T15:11:26.000Z"
+    },
+    "amount": 2,
+    "type": "sale",
+    "source": "manual",
+    "notes": "",
+    "createdAt": {
+      "$date": "2025-08-09T15:11:26.362Z"
+    },
+    "updatedAt": {
+      "$date": "2025-08-09T15:11:26.362Z"
+    },
+    "paymentMethod": "Cash",
+    "customer": "",
+    "isTaxable": true,
+    "preTaxAmount": 1.84,
+    "taxAmount": 0.16,
+    "tip": 0,
+    "discount": 0,
+    "shipping": 0,
+    "products": [
+      {
+        "productId": "67e071e27387789692bbd386",
+        "name": "Ice cream (Strawberry Shortcake) - Regular",
+        "quantity": 1,
+        "unitPrice": 2,
+        "totalPrice": 2,
+        "isTaxable": true
+      }
+    ]
+  }

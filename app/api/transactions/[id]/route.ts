@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import mongoose from 'mongoose'
 import { ObjectId } from 'mongodb'
-import { updateInventoryForExistingTransaction, convertModalLineItemsToInventoryFormat, restoreInventoryForDeletedTransaction, type InventoryUpdateResult } from '@/lib/utils/inventory-management'
+import { updateInventoryForExistingTransaction, convertModalLineItemsToInventoryFormat, restoreInventoryForDeletedTransaction, type InventoryUpdateResult, increaseInventoryForExistingExpense } from '@/lib/utils/inventory-management'
 
 export async function PUT(
   request: NextRequest,
@@ -21,12 +21,16 @@ export async function PUT(
       updateData.createdAt = new Date(updateData.createdAt)
     }
 
-    // Update inventory for Viva Raw products if this is a sale transaction with products being updated
+    // Update inventory for Viva Raw products if products are being updated
     let inventoryResults: InventoryUpdateResult[] = []
-    if (updateData.type === 'sale' && updateData.products && Array.isArray(updateData.products) && updateData.products.length > 0) {
+    if (updateData.products && Array.isArray(updateData.products) && updateData.products.length > 0) {
       try {
         const inventoryProducts = convertModalLineItemsToInventoryFormat(updateData.products)
-        inventoryResults = await updateInventoryForExistingTransaction(params.id, inventoryProducts)
+        if (updateData.type === 'sale') {
+          inventoryResults = await updateInventoryForExistingTransaction(params.id, inventoryProducts)
+        } else if (updateData.type === 'expense' && updateData.affectStock) {
+          inventoryResults = await increaseInventoryForExistingExpense(params.id, inventoryProducts)
+        }
         console.log(`[API] Inventory update results for transaction ${params.id}:`, inventoryResults)
       } catch (error) {
         console.error(`[API] Error updating inventory for transaction ${params.id}:`, error)

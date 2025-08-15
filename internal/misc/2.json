@@ -1,0 +1,21 @@
+{
+    "_id": {
+      "$oid": "689693cc8f1fa83eb44fd678"
+    },
+    "date": {
+      "$date": "2025-08-09T16:00:00.000Z"
+    },
+    "amount": 826.64,
+    "type": "expense",
+    "source": "manual",
+    "notes": "Independent contractor payout for training session - Client: Nora Carvajal, Dog: Maxine. Related training txn: 689693cc8f1fa83eb44fd677",
+    "createdAt": {
+      "$date": "2025-08-09T00:18:20.969Z"
+    },
+    "updatedAt": {
+      "$date": "2025-08-09T00:18:20.969Z"
+    },
+    "supplier": "Independent Contractor",
+    "purchaseCategory": "Independent Contractor Payment",
+    "supplierOrderNumber": ""
+  }

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { connectToDatabase } from '@/lib/mongoose'
 import TransactionModel from '@/lib/models/transaction'
 import mongoose from 'mongoose'
-import { updateInventoryForNewTransaction, convertModalLineItemsToInventoryFormat } from '@/lib/utils/inventory-management'
+import { updateInventoryForNewTransaction, convertModalLineItemsToInventoryFormat, increaseInventoryForNewExpense, type InventoryUpdateResult } from '@/lib/utils/inventory-management'
 
 interface TransactionQuery {
   date?: {
@@ -173,7 +173,8 @@ export async function POST(request: Request) {
       sessionNotes, // Could also be part of notes
       revenue,
       trainingAgency,
-      draft // Add draft field
+      draft, // Add draft field
+      affectStock // optional flag to control inventory update on expense
     } = body
     
     // Base transaction object
@@ -251,13 +252,19 @@ export async function POST(request: Request) {
     console.log('Server: /api/transactions POST: Transaction object before saving:', transactionToSave);
     const result = await mongoose.connection.db!.collection('transactions').insertOne(transactionToSave)
     
-    // Update inventory for Viva Raw products if this is a sale transaction with products
-    let inventoryResults = []
-    if (type === 'sale' && products && Array.isArray(products) && products.length > 0) {
+    // Update inventory for Viva Raw products
+    let inventoryResults: InventoryUpdateResult[] = []
+    if (products && Array.isArray(products) && products.length > 0) {
       try {
         const inventoryProducts = convertModalLineItemsToInventoryFormat(products)
-        inventoryResults = await updateInventoryForNewTransaction(inventoryProducts)
-        console.log('Server: /api/transactions POST: Inventory update results:', inventoryResults)
+        if (type === 'sale') {
+          inventoryResults = await updateInventoryForNewTransaction(inventoryProducts)
+        } else if (type === 'expense' && affectStock) {
+          inventoryResults = await increaseInventoryForNewExpense(inventoryProducts)
+        }
+        if (inventoryResults.length > 0) {
+          console.log('Server: /api/transactions POST: Inventory update results:', inventoryResults)
+        }
       } catch (error) {
         console.error('Server: /api/transactions POST: Error updating inventory:', error)
       }

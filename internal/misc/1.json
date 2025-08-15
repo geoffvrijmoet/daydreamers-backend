@@ -1,0 +1,36 @@
+{
+    "_id": {
+      "$oid": "689771d91f8fd712a5c5f03e"
+    },
+    "date": {
+      "$date": "2025-08-09T16:05:45.000Z"
+    },
+    "amount": 2,
+    "type": "sale",
+    "source": "manual",
+    "notes": "",
+    "createdAt": {
+      "$date": "2025-08-09T16:05:45.443Z"
+    },
+    "updatedAt": {
+      "$date": "2025-08-09T16:05:45.443Z"
+    },
+    "paymentMethod": "Cash",
+    "customer": "",
+    "isTaxable": true,
+    "preTaxAmount": 1.84,
+    "taxAmount": 0.16,
+    "tip": 0,
+    "discount": 0,
+    "shipping": 0,
+    "products": [
+      {
+        "productId": "67e071e27387789692bbd3a8",
+        "name": "Turkey Flip - Single",
+        "quantity": 2,
+        "unitPrice": 1,
+        "totalPrice": 2,
+        "isTaxable": true
+      }
+    ]
+  }

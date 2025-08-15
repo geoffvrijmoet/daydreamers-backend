@@ -1,0 +1,76 @@
+{
+    "_id": {
+      "$oid": "6897617139e21ac8149fc976"
+    },
+    "date": {
+      "$date": "2025-08-09T14:34:29.674Z"
+    },
+    "amount": 7,
+    "type": "sale",
+    "source": "square",
+    "platformMetadata": {
+      "platform": "square",
+      "orderId": "hP2mIJDJpmPjG2dAZNlaARYN8ASZY",
+      "data": {
+        "orderId": "hP2mIJDJpmPjG2dAZNlaARYN8ASZY",
+        "locationId": "L6WVY1V5T4WFS",
+        "state": "COMPLETED",
+        "createdAt": "2025-08-09T14:34:29.674Z",
+        "updatedAt": "2025-08-09T14:34:35.000Z"
+      },
+      "_id": {
+        "$oid": "6897617139e21ac8149fc977"
+      }
+    },
+    "draft": false,
+    "createdAt": {
+      "$date": "2025-08-09T14:55:45.742Z"
+    },
+    "updatedAt": {
+      "$date": "2025-08-09T15:11:32.781Z"
+    },
+    "isTaxable": true,
+    "preTaxAmount": 6.43,
+    "taxAmount": 0.57,
+    "products": [
+      {
+        "productId": {
+          "$oid": "67e071e27387789692bbd41d"
+        },
+        "name": "Collagen Straight Stick with Peanut Butter 6”",
+        "quantity": 1,
+        "unitPrice": 3,
+        "totalPrice": 3,
+        "isTaxable": true,
+        "_id": {
+          "$oid": "6897617139e21ac8149fc978"
+        }
+      },
+      {
+        "productId": {
+          "$oid": "67e071e27387789692bbd386"
+        },
+        "name": "Ice cream (Strawberry Shortcake)",
+        "quantity": 2,
+        "unitPrice": 2,
+        "totalPrice": 4,
+        "isTaxable": true,
+        "_id": {
+          "$oid": "6897617139e21ac8149fc979"
+        }
+      }
+    ],
+    "tip": 0,
+    "paymentProcessing": {
+      "fee": 0.33,
+      "provider": "Square",
+      "transactionId": "hP2mIJDJpmPjG2dAZNlaARYN8ASZY",
+      "_id": {
+        "$oid": "6897617139e21ac8149fc97a"
+      }
+    },
+    "profitCalculation": {
+      "items": []
+    },
+    "__v": 0
+  }

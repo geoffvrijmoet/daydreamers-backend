@@ -1,0 +1,36 @@
+{
+    "_id": {
+      "$oid": "68974e6ef1875bed51bdf353"
+    },
+    "date": {
+      "$date": "2025-08-09T13:34:36.000Z"
+    },
+    "amount": 10,
+    "type": "sale",
+    "source": "manual",
+    "notes": "",
+    "createdAt": {
+      "$date": "2025-08-09T13:34:38.130Z"
+    },
+    "updatedAt": {
+      "$date": "2025-08-09T13:34:38.130Z"
+    },
+    "paymentMethod": "Cash",
+    "customer": "",
+    "isTaxable": true,
+    "preTaxAmount": 8.73,
+    "taxAmount": 0.77,
+    "tip": 0.5,
+    "discount": 0,
+    "shipping": 0,
+    "products": [
+      {
+        "productId": "67e071e27387789692bbd3aa",
+        "name": "Turkey Flip - 8.5 oz bag",
+        "quantity": 1,
+        "unitPrice": 9.5,
+        "totalPrice": 9.5,
+        "isTaxable": true
+      }
+    ]
+  }

@@ -1,0 +1,102 @@
+{
+    "_id": {
+      "$oid": "6897617139e21ac8149fc983"
+    },
+    "date": {
+      "$date": "2025-08-09T14:46:57.199Z"
+    },
+    "amount": 25,
+    "type": "sale",
+    "source": "square",
+    "platformMetadata": {
+      "platform": "square",
+      "orderId": "hZLyqLejRovWTBGlDZMn9XmXZTIZY",
+      "data": {
+        "orderId": "hZLyqLejRovWTBGlDZMn9XmXZTIZY",
+        "locationId": "L6WVY1V5T4WFS",
+        "state": "COMPLETED",
+        "createdAt": "2025-08-09T14:46:57.199Z",
+        "updatedAt": "2025-08-09T14:47:07.000Z"
+      },
+      "_id": {
+        "$oid": "6897617139e21ac8149fc984"
+      }
+    },
+    "draft": false,
+    "createdAt": {
+      "$date": "2025-08-09T14:55:45.970Z"
+    },
+    "updatedAt": {
+      "$date": "2025-08-09T15:11:32.982Z"
+    },
+    "isTaxable": true,
+    "preTaxAmount": 22.96,
+    "taxAmount": 2.04,
+    "products": [
+      {
+        "productId": {
+          "$oid": "67e071e27387789692bbd386"
+        },
+        "name": "Ice cream (Strawberry Shortcake)",
+        "quantity": 5,
+        "unitPrice": 2,
+        "totalPrice": 10,
+        "isTaxable": true,
+        "_id": {
+          "$oid": "6897617139e21ac8149fc985"
+        }
+      },
+      {
+        "productId": {
+          "$oid": "67e071e27387789692bbd431"
+        },
+        "name": "Cow Ear",
+        "quantity": 2,
+        "unitPrice": 3.5,
+        "totalPrice": 7,
+        "isTaxable": true,
+        "_id": {
+          "$oid": "6897617139e21ac8149fc986"
+        }
+      },
+      {
+        "productId": {
+          "$oid": "67e071e27387789692bbd41f"
+        },
+        "name": "Ostrich Heart (Per oz)",
+        "quantity": 1,
+        "unitPrice": 4,
+        "totalPrice": 4,
+        "isTaxable": true,
+        "_id": {
+          "$oid": "6897617139e21ac8149fc987"
+        }
+      },
+      {
+        "productId": {
+          "$oid": "6833340bb1af7a3a7cc7fbda"
+        },
+        "name": "Ostrich Kidney",
+        "quantity": 1,
+        "unitPrice": 4,
+        "totalPrice": 4,
+        "isTaxable": true,
+        "_id": {
+          "$oid": "6897617139e21ac8149fc988"
+        }
+      }
+    ],
+    "tip": 0,
+    "paymentProcessing": {
+      "fee": 0.8,
+      "provider": "Square",
+      "transactionId": "hZLyqLejRovWTBGlDZMn9XmXZTIZY",
+      "_id": {
+        "$oid": "6897617139e21ac8149fc989"
+      }
+    },
+    "profitCalculation": {
+      "items": []
+    },
+    "__v": 0
+  }

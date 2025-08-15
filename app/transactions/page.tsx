@@ -219,6 +219,9 @@ export default function TransactionsPage() {
     totalExamples: []
   });
 
+  // Control whether saving parsed products should affect stock (default: true)
+  const [affectStockCheckbox, setAffectStockCheckbox] = useState<boolean>(true);
+
   // NEW: Content bounds inputs state
   const [contentBoundsInputs, setContentBoundsInputs] = useState<{ startPattern: string; endPattern: string }>({
     startPattern: '',
@@ -226,7 +229,7 @@ export default function TransactionsPage() {
   });
 
   // Filter states
-  const [activeFilter, setActiveFilter] = useState<'all' | 'sales' | 'expenses' | 'training' | 'invoices'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'sales' | 'expenses' | 'training'>('all');
 
   // Date filter: all | thisMonth | thisYear | lastYear
   const [dateFilter, setDateFilter] = useState<'all' | 'thisMonth' | 'thisYear' | 'lastYear'>('thisYear');
@@ -319,7 +322,8 @@ export default function TransactionsPage() {
         }
       }
       
-      setActiveFilter('invoices');
+      // After checking emails, show them within the merged Expenses filter
+      setActiveFilter('expenses');
       
       const totalNew = uniqueAmex.length + (json.supplierEmails?.length || 0);
       
@@ -1214,7 +1218,8 @@ export default function TransactionsPage() {
             supplier: email.supplier?.name || email.from.split('<')[0].trim(),
             notes: `Invoice from ${email.supplier?.name || 'unknown supplier'}`,
             supplierOrderNumber: parsingResults[email._id]?.orderNumber?.value || '',
-            products: products // saved
+            products: products, // saved
+            affectStock: affectStockCheckbox
           }),
         });
         
@@ -1253,7 +1258,8 @@ export default function TransactionsPage() {
             emailId: email.emailId,
             purchaseCategory: 'inventory',
             supplierOrderNumber: parsingResults[email._id]?.orderNumber?.value || '',
-            products: products // saved
+            products: products, // saved
+            affectStock: affectStockCheckbox
           }),
         });
         
@@ -1595,16 +1601,17 @@ export default function TransactionsPage() {
   // Filter items based on active filter
   const filteredItems = allItems.filter(item => {
     if (activeFilter === 'all') return true;
-    if (activeFilter === 'invoices') {
-      if (item.type === 'invoice' || item.type === 'amex') return true;
-      if (item.type === 'transaction' && (item.data as Transaction).source === 'amex') return true;
-      return false;
-    }
     if (activeFilter === 'sales') {
       return item.type === 'transaction' && (item.data as Transaction).type === 'sale';
     }
     if (activeFilter === 'expenses') {
-      return item.type === 'transaction' && (item.data as Transaction).type === 'expense';
+      // Combine traditional expenses with invoice emails and Amex items
+      if (item.type === 'invoice' || item.type === 'amex') return true;
+      if (item.type === 'transaction') {
+        const t = item.data as Transaction;
+        return t.type === 'expense' || t.source === 'amex';
+      }
+      return false;
     }
     if (activeFilter === 'training') {
       return item.type === 'transaction' && (item.data as Transaction).type === 'training';
@@ -1814,7 +1821,8 @@ export default function TransactionsPage() {
         }
         
         alert(`Found ${result.invoiceEmails.length} potential invoice email(s) for this transaction. Check the invoice emails list.`);
-        setActiveFilter('invoices');
+       // Jump to the merged Expenses view to reveal invoice emails + Amex items
+       setActiveFilter('expenses');
       } else {
         alert('No invoice emails found for this transaction in the specified date range.');
       }
@@ -2047,16 +2055,7 @@ export default function TransactionsPage() {
         >
           Training ({transactions.filter(t => t.type === 'training').length})
         </button>
-        <button
-          onClick={() => setActiveFilter('invoices')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            activeFilter === 'invoices'
-              ? 'bg-purple-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-        >
-          Amex / Invoice Emails ({invoiceEmails.length + amexTxns.length})
-        </button>
+        {/* Invoices filter removed; its functionality is merged into Expenses */}
       </div>
       
       {/* Add parsing stats information */}
@@ -2542,6 +2541,14 @@ export default function TransactionsPage() {
                         >
                           Save Products to Transaction
                         </Button>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={affectStockCheckbox}
+                            onChange={(e) => setAffectStockCheckbox(e.target.checked)}
+                          />
+                          <span>Affect stock</span>
+                        </label>
                       </div>
                       
                       <div className="overflow-x-auto">

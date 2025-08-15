@@ -1,0 +1,36 @@
+{
+    "_id": {
+      "$oid": "68975ba2a01c5ffc0c22bc0b"
+    },
+    "date": {
+      "$date": "2025-08-09T14:30:58.000Z"
+    },
+    "amount": 5,
+    "type": "sale",
+    "source": "manual",
+    "notes": "",
+    "createdAt": {
+      "$date": "2025-08-09T14:30:58.858Z"
+    },
+    "updatedAt": {
+      "$date": "2025-08-09T14:30:58.858Z"
+    },
+    "paymentMethod": "Venmo",
+    "customer": "Jordan Miller",
+    "isTaxable": true,
+    "preTaxAmount": 4.59,
+    "taxAmount": 0.41,
+    "tip": 0,
+    "discount": 0,
+    "shipping": 0,
+    "products": [
+      {
+        "productId": "67e071e27387789692bbd439",
+        "name": "Link - Lamb",
+        "quantity": 4,
+        "unitPrice": 1.25,
+        "totalPrice": 5,
+        "isTaxable": true
+      }
+    ]
+  }

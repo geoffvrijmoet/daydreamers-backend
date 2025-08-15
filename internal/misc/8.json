@@ -1,0 +1,63 @@
+{
+    "_id": {
+      "$oid": "68975baaa01c5ffc0c22bc1d"
+    },
+    "date": {
+      "$date": "2025-08-09T13:54:57.205Z"
+    },
+    "amount": 10.5,
+    "type": "sale",
+    "source": "square",
+    "platformMetadata": {
+      "platform": "square",
+      "orderId": "p9l7wtmnRT5WQCJc730x9xmfTIVZY",
+      "data": {
+        "orderId": "p9l7wtmnRT5WQCJc730x9xmfTIVZY",
+        "locationId": "L6WVY1V5T4WFS",
+        "state": "COMPLETED",
+        "createdAt": "2025-08-09T13:54:57.205Z",
+        "updatedAt": "2025-08-09T13:55:02.000Z"
+      },
+      "_id": {
+        "$oid": "68975baaa01c5ffc0c22bc1e"
+      }
+    },
+    "draft": false,
+    "createdAt": {
+      "$date": "2025-08-09T14:31:06.349Z"
+    },
+    "updatedAt": {
+      "$date": "2025-08-09T15:11:32.776Z"
+    },
+    "isTaxable": true,
+    "preTaxAmount": 9.64,
+    "taxAmount": 0.86,
+    "products": [
+      {
+        "productId": {
+          "$oid": "67e071e27387789692bbd431"
+        },
+        "name": "Cow Ear",
+        "quantity": 3,
+        "unitPrice": 3.5,
+        "totalPrice": 10.5,
+        "isTaxable": true,
+        "_id": {
+          "$oid": "68975baaa01c5ffc0c22bc1f"
+        }
+      }
+    ],
+    "tip": 0,
+    "paymentProcessing": {
+      "fee": 0.42,
+      "provider": "Square",
+      "transactionId": "p9l7wtmnRT5WQCJc730x9xmfTIVZY",
+      "_id": {
+        "$oid": "68975baaa01c5ffc0c22bc20"
+      }
+    },
+    "profitCalculation": {
+      "items": []
+    },
+    "__v": 0
+  }
