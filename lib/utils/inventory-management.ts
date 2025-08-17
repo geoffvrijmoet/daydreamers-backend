@@ -1,5 +1,20 @@
 import mongoose from 'mongoose'
 
+// Lazy import to avoid module loading issues
+let InventoryChangeModel: any = null
+async function getInventoryChangeModel(): Promise<any> {
+  if (!InventoryChangeModel) {
+    try {
+      const { InventoryChangeModel: Model } = await import('@/lib/models/inventory-change')
+      InventoryChangeModel = Model
+    } catch (error) {
+      console.error('[Inventory] Failed to import InventoryChangeModel:', error)
+      return null
+    }
+  }
+  return InventoryChangeModel
+}
+
 interface ProductInTransaction {
   productId: mongoose.Types.ObjectId | string
   name: string
@@ -18,6 +33,7 @@ export interface InventoryUpdateResult {
   quantityChange: number
   success: boolean
   error?: string
+  changeRecorded?: boolean
 }
 
 // Type for products from the modal (with optional productId)
@@ -45,12 +61,84 @@ export function convertModalLineItemsToInventoryFormat(products: ModalLineItem[]
 }
 
 /**
+ * Records an inventory change in the tracking collection
+ */
+async function recordInventoryChange(
+  transactionId: string,
+  productId: string,
+  quantityChange: number,
+  changeType: 'sale' | 'purchase' | 'adjustment' | 'restoration',
+  productName: string,
+  transactionType: 'sale' | 'expense' | 'training',
+  source: string,
+  notes?: string
+): Promise<boolean> {
+  try {
+    const Model = await getInventoryChangeModel()
+    if (!Model) {
+      console.warn('[Inventory] InventoryChangeModel not available, skipping record')
+      return false
+    }
+    
+    await Model.create({
+      transactionId: new mongoose.Types.ObjectId(transactionId),
+      productId: new mongoose.Types.ObjectId(productId),
+      quantityChange,
+      changeType,
+      productName,
+      transactionType,
+      source,
+      notes
+    })
+    return true
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('duplicate key')) {
+      console.log(`[Inventory] Change already recorded for transaction ${transactionId}, product ${productId}`)
+      return false // Already recorded
+    }
+    console.error(`[Inventory] Error recording inventory change:`, error)
+    return false
+  }
+}
+
+/**
+ * Checks if an inventory change has already been recorded for a transaction/product combination
+ */
+async function hasInventoryChangeBeenRecorded(
+  transactionId: string,
+  productId: string
+): Promise<boolean> {
+  try {
+    const Model = await getInventoryChangeModel()
+    if (!Model) {
+      console.warn('[Inventory] InventoryChangeModel not available, skipping check')
+      return false
+    }
+    
+    const existingChange = await Model.findOne({
+      transactionId: new mongoose.Types.ObjectId(transactionId),
+      productId: new mongoose.Types.ObjectId(productId)
+    })
+    return !!existingChange
+  } catch (error) {
+    console.error(`[Inventory] Error checking for existing inventory change:`, error)
+    return false
+  }
+}
+
+/**
  * Updates inventory for Viva Raw products when a transaction is created
  * @param products Array of products in the transaction
+ * @param transactionId The ID of the transaction (optional, for tracking)
+ * @param transactionType The type of transaction (optional, for tracking)
+ * @param source The source of the transaction (optional, for tracking)
  * @returns Array of inventory update results
  */
 export async function updateInventoryForNewTransaction(
-  products: ProductInTransaction[]
+  products: ProductInTransaction[],
+  transactionId?: string,
+  transactionType: 'sale' | 'expense' | 'training' = 'sale',
+  source: string = 'manual'
 ): Promise<InventoryUpdateResult[]> {
   // Filter out products with invalid names or missing productIds
   const validProducts = products.filter(product => 
@@ -76,6 +164,23 @@ export async function updateInventoryForNewTransaction(
         ? new mongoose.Types.ObjectId(product.productId)
         : product.productId
 
+      const productIdString = productId.toString()
+
+      // Check if this change has already been recorded (for sync operations)
+      if (transactionId && await hasInventoryChangeBeenRecorded(transactionId, productIdString)) {
+        console.log(`[Inventory] Skipping inventory update for transaction ${transactionId}, product ${product.name} - already processed`)
+        results.push({
+          productId: productIdString,
+          productName: product.name,
+          oldStock: 0,
+          newStock: 0,
+          quantityChange: 0,
+          success: true,
+          changeRecorded: false
+        })
+        continue
+      }
+
       // Find the product in the database
       const productDoc = await mongoose.connection.db!.collection('products').findOne({
         _id: productId,
@@ -84,7 +189,7 @@ export async function updateInventoryForNewTransaction(
 
       if (!productDoc) {
         results.push({
-          productId: productId.toString(),
+          productId: productIdString,
           productName: product.name,
           oldStock: 0,
           newStock: 0,
@@ -104,13 +209,28 @@ export async function updateInventoryForNewTransaction(
         { $set: { stock: newStock, updatedAt: new Date() } }
       )
 
+      // Record the inventory change if we have a transaction ID
+      let changeRecorded = false
+      if (transactionId) {
+        changeRecorded = await recordInventoryChange(
+          transactionId,
+          productIdString,
+          -product.quantity, // Negative for sales
+          'sale',
+          product.name,
+          transactionType,
+          source
+        )
+      }
+
       results.push({
-        productId: productId.toString(),
+        productId: productIdString,
         productName: product.name,
         oldStock,
         newStock,
         quantityChange: -product.quantity, // Negative because we're reducing stock
-        success: true
+        success: true,
+        changeRecorded
       })
 
       console.log(`[Inventory] Updated Viva Raw product ${product.name}: ${oldStock} → ${newStock} (-${product.quantity})`)
@@ -134,10 +254,14 @@ export async function updateInventoryForNewTransaction(
 /**
  * Increases inventory for Viva Raw products when an expense transaction is created (purchases received)
  * @param products Array of products in the expense transaction
+ * @param transactionId The ID of the transaction (optional, for tracking)
+ * @param source The source of the transaction (optional, for tracking)
  * @returns Array of inventory update results
  */
 export async function increaseInventoryForNewExpense(
-  products: ProductInTransaction[]
+  products: ProductInTransaction[],
+  transactionId?: string,
+  source: string = 'manual'
 ): Promise<InventoryUpdateResult[]> {
   // Filter out products with invalid names or missing productIds
   const validProducts = products.filter(product => 
@@ -163,6 +287,23 @@ export async function increaseInventoryForNewExpense(
         ? new mongoose.Types.ObjectId(product.productId)
         : product.productId
 
+      const productIdString = productId.toString()
+
+      // Check if this change has already been recorded (for sync operations)
+      if (transactionId && await hasInventoryChangeBeenRecorded(transactionId, productIdString)) {
+        console.log(`[Inventory] Skipping inventory increase for transaction ${transactionId}, product ${product.name} - already processed`)
+        results.push({
+          productId: productIdString,
+          productName: product.name,
+          oldStock: 0,
+          newStock: 0,
+          quantityChange: 0,
+          success: true,
+          changeRecorded: false
+        })
+        continue
+      }
+
       const productDoc = await mongoose.connection.db!.collection('products').findOne({
         _id: productId,
         supplier: 'Viva Raw'
@@ -170,7 +311,7 @@ export async function increaseInventoryForNewExpense(
 
       if (!productDoc) {
         results.push({
-          productId: productId.toString(),
+          productId: productIdString,
           productName: product.name,
           oldStock: 0,
           newStock: 0,
@@ -189,13 +330,28 @@ export async function increaseInventoryForNewExpense(
         { $set: { stock: newStock, updatedAt: new Date() } }
       )
 
+      // Record the inventory change if we have a transaction ID
+      let changeRecorded = false
+      if (transactionId) {
+        changeRecorded = await recordInventoryChange(
+          transactionId,
+          productIdString,
+          product.quantity, // Positive for purchases
+          'purchase',
+          product.name,
+          'expense',
+          source
+        )
+      }
+
       results.push({
-        productId: productId.toString(),
+        productId: productIdString,
         productName: product.name,
         oldStock,
         newStock,
         quantityChange: product.quantity, // Positive because we're increasing stock
-        success: true
+        success: true,
+        changeRecorded
       })
 
       console.log(`[Inventory] (Expense New) Increased Viva Raw product ${product.name}: ${oldStock} → ${newStock} (+${product.quantity})`)
@@ -277,7 +433,7 @@ export async function updateInventoryForExistingTransaction(
 
         // If product didn't exist before, treat it as a new addition
         if (!existingProduct) {
-          const result = await updateInventoryForNewTransaction([newProduct])
+          const result = await updateInventoryForNewTransaction([newProduct], transactionId, 'sale', 'manual')
           results.push(...result)
           continue
         }
@@ -466,7 +622,7 @@ export async function increaseInventoryForExistingExpense(
 
         // Treat new additions as new stock increases
         if (!existingProduct) {
-          const result = await increaseInventoryForNewExpense([newProduct])
+          const result = await increaseInventoryForNewExpense([newProduct], transactionId, 'manual')
           results.push(...result)
           continue
         }

@@ -258,9 +258,18 @@ export async function POST(request: Request) {
       try {
         const inventoryProducts = convertModalLineItemsToInventoryFormat(products)
         if (type === 'sale') {
-          inventoryResults = await updateInventoryForNewTransaction(inventoryProducts)
+          inventoryResults = await updateInventoryForNewTransaction(
+            inventoryProducts,
+            result.insertedId.toString(),
+            'sale',
+            'manual'
+          )
         } else if (type === 'expense' && affectStock) {
-          inventoryResults = await increaseInventoryForNewExpense(inventoryProducts)
+          inventoryResults = await increaseInventoryForNewExpense(
+            inventoryProducts,
+            result.insertedId.toString(),
+            'manual'
+          )
         }
         if (inventoryResults.length > 0) {
           console.log('Server: /api/transactions POST: Inventory update results:', inventoryResults)

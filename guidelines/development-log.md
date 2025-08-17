@@ -423,6 +423,10 @@
     -   Property 'status' and 'products' do not exist on the base transaction type
     -   Need to resolve type issues around lines 107 and 147 in `app/api/transactions/sync/shopify/route.ts`
     -   The sync functionality works but needs type fixes to compile properly
+-   **Run Inventory Changes Migration** - Need to run the migration script to backfill existing inventory changes
+    -   Run `npx tsx scripts/migrate-inventory-changes.ts` to populate the new inventory_changes collection
+    -   This will prevent duplicate inventory processing during sync operations
+    -   Migration script is ready but needs to be executed in production
 
 ## ✅ Recently Completed Tasks
 
@@ -535,10 +539,22 @@
     -   Files changed: `app/api/transactions/route.ts`.
 
 -   **Copyable In-Stock Blurbs for Viva Raw Sections**
-    -   Added compact “Copy blurb” buttons to Cats, Dogs, and Pure sections on the Viva Raw page.
+    -   Added compact "Copy blurb" buttons to Cats, Dogs, and Pure sections on the Viva Raw page.
     -   Generates customer-friendly text like: `Turkey 3 lb, Chicken 6 lb, Duck 4 lb, Rabbit 7 lb, Beef 10 lb`.
     -   Uses simplified recipe names (Turkey/Chicken/Beef/Rabbit/Duck) and sums total pounds across in-stock items.
     -   Robust parsing for names like `Viva Raw <Recipe> for <Cats|Dogs> 1 lb - Regular` and `Viva Raw Pure <Recipe> 1 lb - Regular`.
     -   Handles oz→lb conversion; rounds to whole or 0.5 lb where applicable.
-    -   One-tap copy with “Copied” feedback; mobile-optimized UI.
+    -   One-tap copy with "Copied" feedback; mobile-optimized UI.
     -   Files changed: `app/viva-raw/page.tsx`.
+
+-   **Implemented Inventory Tracking System to Prevent Duplicate Processing**
+    -   Created `InventoryChange` model to track all inventory modifications with transaction/product relationships
+    -   Added duplicate detection logic to prevent the same transaction from affecting inventory multiple times
+    -   Updated inventory management utilities to record changes and check for existing records before processing
+    -   Modified sync routes (Shopify, Square) to pass transaction IDs and source information for proper tracking
+    -   Updated main transaction routes to include tracking information for manual transactions
+    -   Created migration script to backfill existing inventory changes from historical transaction data
+    -   Added inventory reconciliation utilities for future "refresh from history" feature
+    -   Prevents double-counting during sync operations by checking if inventory changes already exist
+    -   Provides complete audit trail of all inventory modifications with timestamps and sources
+    -   Files changed: `lib/models/inventory-change.ts`, `lib/utils/inventory-management.ts`, `lib/utils/inventory-reconciliation.ts`, `app/api/transactions/sync/shopify/route.ts`, `app/api/transactions/sync/square/route.ts`, `app/api/transactions/route.ts`, `scripts/migrate-inventory-changes.ts`.

@@ -1883,9 +1883,61 @@ export default function TransactionsPage() {
     }
   };
 
+  // Temporary migration function
+  const handleMigration = async () => {
+    if (!window.confirm('This will migrate historical inventory changes. Continue?')) return
+    
+    try {
+      const response = await fetch('/api/transactions/migrate-inventory', { method: 'POST' })
+      const result = await response.json()
+      if (result.error) {
+        alert(`Migration failed: ${result.error}`)
+      } else {
+        alert(`Migration completed! Processed: ${result.stats?.processed || 0}, Skipped: ${result.stats?.skipped || 0}`)
+      }
+    } catch {
+      alert('Migration failed')
+    }
+  }
+
+  // Fix productId conversion function
+  const handleFixProductIds = async () => {
+    if (!window.confirm('This will convert string productIds to ObjectId format. Continue?')) return
+    
+    try {
+      const response = await fetch('/api/transactions/fix-product-ids', { method: 'POST' })
+      const result = await response.json()
+      if (result.error) {
+        alert(`Conversion failed: ${result.error}`)
+      } else {
+        alert(`Conversion completed! Processed: ${result.stats?.processed || 0}, Skipped: ${result.stats?.skipped || 0}`)
+      }
+    } catch {
+      alert('Conversion failed')
+    }
+  }
+
   return (
     <div className="p-4">
-      <h1 className="text-2xl font-bold mb-4">Transactions & Invoices</h1>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-bold">Transactions & Invoices</h1>
+        
+        {/* Temporary Migration Buttons */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleFixProductIds}
+            className="px-3 py-1.5 rounded text-sm font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 border border-blue-300 transition-colors"
+          >
+            🔧 Fix Product IDs
+          </button>
+          <button
+            onClick={handleMigration}
+            className="px-3 py-1.5 rounded text-sm font-medium bg-orange-100 text-orange-700 hover:bg-orange-200 border border-orange-300 transition-colors"
+          >
+            🚀 Migrate Inventory
+          </button>
+        </div>
+      </div>
       
       {/* Amex fetch button + menu */}
       <div className="mb-6 relative inline-block">

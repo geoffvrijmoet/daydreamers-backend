@@ -257,7 +257,12 @@ export async function POST(request: Request) {
       // Update inventory for Viva Raw products
       if (transaction.products && transaction.products.length > 0) {
         try {
-          const inventoryResults = await updateInventoryForNewTransaction(transaction.products)
+          const inventoryResults = await updateInventoryForNewTransaction(
+            transaction.products,
+            newTransaction._id.toString(),
+            'sale',
+            'square'
+          )
           console.log(`[Square Sync] Inventory update results for order ${order.id}:`, inventoryResults)
         } catch (error) {
           console.error(`[Square Sync] Error updating inventory for order ${order.id}:`, error)
