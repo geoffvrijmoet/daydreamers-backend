@@ -1,7 +1,9 @@
 import mongoose from 'mongoose'
 
 // Lazy import to avoid module loading issues
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let InventoryChangeModel: any = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getInventoryChangeModel(): Promise<any> {
   if (!InventoryChangeModel) {
     try {

@@ -210,7 +210,10 @@ export async function POST(request: Request) {
         tip: parseFloat(tip) || 0,
         discount: parseFloat(discount) || 0,
         shipping: parseFloat(shipping) || 0,
-        products: products && Array.isArray(products) ? products.map(p => ({ ...p })) : [], // Ensure products is an array
+        products: products && Array.isArray(products) ? products.map(p => ({
+          ...p,
+          productId: p.productId ? new mongoose.Types.ObjectId(p.productId) : undefined
+        })) : [], // Ensure products is an array and convert productIds to ObjectIds
       };
       
       transactionToSave = saleTransaction;
@@ -256,7 +259,13 @@ export async function POST(request: Request) {
     let inventoryResults: InventoryUpdateResult[] = []
     if (products && Array.isArray(products) && products.length > 0) {
       try {
-        const inventoryProducts = convertModalLineItemsToInventoryFormat(products)
+        // Convert string productIds to ObjectIds for inventory management
+        const productsWithObjectIds = products.map(product => ({
+          ...product,
+          productId: product.productId ? new mongoose.Types.ObjectId(product.productId) : undefined
+        }))
+        
+        const inventoryProducts = convertModalLineItemsToInventoryFormat(productsWithObjectIds)
         if (type === 'sale') {
           inventoryResults = await updateInventoryForNewTransaction(
             inventoryProducts,
