@@ -435,6 +435,24 @@
 
 ## ✅ Recently Completed Tasks
 
+-   **Improved Number Input UX in Transaction Modal**
+    -   Prevented number inputs from changing values when scrolling over them
+    -   Removed up/down arrow buttons from all number inputs for cleaner appearance
+    -   Added `onWheel` event handlers to blur inputs when scrolling to prevent accidental value changes
+    -   Applied Tailwind CSS classes to hide spin buttons: `[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`
+    -   Updated all number inputs throughout the modal including: amount, shipping, product quantities, unit prices, and total prices
+    -   Maintains all existing functionality while improving user experience
+    -   Files changed: `components/new-transaction-modal.tsx`
+
+-   **Rearranged New Transaction Modal for Sale Mode**
+    -   Reorganized the sale transaction modal layout to improve user workflow
+    -   New order: Payment Method → Products → Customer → Amount/Sales Tax → Date/Taxable → Shipping/Tip/Discount → Save as Draft → Notes
+    -   Moved all sale-specific fields into a dedicated sale section with proper ordering
+    -   Removed duplicate fields from common sections to avoid confusion
+    -   Maintained existing functionality while improving the logical flow for sales transactions
+    -   Applied changes to both mobile and desktop versions of the modal
+    -   Files changed: `components/new-transaction-modal.tsx`
+
 -   **Fixed Inventory Change Utility Quantity Sign Issue**
     -   Resolved the bug where all inventory change `quantityChange` entries were being recorded as negative numbers
     -   The issue was in the PATCH method of `/api/transactions/[id]/route.ts` which always called `updateInventoryForExistingTransaction` regardless of transaction type

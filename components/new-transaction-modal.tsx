@@ -1020,7 +1020,8 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
                     setFormData(prev => ({ ...prev, amount: newAmount }));
                   }}
                   onFocus={(e) => (e.target as HTMLInputElement).select()}
-                  className="text-center text-4xl md:text-5xl font-semibold border-none bg-transparent focus:ring-0 focus:border-none shadow-none w-40 appearance-none"
+                  onWheel={(e) => e.currentTarget.blur()}
+                  className="text-center text-4xl md:text-5xl font-semibold border-none bg-transparent focus:ring-0 focus:border-none shadow-none w-40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   required
                   inputMode="decimal"
                 />
@@ -1104,143 +1105,142 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
             </div>
           )}
 
-          {/* Common Fields (mobile-first layout) */}
-          <div className="space-y-4">
-            {/* Row: Amount + Sales Tax + Payment Methods */}
-            <div className="flex flex-wrap items-start gap-4">
-              {/* Amount */}
-              {formData.type !== 'expense' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Amount</label>
-                  <div className="flex items-center mt-1">
-                    <span className="text-gray-500 mr-1">$</span>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.amount}
-                      readOnly={false}
-                      onChange={(e) => {
-                        const newAmount = parseFloat(e.target.value) || 0;
-                        if (formData.type === 'training') {
-                          handleTrainingRevenueChange(parseFloat(newAmount.toFixed(2)));
-                          setFormData(prev => ({ ...(prev as TrainingFormData), amount: newAmount }));
-                        } else {
-                          setFormData(prev => ({ ...prev, amount: newAmount }));
-                        }
-                      }}
-                      onFocus={(e) => (e.target as HTMLInputElement).select()}
-                      className="block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-right"
-                      required
-                      inputMode="decimal"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Training-specific Sale & Tax inputs */}
-              {formData.type === 'training' && (
-                <>
+          {/* Common Fields (mobile-first layout) - Non-sale types only */}
+          {formData.type !== 'sale' && (
+            <div className="space-y-4">
+              {/* Row: Amount + Sales Tax + Payment Methods */}
+              <div className="flex flex-wrap items-start gap-4">
+                {/* Amount */}
+                {formData.type !== 'expense' && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Sale&nbsp;(Pre-tax)</label>
+                    <label className="block text-sm font-medium text-gray-700">Amount</label>
                     <div className="flex items-center mt-1">
                       <span className="text-gray-500 mr-1">$</span>
                       <Input
                         type="number"
                         step="0.01"
                         min="0"
-                        value={(formData as TrainingFormData).sale ?? ''}
-                        onChange={e => handleTrainingSaleChange(parseFloat(e.target.value) || 0)}
-                        onFocus={e => (e.target as HTMLInputElement).select()}
-                        className="block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-right"
-                        inputMode="decimal"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Sales&nbsp;Tax</label>
-                    <div className="flex items-center mt-1">
-                      <span className="text-gray-500 mr-1">$</span>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={(formData as TrainingFormData).taxAmount ?? ''}
-                        onChange={e => handleTrainingTaxChange(parseFloat(e.target.value) || 0)}
-                        onFocus={e => (e.target as HTMLInputElement).select()}
-                        className="block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-right"
-                        inputMode="decimal"
-                      />
-                    </div>
-                    <label className="inline-flex items-center text-xs mt-1 select-none">
-                      <input
-                        type="checkbox"
-                        checked={(formData as TrainingFormData).taxIncluded}
-                        onChange={e => {
-                          const val = e.target.checked;
-                          setFormData(prev => {
-                            if (prev.type !== 'training') return prev;
-                            const updated: TrainingFormData = { ...(prev as TrainingFormData), taxIncluded: val };
-                            return recomputeTrainingFromCurrent(updated);
-                          });
+                        value={formData.amount}
+                        readOnly={false}
+                        onChange={(e) => {
+                          const newAmount = parseFloat(e.target.value) || 0;
+                          if (formData.type === 'training') {
+                            handleTrainingRevenueChange(parseFloat(newAmount.toFixed(2)));
+                            setFormData(prev => ({ ...(prev as TrainingFormData), amount: newAmount }));
+                          } else {
+                            setFormData(prev => ({ ...prev, amount: newAmount }));
+                          }
                         }}
-                        className="mr-1 rounded border-gray-300 text-blue-600 shadow-sm focus:ring-blue-500"
+                        onFocus={(e) => (e.target as HTMLInputElement).select()}
+                        onWheel={(e) => e.currentTarget.blur()}
+                        className="block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        required
+                        inputMode="decimal"
                       />
-                      Tax&nbsp;Included
-                    </label>
+                    </div>
                   </div>
-                </>
-              )}
+                )}
 
-              {/* Sales Tax (only for sale) */}
-              {formData.type === 'sale' && (
+                {/* Training-specific Sale & Tax inputs */}
+                {formData.type === 'training' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Sale&nbsp;(Pre-tax)</label>
+                      <div className="flex items-center mt-1">
+                        <span className="text-gray-500 mr-1">$</span>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={(formData as TrainingFormData).sale ?? ''}
+                          onChange={e => handleTrainingSaleChange(parseFloat(e.target.value) || 0)}
+                          onFocus={e => (e.target as HTMLInputElement).select()}
+                          onWheel={(e) => e.currentTarget.blur()}
+                          className="block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          inputMode="decimal"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Sales&nbsp;Tax</label>
+                      <div className="flex items-center mt-1">
+                        <span className="text-gray-500 mr-1">$</span>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={(formData as TrainingFormData).taxAmount ?? ''}
+                          onChange={e => handleTrainingTaxChange(parseFloat(e.target.value) || 0)}
+                          onFocus={e => (e.target as HTMLInputElement).select()}
+                          onWheel={(e) => e.currentTarget.blur()}
+                          className="block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          inputMode="decimal"
+                        />
+                      </div>
+                      <label className="inline-flex items-center text-xs mt-1 select-none">
+                        <input
+                          type="checkbox"
+                          checked={(formData as TrainingFormData).taxIncluded}
+                          onChange={e => {
+                            const val = e.target.checked;
+                            setFormData(prev => {
+                              if (prev.type !== 'training') return prev;
+                              const updated: TrainingFormData = { ...(prev as TrainingFormData), taxIncluded: val };
+                              return recomputeTrainingFromCurrent(updated);
+                            });
+                          }}
+                          className="mr-1 rounded border-gray-300 text-blue-600 shadow-sm focus:ring-blue-500"
+                        />
+                        Tax&nbsp;Included
+                      </label>
+                    </div>
+                  </>
+                )}
+
+                {/* Date (hidden in expense mode – rendered above) */}
+                {formData.type !== 'expense' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Sales&nbsp;Tax</label>
-                  <div className="flex items-center mt-1">
-                    <span className="text-gray-500 mr-1">$</span>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      readOnly
-                      value={(formData as SaleFormData).taxAmount.toFixed(2)}
-                      className="rounded-md border-gray-300 bg-gray-50 shadow-sm"
-                      style={{ width: `${String((formData as SaleFormData).taxAmount.toFixed(2)).length + 3}ch` }}
-                      inputMode="decimal"
-                    />
+                  <label className="block text-sm font-medium text-gray-700">Date</label>
+                  <input
+                    type="date"
+                    value={formData.date}
+                    onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
+                    className="mt-1 block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                )}
+
+                {/* Payment Methods (hidden in expense mode – rendered above) */}
+                {formData.type !== 'expense' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Payment&nbsp;Method</label>
+                  <div className="flex flex-wrap gap-2">
+                    {['Venmo', 'Cash', 'Cash App', 'Zelle'].map((method) => (
+                      <button
+                        type="button"
+                        key={method}
+                        onClick={() => setFormData(prev => ({ ...prev, paymentMethod: method }))}
+                        className={`px-3 py-1 rounded-full text-sm border transition-colors ${formData.paymentMethod === method ? 'bg-blue-500 text-white border-blue-500' : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200'}`}
+                      >
+                        {method}
+                      </button>
+                    ))}
                   </div>
                 </div>
-              )}
-
-              {/* Date (hidden in expense mode – rendered above) */}
-              {formData.type !== 'expense' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Date</label>
-                <input
-                  type="date"
-                  value={formData.date}
-                  onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
-                  className="mt-1 block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                />
-                {formData.type === 'sale' && (
-                  <label className="inline-flex items-center mt-2 whitespace-nowrap text-sm font-medium text-gray-700">
-                    <input
-                      type="checkbox"
-                      checked={formData.isTaxable}
-                      onChange={(e) => setFormData(prev => ({ ...prev, isTaxable: e.target.checked, amount: 0 }))}
-                      className="mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
-                    Apply&nbsp;tax
-                  </label>
                 )}
               </div>
-              )}
+            </div>
+          )}
 
-              {/* Payment Methods (hidden in expense mode – rendered above) */}
-              {formData.type !== 'expense' && (
+          {/* Type-specific Fields */}
+          {/* Sale Specific Section - Reordered */}
+          {formData.type === 'sale' && (
+            <div className="space-y-4">
+              {/* 1. Payment Method */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Payment&nbsp;Method</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
                 <div className="flex flex-wrap gap-2">
                   {['Venmo', 'Cash', 'Cash App', 'Zelle'].map((method) => (
                     <button
@@ -1254,76 +1254,102 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
                   ))}
                 </div>
               </div>
-              )}
-            </div>
 
-            {/* Shipping/Tip/Discount row (sale only) */}
-            {formData.type === 'sale' && (
-              <div className="flex flex-wrap items-end gap-4 mt-2">
-                {/* Shipping input */}
-                <div>
-                  <label className="block text-xs text-gray-500">Shipping</label>
-                  <div className="flex items-center">
-                    <span className="text-gray-500 mr-1">$</span>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={(formData as SaleFormData).shipping}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setFormData(prev => ({ ...(prev as SaleFormData), shipping: val, amount: 0 }));
-                      }}
-                      onFocus={(e) => (e.target as HTMLInputElement).select()}
-                      className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                      style={{ width: `${String((formData as SaleFormData).shipping || 0).length + 3}ch` }}
-                      inputMode="decimal"
-                    />
+              {/* 2. Products Section */}
+              <div className="space-y-4">
+                <button
+                  type="button"
+                  onClick={() => setShowProducts(prev => !prev)}
+                  className="flex items-center gap-1 text-md font-medium text-blue-600 hover:underline"
+                >
+                  {showProducts ? 'Hide Products ▲' : 'Add Products to Sale ▼'}
+                </button>
+
+                {showProducts && (
+                <>
+                
+                {/* Quick-add popular products (mobile only) */}
+                {!isDesktop && popularProducts.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {popularProducts.map((product) => (
+                      <button
+                        key={product._id}
+                        type="button"
+                        onClick={() => handleAddProduct(product)}
+                        className="px-3 py-1 rounded-full bg-gray-100 text-sm hover:bg-blue-100 border border-gray-300"
+                      >
+                        {product.name}
+                      </button>
+                    ))}
                   </div>
+                )}
+
+                <div>
+                  <input
+                    type="text"
+                    placeholder="Search products by name or SKU..."
+                    value={productSearchTerm}
+                    onChange={(e) => {
+                      const searchTerm = e.target.value;
+                      setProductSearchTerm(searchTerm);
+                      const lowerSearchTerm = searchTerm.toLowerCase();
+                      const filtered = products.filter(p =>
+                        p.name.toLowerCase().includes(lowerSearchTerm) ||
+                        (p.sku?.toLowerCase() || '').includes(lowerSearchTerm)
+                      );
+                      setFilteredProducts(filtered);
+                    }}
+                    className="w-full px-4 py-2 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
                 </div>
 
-                {/* Tip */}
-                <div>
-                  <label className="block text-xs text-gray-500">Tip</label>
-                  <div className="flex items-center">
-                    <span className="text-gray-500 mr-1">$</span>
-                    <Input
-                      type="number"
-                      readOnly
-                      value={(formData as SaleFormData).tip.toFixed(2)}
-                      className="rounded-md border-gray-300 bg-gray-50 shadow-sm"
-                      style={{ width: `${((formData as SaleFormData).tip.toFixed(2)).length + 3}ch` }}
-                      inputMode="decimal"
-                    />
-                  </div>
+                {/* Product Suggestions List */}
+                <div className="max-h-[200px] overflow-y-auto space-y-1 border rounded p-2">
+                  {filteredProducts.map((product) => (
+                    <button
+                      key={product._id ?? product.sku ?? product.name}
+                      type="button"
+                      onClick={() => handleAddProduct(product)}
+                      className="w-full flex items-center justify-between p-2 rounded hover:bg-blue-50 focus:outline-none"
+                    >
+                      <span className="text-sm text-left">{product.name}</span>
+                      {typeof product.price === 'number' && !isNaN(product.price) && (
+                        <span className="text-xs text-gray-500 ml-2">${product.price.toFixed(2)}</span>
+                      )}
+                    </button>
+                  ))}
                 </div>
+                </>
+                )}
 
-                {/* Discount */}
-                <div>
-                  <label className="block text-xs text-gray-500">Discount</label>
-                  <div className="flex items-center">
-                    <span className="text-gray-500 mr-1">$</span>
-                    <Input
-                      type="number"
-                      readOnly
-                      value={(formData as SaleFormData).discount.toFixed(2)}
-                      className="rounded-md border-gray-300 bg-gray-50 shadow-sm"
-                      style={{ width: `${((formData as SaleFormData).discount.toFixed(2)).length + 3}ch` }}
-                      inputMode="decimal"
-                    />
+                {/* Show existing products */}
+                {!isCreatingProduct && formData.products && formData.products.length > 0 && (
+                  <div className="space-y-2">
+                    {formData.products.map((product, index) => (
+                      <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div className="flex-1">
+                          <div className="font-medium text-sm">{product.name}</div>
+                          <div className="text-xs text-gray-500">
+                            ${product.unitPrice.toFixed(2)} × {product.quantity}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">${product.totalPrice.toFixed(2)}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveProduct(index)}
+                            className="text-red-500 hover:text-red-700 text-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                </div>
+                )}
               </div>
-            )}
 
-          </div>
-
-          {/* Type-specific Fields */}
-          {/* Sale Specific Section */}
-          {formData.type === 'sale' && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold">Sale Details</h2>
-              {/* Customer Input */}
+              {/* 3. Customer Input */}
               <div className="mb-4 relative">
                 <label className="text-sm mb-1 block">Customer</label>
                 <Input
@@ -1360,20 +1386,154 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
                 )}
               </div>
 
-              {/* Shipping, Tip, Discount */}
-              {/* Shipping/Tip/Discount block removed (now displayed next to Apply Tax) */}
+              {/* 4. Amount and Sales Tax */}
+              <div className="flex flex-wrap items-start gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Amount</label>
+                  <div className="flex items-center mt-1">
+                    <span className="text-gray-500 mr-1">$</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.amount}
+                      readOnly={false}
+                      onChange={(e) => {
+                        const newAmount = parseFloat(e.target.value) || 0;
+                        setFormData(prev => ({ ...prev, amount: newAmount }));
+                      }}
+                      onFocus={(e) => (e.target as HTMLInputElement).select()}
+                      onWheel={(e) => e.currentTarget.blur()}
+                      className="block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      required
+                      inputMode="decimal"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Sales Tax</label>
+                  <div className="flex items-center mt-1">
+                    <span className="text-gray-500 mr-1">$</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      readOnly
+                      value={(formData as SaleFormData).taxAmount.toFixed(2)}
+                      className="rounded-md border-gray-300 bg-gray-50 shadow-sm"
+                      style={{ width: `${String((formData as SaleFormData).taxAmount.toFixed(2)).length + 3}ch` }}
+                      inputMode="decimal"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 5. Date and Taxable */}
+              <div className="flex flex-wrap items-start gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Date</label>
+                  <input
+                    type="date"
+                    value={formData.date}
+                    onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
+                    className="mt-1 block rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+
+                <div className="flex items-end">
+                  <label className="inline-flex items-center mt-2 whitespace-nowrap text-sm font-medium text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={formData.isTaxable}
+                      onChange={(e) => setFormData(prev => ({ ...prev, isTaxable: e.target.checked, amount: 0 }))}
+                      className="mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    />
+                    Apply tax
+                  </label>
+                </div>
+              </div>
+
+              {/* 6. Shipping, Tip, Discount */}
+              <div className="flex flex-wrap items-end gap-4">
+                <div>
+                  <label className="block text-xs text-gray-500">Shipping</label>
+                  <div className="flex items-center">
+                    <span className="text-gray-500 mr-1">$</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={(formData as SaleFormData).shipping}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setFormData(prev => ({ ...(prev as SaleFormData), shipping: val, amount: 0 }));
+                      }}
+                      onFocus={(e) => (e.target as HTMLInputElement).select()}
+                      onWheel={(e) => e.currentTarget.blur()}
+                      className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      style={{ width: `${String((formData as SaleFormData).shipping || 0).length + 3}ch` }}
+                      inputMode="decimal"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-500">Tip</label>
+                  <div className="flex items-center">
+                    <span className="text-gray-500 mr-1">$</span>
+                    <Input
+                      type="number"
+                      readOnly
+                      value={(formData as SaleFormData).tip.toFixed(2)}
+                      className="rounded-md border-gray-300 bg-gray-50 shadow-sm"
+                      style={{ width: `${((formData as SaleFormData).tip.toFixed(2)).length + 3}ch` }}
+                      inputMode="decimal"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-500">Discount</label>
+                  <div className="flex items-center">
+                    <span className="text-gray-500 mr-1">$</span>
+                    <Input
+                      type="number"
+                      readOnly
+                      value={(formData as SaleFormData).discount.toFixed(2)}
+                      className="rounded-md border-gray-300 bg-gray-50 shadow-sm"
+                      style={{ width: `${((formData as SaleFormData).discount.toFixed(2)).length + 3}ch` }}
+                      inputMode="decimal"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 7. Save as Draft Checkbox */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="sale-draft-checkbox"
+                  checked={isDraft}
+                  onChange={e => setIsDraft(e.target.checked)}
+                  className="form-checkbox h-4 w-4 text-blue-600"
+                />
+                <label htmlFor="sale-draft-checkbox" className="text-sm text-gray-700 select-none">
+                  Save as draft (customer has not paid yet)
+                </label>
+              </div>
             </div>
           )}
 
-          {/* Product Section (Visible for Sale and Expense) */}
-          {(formData.type === 'sale' || formData.type === 'expense') && (
+          {/* Product Section (Visible for Expense only - Sale products moved to sale section) */}
+          {formData.type === 'expense' && (
              <div className="space-y-4">
                 <button
                   type="button"
                   onClick={() => setShowProducts(prev => !prev)}
                   className="flex items-center gap-1 text-md font-medium text-blue-600 hover:underline"
                 >
-                  {showProducts ? 'Hide Products ▲' : (formData.type === 'sale' ? 'Add Products to Sale ▼' : 'Add Products Purchased ▼')}
+                  {showProducts ? 'Hide Products ▲' : 'Add Products Purchased ▼'}
                 </button>
 
                 {showProducts && (
@@ -1432,8 +1592,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
                 </div>
 
                 {/* Show 'Create Product' button for Expenses if term entered and no exact match */}
-                {formData.type === 'expense' && 
-                 productSearchTerm.trim() && 
+                {productSearchTerm.trim() && 
                  !isCreatingProduct && // Don't show if already creating
                  !filteredProducts.some(p => p.name.toLowerCase() === productSearchTerm.trim().toLowerCase()) && (
                    <div className="mt-2 text-center">
@@ -1574,7 +1733,7 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
                  {/* --- End New Product Form --- */}
 
                 {/* Selected Products List (Hide when creating new product) */}
-                {!isCreatingProduct && (formData.type === 'sale' || formData.type === 'expense') && formData.products && formData.products.length > 0 && (
+                {!isCreatingProduct && formData.products && formData.products.length > 0 && (
                   <div ref={selectedProductsRef} className="space-y-2 sticky bottom-14 left-0 right-0 bg-white border-t pt-2 max-h-[40vh] overflow-y-auto">
                     <h4 className="text-sm font-medium">Selected Products</h4>
                     {formData.products.map((product, index) => (
@@ -1599,7 +1758,8 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
                             value={product.quantity}
                             onChange={(e) => handleUpdateProductQuantity(index, parseFloat(e.target.value) || 0)}
                             onFocus={(e) => (e.target as HTMLInputElement).select()}
-                            className="w-20 px-2 py-1 border rounded"
+                            onWheel={(e) => e.currentTarget.blur()}
+                            className="w-20 px-2 py-1 border rounded [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             inputMode="decimal"
                           />
                           {/* Unit Price (expense only) */}
@@ -1611,7 +1771,8 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
                             value={product.unitPrice}
                             onChange={(e) => handleUpdateProductUnitPrice(index, parseFloat(e.target.value) || 0)}
                             onFocus={(e) => (e.target as HTMLInputElement).select()}
-                            className="w-20 px-2 py-1 border rounded text-sm text-right"
+                            onWheel={(e) => e.currentTarget.blur()}
+                            className="w-20 px-2 py-1 border rounded text-sm text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             aria-label={`Unit price for ${product.name}`}
                             disabled={false}
                             inputMode="decimal"
@@ -1624,7 +1785,8 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
                             value={(product.totalPrice ?? (product.unitPrice * product.quantity)).toFixed(2)}
                             onChange={(e) => handleUpdateProductTotalPrice(index, parseFloat(e.target.value) || 0)}
                             onFocus={(e) => (e.target as HTMLInputElement).select()}
-                            className="w-24 px-2 py-1 border rounded text-sm font-medium text-right"
+                            onWheel={(e) => e.currentTarget.blur()}
+                            className="w-24 px-2 py-1 border rounded text-sm font-medium text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             aria-label={`Total price for ${product.name}`}
                             disabled={false}
                             inputMode="decimal"
@@ -1714,22 +1876,6 @@ function NewSaleModalDesktop({ open, onOpenChange, onSuccess, transactionToEdit 
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             />
           </div>
-
-          {/* Save as Draft Checkbox */}
-          {formData.type === 'sale' && (
-            <div className="flex items-center gap-2 mt-2">
-              <input
-                type="checkbox"
-                id="sale-draft-checkbox"
-                checked={isDraft}
-                onChange={e => setIsDraft(e.target.checked)}
-                className="form-checkbox h-4 w-4 text-blue-600"
-              />
-              <label htmlFor="sale-draft-checkbox" className="text-sm text-gray-700 select-none">
-                Save as draft (customer has not paid yet)
-              </label>
-            </div>
-          )}
 
           {/* Submit Button */}
           <div className="flex justify-end sticky bottom-0 left-0 right-0 bg-white py-2 border-t z-20">
