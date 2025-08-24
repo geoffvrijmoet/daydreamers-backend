@@ -42,6 +42,18 @@ interface Transaction {
   }
   // Sale-specific fields
   customer?: string
+  // Additional transaction fields
+  tip?: number
+  discount?: number
+  shipping?: number
+  // Product fields
+  products?: Array<{
+    productId?: string
+    name: string
+    quantity: number
+    unitPrice?: number
+    totalPrice?: number
+  }>
 }
 
 interface CategoryGroup {
@@ -99,9 +111,11 @@ export default function ProfitLossPage() {
   const [isTrainingCollapsed, setIsTrainingCollapsed] = useState(true)
   const [isExpensesCollapsed, setIsExpensesCollapsed] = useState(true)
   const [isTaxesCollapsed, setIsTaxesCollapsed] = useState(true)
+  const [isVivaRawCollapsed, setIsVivaRawCollapsed] = useState(true)
   const trainingRef = useRef<HTMLDivElement>(null)
   const expensesRef = useRef<HTMLDivElement>(null)
   const taxesRef = useRef<HTMLDivElement>(null)
+  const vivaRawRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setIsClient(true)
@@ -1103,7 +1117,7 @@ export default function ProfitLossPage() {
   )
 
   // Handler for sticky bar buttons
-  const handleSectionToggle = (section: 'training' | 'expenses' | 'taxes') => {
+  const handleSectionToggle = (section: 'training' | 'expenses' | 'taxes' | 'vivaRaw') => {
     if (section === 'training') {
       setIsTrainingCollapsed((prev) => {
         if (prev && trainingRef.current) {
@@ -1115,6 +1129,13 @@ export default function ProfitLossPage() {
       setIsExpensesCollapsed((prev) => {
         if (prev && expensesRef.current) {
           expensesRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+        return !prev
+      })
+    } else if (section === 'vivaRaw') {
+      setIsVivaRawCollapsed((prev) => {
+        if (prev && vivaRawRef.current) {
+          vivaRawRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
         }
         return !prev
       })
@@ -1981,6 +2002,485 @@ export default function ProfitLossPage() {
         </div>
       </div>
 
+      {/* Collapsible Viva Raw Section */}
+      <div ref={vivaRawRef} className="mb-8">
+        <div className="flex items-center justify-between cursor-pointer rounded-lg border border-green-200 bg-green-50 px-4 py-3 mb-2 sticky top-0 z-10" onClick={() => setIsVivaRawCollapsed((prev) => !prev)} aria-expanded={!isVivaRawCollapsed} tabIndex={0} role="button">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">🐕</span>
+            <span className="font-semibold text-green-900">Viva Raw</span>
+          </div>
+          <span className="ml-2">{isVivaRawCollapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}</span>
+        </div>
+        <div className={`transition-all duration-300 overflow-hidden ${isVivaRawCollapsed ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-[2000px] opacity-100'}`}> 
+          <Card className="mb-8 mt-0">
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle>Viva Raw Transactions</CardTitle>
+                  <CardDescription>
+                    All transactions involving Viva Raw products
+                    {isClient && startDate && endDate && (
+                      <span className="ml-1">
+                        ({format(startDate, "MMM d, yyyy")} - {format(endDate, "MMM d, yyyy")})
+                      </span>
+                    )}
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                // Filter transactions that contain Viva Raw products
+                const vivaRawTransactions = transactions.filter(t => {
+                  if (!t.products || !Array.isArray(t.products)) return false
+                  return t.products.some(product => 
+                    product.name && product.name.toLowerCase().includes('viva raw')
+                  )
+                })
+                
+                // Debug tracking
+                const debugInfo = {
+                  noTax: [] as Transaction[],
+                  noProcessingFee: [] as Transaction[],
+                  noTip: [] as Transaction[],
+                  noDiscount: [] as Transaction[],
+                  noShipping: [] as Transaction[],
+                  mixedTransactions: [] as Transaction[],
+                  allVivaRawTransactions: [] as Transaction[],
+                  nonItemizedExpenses: [] as Transaction[]
+                }
+                
+                // Viva Raw profit analysis
+                const vivaRawAnalysis = {
+                  totalRevenue: 0,
+                  totalExpenses: 0,
+                  totalProfit: 0,
+                  productBreakdown: new Map<string, {
+                    revenue: number,
+                    quantity: number,
+                    transactions: number,
+                    sharedCosts: number,
+                    netRevenue: number
+                  }>(),
+                  transactionDetails: [] as Array<{
+                    transactionId: string,
+                    date: string,
+                    type: string,
+                    customer: string,
+                    vivaRawProducts: Array<{
+                      name: string,
+                      quantity: number,
+                      unitPrice: number,
+                      totalPrice: number,
+                      revenue: number,
+                      sharedCosts: number,
+                      netRevenue: number
+                    }>,
+                    totalVivaRawRevenue: number,
+                    transactionTotal: number,
+                    vivaRawShare: number,
+                    sharedCosts: {
+                      tax: number,
+                      processingFee: number,
+                      tip: number,
+                      discount: number,
+                      shipping: number
+                    },
+                    debugFlags: string[]
+                  }>
+                }
+                
+                vivaRawTransactions.forEach(transaction => {
+                  const transactionId = transaction._id
+                  const transactionTotal = Number(transaction.amount) || 0
+                  const products = transaction.products || []
+                  
+                  // Filter Viva Raw products
+                  const vivaRawProducts = products.filter(p => 
+                    p.name && p.name.toLowerCase().includes('viva raw')
+                  )
+                  
+                  if (vivaRawProducts.length === 0) return
+                  
+                  // Categorize transaction
+                  const isAllVivaRaw = products.length === vivaRawProducts.length
+                  if (isAllVivaRaw) {
+                    debugInfo.allVivaRawTransactions.push(transaction)
+                  } else {
+                    debugInfo.mixedTransactions.push(transaction)
+                  }
+                  
+                  // Handle non-itemized expenses
+                  if (transaction.type === 'expense' && (!products || products.length === 0)) {
+                    debugInfo.nonItemizedExpenses.push(transaction)
+                    // For now, assume 100% is Viva Raw if supplier is Viva Raw
+                    if (transaction.supplier && transaction.supplier.toLowerCase().includes('viva raw')) {
+                      vivaRawAnalysis.totalExpenses += transactionTotal
+                    }
+                    return
+                  }
+                  
+                  // Calculate Viva Raw revenue
+                  const vivaRawRevenue = vivaRawProducts.reduce((sum, p) => 
+                    sum + (Number(p.totalPrice) || 0), 0
+                  )
+                  
+                  // Calculate Viva Raw's share of transaction
+                  const vivaRawShare = transactionTotal > 0 ? vivaRawRevenue / transactionTotal : 0
+                  
+                  // Track shared costs
+                  const sharedCosts = {
+                    tax: 0,
+                    processingFee: 0,
+                    tip: 0,
+                    discount: 0,
+                    shipping: 0
+                  }
+                  
+                  const debugFlags: string[] = []
+                  
+                  // Tax attribution
+                  if (transaction.taxAmount && transaction.taxAmount > 0) {
+                    sharedCosts.tax = transaction.taxAmount * vivaRawShare
+                  } else {
+                    debugInfo.noTax.push(transaction)
+                    debugFlags.push('no-tax')
+                  }
+                  
+                  // Processing fee attribution
+                  if (transaction.paymentProcessing?.fee && transaction.paymentProcessing.fee > 0) {
+                    sharedCosts.processingFee = transaction.paymentProcessing.fee * vivaRawShare
+                  } else {
+                    debugInfo.noProcessingFee.push(transaction)
+                    debugFlags.push('no-processing-fee')
+                  }
+                  
+                  // Tip attribution (note: tips are revenue, not cost)
+                  if (transaction.tip && transaction.tip > 0) {
+                    sharedCosts.tip = transaction.tip * vivaRawShare
+                  } else {
+                    debugInfo.noTip.push(transaction)
+                    debugFlags.push('no-tip')
+                  }
+                  
+                  // Discount attribution
+                  if (transaction.discount && transaction.discount > 0) {
+                    sharedCosts.discount = transaction.discount * vivaRawShare
+                  } else {
+                    debugInfo.noDiscount.push(transaction)
+                    debugFlags.push('no-discount')
+                  }
+                  
+                  // Shipping attribution
+                  if (transaction.shipping && transaction.shipping > 0) {
+                    sharedCosts.shipping = transaction.shipping * vivaRawShare
+                  } else {
+                    debugInfo.noShipping.push(transaction)
+                    debugFlags.push('no-shipping')
+                  }
+                  
+                  // Calculate total shared costs (excluding tips since they're revenue)
+                  const totalSharedCosts = sharedCosts.tax + sharedCosts.processingFee + 
+                                         sharedCosts.discount + sharedCosts.shipping
+                  
+                  // Process each Viva Raw product
+                  const productDetails = vivaRawProducts.map(product => {
+                    const productName = product.name
+                    const quantity = Number(product.quantity) || 0
+                    const unitPrice = Number(product.unitPrice) || 0
+                    const totalPrice = Number(product.totalPrice) || 0
+                    
+                    // Calculate this product's share of Viva Raw revenue
+                    const productShare = vivaRawRevenue > 0 ? totalPrice / vivaRawRevenue : 0
+                    
+                    // Calculate this product's share of shared costs
+                    const productSharedCosts = totalSharedCosts * productShare
+                    
+                    // Calculate net revenue (revenue - shared costs)
+                    const netRevenue = totalPrice - productSharedCosts
+                    
+                    // Update product breakdown
+                    if (!vivaRawAnalysis.productBreakdown.has(productName)) {
+                      vivaRawAnalysis.productBreakdown.set(productName, {
+                        revenue: 0,
+                        quantity: 0,
+                        transactions: 0,
+                        sharedCosts: 0,
+                        netRevenue: 0
+                      })
+                    }
+                    
+                    const breakdown = vivaRawAnalysis.productBreakdown.get(productName)!
+                    breakdown.revenue += totalPrice
+                    breakdown.quantity += quantity
+                    breakdown.transactions += 1
+                    breakdown.sharedCosts += productSharedCosts
+                    breakdown.netRevenue += netRevenue
+                    
+                    return {
+                      name: productName,
+                      quantity,
+                      unitPrice,
+                      totalPrice,
+                      revenue: totalPrice,
+                      sharedCosts: productSharedCosts,
+                      netRevenue
+                    }
+                  })
+                  
+                  // Update totals
+                  if (transaction.type === 'sale') {
+                    vivaRawAnalysis.totalRevenue += vivaRawRevenue
+                    // Add tips as additional revenue
+                    if (sharedCosts.tip > 0) {
+                      vivaRawAnalysis.totalRevenue += sharedCosts.tip
+                    }
+                  } else if (transaction.type === 'expense') {
+                    vivaRawAnalysis.totalExpenses += transactionTotal
+                  }
+                  
+                  // Store transaction details
+                  vivaRawAnalysis.transactionDetails.push({
+                    transactionId,
+                    date: transaction.date,
+                    type: transaction.type,
+                    customer: transaction.customer || transaction.supplier || 'N/A',
+                    vivaRawProducts: productDetails,
+                    totalVivaRawRevenue: vivaRawRevenue,
+                    transactionTotal,
+                    vivaRawShare,
+                    sharedCosts,
+                    debugFlags
+                  })
+                })
+                
+                // Calculate total profit
+                vivaRawAnalysis.totalProfit = vivaRawAnalysis.totalRevenue - vivaRawAnalysis.totalExpenses
+                
+                if (loading) {
+                  return (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-8 w-8 text-green-500 animate-spin mr-2" />
+                      <p>Loading Viva Raw transactions...</p>
+                    </div>
+                  )
+                }
+                
+                if (error) {
+                  return (
+                    <div className="text-red-500 py-4">
+                      Error: {error}
+                    </div>
+                  )
+                }
+                
+                if (vivaRawTransactions.length === 0) {
+                  return (
+                    <div className="text-center py-8 text-gray-500">
+                      No Viva Raw transactions found for the selected period.
+                    </div>
+                  )
+                }
+                
+                return (
+                  <div>
+                    {/* Viva Raw Summary Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                      <div className="bg-green-100 p-4 rounded-lg border border-green-200">
+                        <h3 className="text-sm font-medium text-green-800 mb-2">Total Revenue</h3>
+                        <p className="text-2xl font-bold text-green-600">
+                          ${formatNumberWithCommas(vivaRawAnalysis.totalRevenue)}
+                        </p>
+                        <p className="text-xs text-green-700 mt-1">
+                          {vivaRawAnalysis.transactionDetails.filter(t => t.type === 'sale').length} sales
+                        </p>
+                      </div>
+                      
+                      <div className="bg-red-100 p-4 rounded-lg border border-red-200">
+                        <h3 className="text-sm font-medium text-red-800 mb-2">Total Expenses</h3>
+                        <p className="text-2xl font-bold text-red-600">
+                          ${formatNumberWithCommas(vivaRawAnalysis.totalExpenses)}
+                        </p>
+                        <p className="text-xs text-red-700 mt-1">
+                          {vivaRawAnalysis.transactionDetails.filter(t => t.type === 'expense').length} expenses
+                        </p>
+                      </div>
+                      
+                      <div className="bg-blue-100 p-4 rounded-lg border border-blue-200">
+                        <h3 className="text-sm font-medium text-blue-800 mb-2">Net Profit</h3>
+                        <p className={`text-2xl font-bold ${vivaRawAnalysis.totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {vivaRawAnalysis.totalProfit >= 0 ? '+' : ''}${formatNumberWithCommas(Math.abs(vivaRawAnalysis.totalProfit))}
+                        </p>
+                        <p className="text-xs text-blue-700 mt-1">
+                          {vivaRawAnalysis.totalRevenue > 0 ? ((vivaRawAnalysis.totalProfit / vivaRawAnalysis.totalRevenue) * 100).toFixed(1) : '0'}% margin
+                        </p>
+                      </div>
+                      
+                      <div className="bg-purple-100 p-4 rounded-lg border border-purple-200">
+                        <h3 className="text-sm font-medium text-purple-800 mb-2">Products</h3>
+                        <p className="text-2xl font-bold text-purple-600">
+                          {vivaRawAnalysis.productBreakdown.size}
+                        </p>
+                        <p className="text-xs text-purple-700 mt-1">
+                          Unique products
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {/* Debug Information */}
+                    <div className="mb-6">
+                      <h3 className="text-lg font-medium mb-4">Debug Information</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
+                          <h4 className="font-medium text-yellow-800 mb-2">Transaction Types</h4>
+                          <div className="text-sm space-y-1">
+                            <div>All Viva Raw: {debugInfo.allVivaRawTransactions.length}</div>
+                            <div>Mixed: {debugInfo.mixedTransactions.length}</div>
+                            <div>Non-itemized expenses: {debugInfo.nonItemizedExpenses.length}</div>
+                          </div>
+                        </div>
+                        
+                        <div className="bg-orange-50 p-3 rounded border border-orange-200">
+                          <h4 className="font-medium text-orange-800 mb-2">Missing Data</h4>
+                          <div className="text-sm space-y-1">
+                            <div>No tax: {debugInfo.noTax.length}</div>
+                            <div>No processing fee: {debugInfo.noProcessingFee.length}</div>
+                            <div>No tip: {debugInfo.noTip.length}</div>
+                            <div>No discount: {debugInfo.noDiscount.length}</div>
+                            <div>No shipping: {debugInfo.noShipping.length}</div>
+                          </div>
+                        </div>
+                        
+                        <div className="bg-blue-50 p-3 rounded border border-blue-200">
+                          <h4 className="font-medium text-blue-800 mb-2">Analysis Summary</h4>
+                          <div className="text-sm space-y-1">
+                            <div>Total transactions: {vivaRawAnalysis.transactionDetails.length}</div>
+                            <div>Total products: {Array.from(vivaRawAnalysis.productBreakdown.values()).reduce((sum, p) => sum + p.quantity, 0)}</div>
+                            <div>Avg profit margin: {vivaRawAnalysis.totalRevenue > 0 ? ((vivaRawAnalysis.totalProfit / vivaRawAnalysis.totalRevenue) * 100).toFixed(1) : '0'}%</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Product Performance Table */}
+                    <div className="mb-6">
+                      <h3 className="text-lg font-medium mb-4">Product Performance</h3>
+                      <div className="overflow-x-auto">
+                        <table className="w-full border-collapse border rounded-md">
+                          <thead>
+                            <tr className="bg-gray-50">
+                              <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Product</th>
+                              <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Transactions</th>
+                              <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Quantity</th>
+                              <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Revenue</th>
+                              <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Shared Costs</th>
+                              <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Net Revenue</th>
+                              <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Margin</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Array.from(vivaRawAnalysis.productBreakdown.entries())
+                              .sort((a, b) => b[1].netRevenue - a[1].netRevenue)
+                              .map(([productName, metrics]) => (
+                                <tr key={productName} className="border-b hover:bg-gray-50">
+                                  <td className="p-3 text-sm font-medium">{productName}</td>
+                                  <td className="p-3 text-sm text-right">{metrics.transactions}</td>
+                                  <td className="p-3 text-sm text-right">{metrics.quantity}</td>
+                                  <td className="p-3 text-sm text-right font-medium text-green-600">
+                                    ${formatNumberWithCommas(metrics.revenue)}
+                                  </td>
+                                  <td className="p-3 text-sm text-right text-red-600">
+                                    ${formatNumberWithCommas(metrics.sharedCosts)}
+                                  </td>
+                                  <td className="p-3 text-sm text-right font-medium text-blue-600">
+                                    ${formatNumberWithCommas(metrics.netRevenue)}
+                                  </td>
+                                  <td className="p-3 text-sm text-right">
+                                    {metrics.revenue > 0 ? ((metrics.netRevenue / metrics.revenue) * 100).toFixed(1) : '0'}%
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                    
+                    {/* Detailed Transactions Table */}
+                    <div>
+                      <h3 className="text-lg font-medium mb-4">Transaction Details</h3>
+                      <div className="overflow-x-auto">
+                        <table className="w-full border-collapse border rounded-md">
+                          <thead>
+                            <tr className="bg-gray-50">
+                              <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Date</th>
+                              <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Type</th>
+                              <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Customer/Supplier</th>
+                              <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Products</th>
+                              <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Viva Raw Revenue</th>
+                              <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Transaction Total</th>
+                              <th className="text-right p-3 text-sm font-medium text-gray-500 border-b">Viva Raw Share</th>
+                              <th className="text-left p-3 text-sm font-medium text-gray-500 border-b">Debug Flags</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {vivaRawAnalysis.transactionDetails.map(detail => (
+                              <tr key={detail.transactionId} className="border-b hover:bg-gray-50">
+                                <td className="p-3 text-sm">{formatTransactionDate(detail.date)}</td>
+                                <td className="p-3 text-sm">
+                                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                    detail.type === 'sale' 
+                                      ? 'bg-green-100 text-green-800' 
+                                      : 'bg-red-100 text-red-800'
+                                  }`}>
+                                    {detail.type.charAt(0).toUpperCase() + detail.type.slice(1)}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-sm">{detail.customer}</td>
+                                <td className="p-3 text-sm">
+                                  <div className="space-y-1">
+                                    {detail.vivaRawProducts.map((product, index) => (
+                                      <div key={index} className="text-xs">
+                                        {product.name} (x{product.quantity})
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td className="p-3 text-sm text-right font-medium text-green-600">
+                                  ${formatNumberWithCommas(detail.totalVivaRawRevenue)}
+                                </td>
+                                <td className="p-3 text-sm text-right">
+                                  ${formatNumberWithCommas(detail.transactionTotal)}
+                                </td>
+                                <td className="p-3 text-sm text-right">
+                                  {(detail.vivaRawShare * 100).toFixed(1)}%
+                                </td>
+                                <td className="p-3 text-sm">
+                                  {detail.debugFlags.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {detail.debugFlags.map(flag => (
+                                        <span key={flag} className="px-1 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded">
+                                          {flag}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-green-600 text-xs">✓ Complete</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
       {/* Collapsible Expenses Section */}
       <div ref={expensesRef} className="mb-8">
         <div className="flex items-center justify-between cursor-pointer rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 mb-2 sticky top-0 z-10" onClick={() => setIsExpensesCollapsed((prev) => !prev)} aria-expanded={!isExpensesCollapsed} tabIndex={0} role="button">
@@ -2221,6 +2721,14 @@ export default function ProfitLossPage() {
         >
           <span className="text-2xl">🏋️</span>
           <span>Training</span>
+        </button>
+        <button
+          className="flex items-center gap-2 px-6 py-2 rounded-full border-2 border-green-500 text-green-900 font-semibold bg-white shadow hover:bg-green-50 transition-all focus:outline-none focus:ring-2 focus:ring-green-400"
+          onClick={() => handleSectionToggle('vivaRaw')}
+          aria-label="Go to Viva Raw Section"
+        >
+          <span className="text-2xl">🐕</span>
+          <span>Viva Raw</span>
         </button>
         <button
           className="flex items-center gap-2 px-6 py-2 rounded-full border-2 border-orange-500 text-orange-900 font-semibold bg-white shadow hover:bg-orange-50 transition-all focus:outline-none focus:ring-2 focus:ring-orange-400"

@@ -30,6 +30,7 @@ type ParsingField = 'orderNumber' | 'total' | 'subtotal' | 'shipping' | 'tax' | 
 interface ParsedProduct {
   name: string;
   quantity: number;
+  preQuantity?: number; // Original quantity before applying quantity multiplier
   total: number;
   costDiscount?: number; // User input for cost discount (e.g., 0.20 for 20% off)
   productId?: string;
@@ -43,6 +44,7 @@ interface ParsingResult {
   match: string | null;
   pattern?: string;
   products?: ParsedProduct[]; // Array of parsed products
+  quantityMultiple?: number; // Quantity multiplier for products
 }
 
 // Helper to format currency values
@@ -1153,9 +1155,11 @@ export default function TransactionsPage() {
       const products: ParsedProduct[] = [];
       
       for (let i = 0; i < minLength; i++) {
+        const originalQuantity = quantityMatches[i].value;
         products.push({
           name: nameMatches[i].value,
-          quantity: quantityMatches[i].value * quantityMultiple, // Apply quantity multiple
+          preQuantity: originalQuantity, // Store original quantity
+          quantity: originalQuantity * quantityMultiple, // Apply quantity multiple
           total: totalMatches[i].value,
           // Apply cost discount to each product
           costDiscount: costDiscount,
@@ -1172,6 +1176,77 @@ export default function TransactionsPage() {
     } catch (error) {
       console.error('Error extracting products from email:', error);
       return null;
+    }
+  };
+
+  // Add a function to save an email as a transaction
+  const saveEmailAsTransaction = async (email: InvoiceEmail) => {
+    const emailId = email._id;
+    if (!emailId || !parsingResults[emailId]) {
+      alert('No parsed data found for this email.');
+      return;
+    }
+    
+    try {
+      // Check if this email has parsed products
+      const hasProducts = parsingResults[emailId]?.products?.products && parsingResults[emailId].products.products.length > 0;
+      
+      if (hasProducts) {
+        // If email has products, use the existing saveProductsToTransaction logic
+        await saveProductsToTransaction(emailId);
+        return;
+      }
+      
+      // Calculate the total from parsed data
+      const total = parsingResults[emailId]?.total?.value 
+        ? parseFloat(parsingResults[emailId].total.value) 
+        : 0;
+      
+      // Create new transaction
+      const response = await fetch('/api/transactions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          date: new Date(email.date).toISOString(),
+          amount: total,
+          supplier: email.supplier?.name || email.from.split('<')[0].trim(),
+          notes: `Invoice from ${email.supplier?.name || 'unknown supplier'}`,
+          type: 'expense',
+          source: 'email',
+          emailId: email.emailId || undefined,
+          purchaseCategory: 'inventory',
+          supplierOrderNumber: parsingResults[emailId]?.orderNumber?.value || '',
+          products: [], // No products for this type
+          affectStock: false
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to create transaction');
+      }
+      
+      const result = await response.json();
+      
+      // Update the UI to show the email is processed and linked
+      setInvoiceEmails(prev => 
+        prev.map(e => 
+          e._id === emailId
+            ? { ...e, status: 'processed', transactionId: result.transaction.id }
+            : e
+        )
+      );
+      
+      // Add the new transaction to the transactions list
+      setTransactions(prev => [result.transaction, ...prev]);
+      
+      // Show success message
+      alert('Transaction saved successfully!');
+      
+    } catch (error) {
+      console.error('Error saving email as transaction:', error);
+      alert('Failed to save transaction. Please try again.');
     }
   };
 
@@ -1574,6 +1649,47 @@ export default function TransactionsPage() {
         [emailId]: {
           ...emailData,
           products: { ...emailData.products, products: updatedProducts }
+        }
+      };
+    });
+  };
+
+  // Update the quantity multiplier and recalculate quantities for all parsed products
+  const updateQuantityMultiplier = (emailId: string, multiplier: number) => {
+    setParsingResults(prev => {
+      const emailData = prev[emailId];
+      if (!emailData || !emailData.products?.products) return prev;
+      const updatedProducts = emailData.products.products.map(p => {
+        // If preQuantity is not set, initialize it with the current quantity (before any multiplier was applied)
+        // If preQuantity is already set, keep it unchanged
+        let baseQuantity: number;
+        let newPreQuantity: number;
+        
+        if (p.preQuantity !== undefined) {
+          // preQuantity already exists, use it as the base
+          baseQuantity = p.preQuantity;
+          newPreQuantity = p.preQuantity; // Keep unchanged
+        } else {
+          // preQuantity doesn't exist, initialize it with current quantity
+          baseQuantity = p.quantity;
+          newPreQuantity = p.quantity; // Set it to current quantity
+        }
+        
+        return {
+          ...p,
+          preQuantity: newPreQuantity,
+          quantity: baseQuantity * multiplier // Calculate new quantity based on base
+        };
+      });
+      return {
+        ...prev,
+        [emailId]: {
+          ...emailData,
+          products: { 
+            ...emailData.products, 
+            products: updatedProducts,
+            quantityMultiple: multiplier
+          }
         }
       };
     });
@@ -2506,6 +2622,19 @@ export default function TransactionsPage() {
                         >
                           {linkingEmailId === email._id ? 'Linking...' : (email.transactionId ? 'Change Link' : 'Link to Transaction')}
                         </button>
+                        
+                        {/* Save Transaction button for emails without transaction IDs */}
+                        {!email.transactionId && hasParsingResults && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              saveEmailAsTransaction(email);
+                            }}
+                            className="mr-3 px-2 py-1 text-xs rounded bg-blue-200 text-blue-700 hover:bg-blue-300"
+                          >
+                            Save Transaction
+                          </button>
+                        )}
                       </>
                     )}
                     <div className="text-purple-600">
@@ -2567,23 +2696,42 @@ export default function TransactionsPage() {
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-3 gap-3">
                         <h3 className="font-medium">Parsed Products</h3>
 
-                        <div className="flex items-center gap-2">
-                          <label className="text-sm">Cost Discount&nbsp;(%)</label>
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="1"
-                            value={((parsingResults[email._id]?.products?.products?.[0]?.costDiscount || 0) * 100).toString()}
-                            onChange={(e) => {
-                              const perc = parseFloat(e.target.value);
-                              const dec = !isNaN(perc) ? perc / 100 : 0;
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-2">
+                            <label className="text-sm">Cost Discount&nbsp;(%)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="1"
+                              value={((parsingResults[email._id]?.products?.products?.[0]?.costDiscount || 0) * 100).toString()}
+                              onChange={(e) => {
+                                const perc = parseFloat(e.target.value);
+                                const dec = !isNaN(perc) ? perc / 100 : 0;
 
-                              // Update all parsed products locally
-                              updateCostDiscount(email._id, dec);
-                            }}
-                            className="w-20 border px-2 py-1 rounded text-right text-sm"
-                          />
+                                // Update all parsed products locally
+                                updateCostDiscount(email._id, dec);
+                              }}
+                              className="w-20 border px-2 py-1 rounded text-right text-sm"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label className="text-sm">Multiplier</label>
+                            <input
+                              type="number"
+                              min="0.1"
+                              step="0.1"
+                              value={parsingResults[email._id]?.products?.quantityMultiple || 1}
+                              onChange={(e) => {
+                                const multiplier = parseFloat(e.target.value);
+                                const validMultiplier = !isNaN(multiplier) && multiplier > 0 ? multiplier : 1;
+
+                                // Update all parsed products locally
+                                updateQuantityMultiplier(email._id, validMultiplier);
+                              }}
+                              className="w-20 border px-2 py-1 rounded text-right text-sm"
+                            />
+                          </div>
                         </div>
 
                         <Button
@@ -2609,6 +2757,7 @@ export default function TransactionsPage() {
                             <tr className="bg-gray-50">
                               <th className="px-3 py-2 text-left">Product</th>
                               <th className="px-3 py-2 text-left">Email Context</th>
+                              <th className="px-3 py-2 text-right">Base Quantity</th>
                               <th className="px-3 py-2 text-right">Quantity</th>
                               <th className="px-3 py-2 text-right">Total</th>
                               <th className="px-3 py-2 text-right">Adjusted Total</th>
@@ -2668,16 +2817,29 @@ export default function TransactionsPage() {
                                       <span className="text-xs text-gray-400 italic">No context</span>
                                     )}
                                   </td>
-                                  {/* Quantity editable */}
+                                  {/* Base Quantity (editable) */}
                                   <td className="px-3 py-2 text-right">
                                     <input
                                       type="number"
                                       min="0"
                                       step="0.01"
-                                      value={product.quantity}
-                                      onChange={e => updateProduct(email._id, index, { quantity: parseFloat(e.target.value) || 0 })}
+                                      value={product.preQuantity !== undefined ? product.preQuantity : product.quantity}
+                                      onChange={e => {
+                                        const newPreQuantity = parseFloat(e.target.value) || 0;
+                                        const multiplier = parsingResults[email._id]?.products?.quantityMultiple || 1;
+                                        updateProduct(email._id, index, { 
+                                          preQuantity: newPreQuantity,
+                                          quantity: newPreQuantity * multiplier
+                                        });
+                                      }}
                                       className="w-20 border px-1 rounded text-right"
                                     />
+                                  </td>
+                                  {/* Quantity (calculated, read-only) */}
+                                  <td className="px-3 py-2 text-right">
+                                    <span className="text-sm text-gray-600 bg-gray-50 px-2 py-1 rounded border">
+                                      {product.quantity}
+                                    </span>
                                   </td>
                                   {/* Total editable */}
                                   <td className="px-3 py-2 text-right">
@@ -2700,7 +2862,7 @@ export default function TransactionsPage() {
                           </tbody>
                           <tfoot>
                             <tr className="bg-gray-50 font-medium">
-                              <td className="px-3 py-2" colSpan={3}>Total</td>
+                              <td className="px-3 py-2" colSpan={4}>Total</td>
                               <td className="px-3 py-2 text-right">
                                 {formatCurrency(
                                   (parsingResults[email._id].products?.products || [])

@@ -153,7 +153,20 @@ export async function PATCH(
     if (updates.products && Array.isArray(updates.products) && updates.products.length > 0) {
       try {
         const inventoryProducts = convertModalLineItemsToInventoryFormat(updates.products)
-        inventoryResults = await updateInventoryForExistingTransaction(params.id, inventoryProducts)
+        
+        // Get the current transaction to determine its type
+        const currentTransaction = await mongoose.connection.db!.collection('transactions').findOne({
+          _id: new mongoose.Types.ObjectId(params.id)
+        })
+        
+        if (currentTransaction) {
+          if (currentTransaction.type === 'sale') {
+            inventoryResults = await updateInventoryForExistingTransaction(params.id, inventoryProducts)
+          } else if (currentTransaction.type === 'expense' && updates.affectStock) {
+            inventoryResults = await increaseInventoryForExistingExpense(params.id, inventoryProducts)
+          }
+        }
+        
         console.log(`[API] Inventory update results for transaction ${params.id}:`, inventoryResults)
       } catch (error) {
         console.error(`[API] Error updating inventory for transaction ${params.id}:`, error)

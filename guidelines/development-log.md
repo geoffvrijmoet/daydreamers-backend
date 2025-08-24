@@ -427,8 +427,43 @@
     -   Run `npx tsx scripts/migrate-inventory-changes.ts` to populate the new inventory_changes collection
     -   This will prevent duplicate inventory processing during sync operations
     -   Migration script is ready but needs to be executed in production
+-   **Enhance Viva Raw Profit-Loss Analysis** - The basic Viva Raw section is complete, but could be enhanced with additional features
+    -   Add cost analysis using product averageCost data from products collection
+    -   Implement historical trend analysis for Viva Raw performance
+    -   Add export functionality for detailed Viva Raw reports
+    -   Files changed: `app/profit-loss/page.tsx` (sophisticated analysis implementation complete)
 
 ## ✅ Recently Completed Tasks
+
+-   **Fixed Inventory Change Utility Quantity Sign Issue**
+    -   Resolved the bug where all inventory change `quantityChange` entries were being recorded as negative numbers
+    -   The issue was in the PATCH method of `/api/transactions/[id]/route.ts` which always called `updateInventoryForExistingTransaction` regardless of transaction type
+    -   For expense transactions, this caused incorrect negative quantity changes instead of positive ones for stock increases
+    -   Fixed by adding proper transaction type checking in the PATCH method, similar to the existing PUT method logic
+    -   Now expense transactions with `affectStock` flag correctly call `increaseInventoryForExistingExpense` for positive quantity changes
+    -   Sales transactions continue to use `updateInventoryForExistingTransaction` for negative quantity changes (stock reductions)
+    -   Files changed: `app/api/transactions/[id]/route.ts`
+
+-   **Added Save Transaction Button for Invoice Emails**
+    -   Implemented "Save Transaction" button for invoice emails that don't have associated transactions yet
+    -   Button appears for emails with parsed data but no products (simple expense transactions)
+    -   Creates expense transactions with parsed total, supplier info, and order number
+    -   Updates email status to 'processed' and links it to the created transaction
+    -   These emails will then become super-cards once they have an associated transaction
+    -   Provides complete workflow for converting parsed invoice emails into transactions
+    -   Files changed: `app/transactions/page.tsx`
+
+-   **Implemented Sophisticated Viva Raw Profit-Loss Analysis**
+    -   Created comprehensive Viva Raw profit analysis system that handles mixed transactions and shared costs
+    -   Implemented proportional attribution logic for taxes, processing fees, discounts, and shipping costs
+    -   Added sophisticated debugging information showing missing data and transaction categorization
+    -   Created detailed product performance analysis with revenue, shared costs, net revenue, and profit margins
+    -   Implemented transaction categorization (all Viva Raw vs mixed transactions) with proper cost allocation
+    -   Added debug flags and transaction details table showing Viva Raw share percentages and missing data
+    -   Handled non-itemized expenses and tips as revenue (not costs) per business requirements
+    -   Updated Transaction interface to include tip, discount, and shipping fields
+    -   Added comprehensive debug tracking for missing tax, processing fees, tips, discounts, and shipping data
+    -   Files changed: `app/profit-loss/page.tsx`
 
 -   **Optional Inventory Update on AI-Parsed Expense Save**
     -   Added inventory increase support when saving AI-parsed products to expense transactions.
